@@ -6,7 +6,7 @@
 		"module": "ESNext",
 		"moduleResolution": "Bundler",
 		"moduleDetection": "force",
-		"types": ["vite/client", "node"],
+		"types": ["vite/client"],
 		"jsx": "react-jsx",
 		"strict": true,
 		"noEmit": true,
