@@ -4,6 +4,6 @@ import { defineConfig } from "vite";
 export default defineConfig({
 	plugins: [react()],
 	server: {
-		allowedHosts: ["dev.syl.ad"],
+		allowedHosts: ["sylvie", "sylvie.t.syl.ad", "sylvie.adelie-woodpecker.ts.net"],
 	},
 });
