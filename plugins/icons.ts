@@ -1,16 +1,18 @@
-import { glob, mkdir } from "node:fs/promises";
+import { glob, mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createElement, type FunctionComponent } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import type { Component } from "solid-js";
 import type { Plugin, ViteDevServer } from "vite";
 
 async function icons(server: ViteDevServer) {
-	const root = resolve(fileURLToPath(import.meta.url), "..", "..");
+	const root = server.config.root;
 	const input = resolve(root, "src/icons");
 	const output = resolve(root, "public/icons");
 
 	const variants = new Set(["Icon", "Favicon"]);
+
+	const { createComponent, renderToString } = (await server.ssrLoadModule(
+		"solid-js/web",
+	)) as typeof import("solid-js/web");
 
 	for await (const file of glob("**/*.svg.tsx", { cwd: input })) {
 		const exports: Record<string, unknown> = await server.ssrLoadModule(
@@ -18,17 +20,13 @@ async function icons(server: ViteDevServer) {
 		);
 		const base = file.replace(/\.svg\.tsx$/, "");
 
-		for (const [name, Component] of Object.entries(exports)) {
-			if (typeof Component !== "function" || !variants.has(name))
-				continue;
+		for (const [name, Icon] of Object.entries(exports)) {
+			if (typeof Icon !== "function" || !variants.has(name)) continue;
 
-			const svg = renderToStaticMarkup(
-				createElement(
-					Component as FunctionComponent<{ xmlns: string }>,
-					{
-						xmlns: "http://www.w3.org/2000/svg",
-					},
-				),
+			const svg = renderToString(() =>
+				createComponent(Icon as Component<{ xmlns: string }>, {
+					xmlns: "http://www.w3.org/2000/svg",
+				}),
 			);
 
 			if (!/^<svg[\s>]/.test(svg) || !svg.endsWith("</svg>")) continue;
@@ -37,7 +35,7 @@ async function icons(server: ViteDevServer) {
 			const dest = resolve(output, `${base}${suffix}.svg`);
 
 			await mkdir(dirname(dest), { recursive: true });
-			await Bun.write(dest, svg);
+			await writeFile(dest, svg, "utf8");
 			console.log(`${file} (${name}) -> ${dest.slice(root.length + 1)}`);
 		}
 	}

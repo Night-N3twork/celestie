@@ -1,19 +1,26 @@
-import type { SVGProps } from "react";
+import { createUniqueId, For, type JSX, splitProps } from "solid-js";
 
-type Props = SVGProps<SVGSVGElement> & {
+type SVGProps = JSX.SvgSVGAttributes<SVGSVGElement>;
+
+type Props = SVGProps & {
 	accents?: boolean;
 };
 
-export function Icon(props: SVGProps<SVGSVGElement>) {
+export function Icon(props: SVGProps) {
 	return <Celestie accents {...props} />;
 }
 
-export function Favicon(props: SVGProps<SVGSVGElement>) {
+export function Favicon(props: SVGProps) {
 	return <Celestie accents={false} {...props} />;
 }
 
-function Celestie({ accents: showAccents = true, ...props }: Props) {
+function Celestie(allProps: Props) {
+	const [local, props] = splitProps(allProps, ["accents"]);
+	const showAccents = local.accents ?? true;
 	const size = 24;
+	const coreId = createUniqueId();
+	const trailId = createUniqueId();
+	const glowId = createUniqueId();
 	const mid = [12, 12];
 	const radius = [8, 9];
 
@@ -176,21 +183,21 @@ function Celestie({ accents: showAccents = true, ...props }: Props) {
 			<title>Celestie</title>
 			<defs>
 				<radialGradient
-					id="core"
+					id={coreId}
 					gradientUnits="userSpaceOnUse"
 					cx={star.pos[0]}
 					cy={star.pos[1]}
 					r={star.outer}
 				>
-					<stop offset="0" stopColor={colors.star[0]} />
-					<stop offset="0.35" stopColor={colors.star[1]} />
-					<stop offset="1" stopColor={colors.star[2]} />
+					<stop offset="0" stop-color={colors.star[0]} />
+					<stop offset="0.35" stop-color={colors.star[1]} />
+					<stop offset="1" stop-color={colors.star[2]} />
 				</radialGradient>
-				<clipPath id="trail">
+				<clipPath id={trailId}>
 					<polygon points={outline} />
 				</clipPath>
 				<filter
-					id="glow"
+					id={glowId}
 					x="-50%"
 					y="-50%"
 					width="200%"
@@ -200,19 +207,20 @@ function Celestie({ accents: showAccents = true, ...props }: Props) {
 				</filter>
 			</defs>
 
-			<g clipPath="url(#trail)">
-				{segments.map((s) => (
-					<polygon key={s.points} points={s.points} fill={s.color} />
-				))}
+			<g clip-path={`url(#${trailId})`}>
+				<For each={segments}>
+					{(s) => <polygon points={s.points} fill={s.color} />}
+				</For>
 			</g>
 
-			{accents.map((a) => (
-				<path
-					key={`${a.pos}`}
-					d={path(a.pos, 4, [a.outer], a.outer * 0.4, -90)}
-					fill={a.color}
-				/>
-			))}
+			<For each={accents}>
+				{(a) => (
+					<path
+						d={path(a.pos, 4, [a.outer], a.outer * 0.4, -90)}
+						fill={a.color}
+					/>
+				)}
+			</For>
 
 			<circle
 				cx={star.pos[0]}
@@ -220,7 +228,7 @@ function Celestie({ accents: showAccents = true, ...props }: Props) {
 				r={2.2}
 				fill={colors.glow}
 				opacity={0.55}
-				filter="url(#glow)"
+				filter={`url(#${glowId})`}
 			/>
 			<path
 				d={path(
@@ -230,7 +238,7 @@ function Celestie({ accents: showAccents = true, ...props }: Props) {
 					star.inner,
 					star.angle,
 				)}
-				fill="url(#core)"
+				fill={`url(#${coreId})`}
 			/>
 		</svg>
 	);

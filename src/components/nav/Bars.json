@@ -1,0 +1,10 @@
+{
+	"top": {
+		"start": ["logo", "file", "edit", "view", "help"],
+		"middle": [],
+		"end": ["new"]
+	},
+	"bottom": { "start": [], "middle": [], "end": [] },
+	"left": { "start": [], "middle": [], "end": [] },
+	"right": { "start": [], "middle": [], "end": [] }
+}

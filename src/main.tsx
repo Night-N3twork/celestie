@@ -1,16 +1,19 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import "./index.css";
-import App from "./App";
+import { MetaProvider } from "@solidjs/meta";
+import { applyTheme } from "@utils/theme.ts";
+import Editor from "#Editor.tsx";
+import "./style.css";
+import { render } from "solid-js/web";
 
-const rootElement = document.getElementById("root");
+applyTheme("white");
 
-if (!rootElement) {
-	throw new Error('Root element with id "root" was not found');
-}
+const root = document.getElementById("root");
+if (!root) throw new Error("Missing application root");
 
-createRoot(rootElement).render(
-	<StrictMode>
-		<App />
-	</StrictMode>,
+render(
+	() => (
+		<MetaProvider>
+			<Editor />
+		</MetaProvider>
+	),
+	root,
 );
