@@ -9,6 +9,7 @@ type Position = keyof (typeof bars)[Side];
 interface BarOptions {
 	vertical?: boolean;
 	id: "t" | "b" | "l" | "r";
+	onNew?: () => void;
 }
 const sides: Record<BarOptions["id"], Side> = {
 	t: "top",
@@ -47,7 +48,16 @@ export default function Bar(props: BarOptions) {
 							class={[section, positions[pos]].join(" ")}
 						>
 							<For each={resolveItems(bar()[pos])}>
-								{(name) => <Button {...items[name]} />}
+								{(name) => (
+									<Button
+										{...items[name]}
+										onClick={
+											name === "new"
+												? props.onNew
+												: undefined
+										}
+									/>
+								)}
 							</For>
 						</div>
 					)}

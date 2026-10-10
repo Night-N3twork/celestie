@@ -1,13 +1,13 @@
 import { style } from "@vanilla-extract/css";
+import { center, fill, row } from "#shared.css";
 import { vars } from "#theme.css";
 
-export const main = style({
-	display: "flex",
-	justifyContent: "center",
-	alignItems: "center",
-	flex: 1,
-	minWidth: 0,
-	minHeight: 0,
-	backgroundColor: vars.color.base,
-	overflow: "auto",
-});
+export const main = style([
+	row,
+	center,
+	fill,
+	{
+		backgroundColor: vars.color.base,
+		overflow: "auto",
+	},
+]);

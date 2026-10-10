@@ -1,33 +1,29 @@
 import { globalStyle, style } from "@vanilla-extract/css";
+import { buttonBase, focusable } from "#shared.css";
 import { vars } from "#theme.css";
 
-export const main = style({
-	cursor: "pointer",
-	border: 0,
-	background: "transparent",
-	borderRadius: "6px",
-	padding: "2px 8px",
-	display: "inline-flex",
-	flexShrink: 0,
-	alignItems: "center",
-	justifyContent: "center",
-	gap: "6px",
-	font: "inherit",
-	fontSize: "12px",
-	lineHeight: 1,
-	whiteSpace: "nowrap",
-	color: vars.color.text,
-	selectors: {
-		"&:hover:not(:disabled)": { backgroundColor: vars.color.surface1 },
-		"&:active:not(:disabled)": { backgroundColor: vars.color.surface2 },
-		'&[aria-pressed="true"]': { backgroundColor: vars.color.surface0 },
+export const main = style([
+	buttonBase,
+	focusable,
+	{
+		borderRadius: "6px",
+		padding: "2px 8px",
+		display: "inline-flex",
+		alignItems: "center",
+		justifyContent: "center",
+		gap: "6px",
+		fontSize: "12px",
+		lineHeight: 1,
+		whiteSpace: "nowrap",
+		color: vars.color.text,
+		selectors: {
+			"&:hover:not(:disabled)": { backgroundColor: vars.color.surface1 },
+			"&:active:not(:disabled)": { backgroundColor: vars.color.surface2 },
+			'&[aria-pressed="true"]': { backgroundColor: vars.color.surface0 },
+		},
+		":disabled": { cursor: "default", opacity: 0.45 },
 	},
-	":focus-visible": {
-		outline: `2px solid ${vars.color.blue}`,
-		outlineOffset: "-2px",
-	},
-	":disabled": { cursor: "default", opacity: 0.45 },
-});
+]);
 
 globalStyle(`${main} > svg`, {
 	width: "100%",

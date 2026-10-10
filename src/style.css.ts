@@ -1,4 +1,5 @@
 import { globalStyle, style } from "@vanilla-extract/css";
+import { fill, row as rowBase } from "#shared.css";
 import { vars } from "#theme.css";
 
 globalStyle("*, *::before, *::after", { boxSizing: "border-box" });
@@ -18,16 +19,13 @@ globalStyle("#root", {
 	overflow: "hidden",
 });
 
-export const row = style({
-	display: "flex",
-	width: "100%",
-	flexDirection: "row",
-	alignItems: "stretch",
-	flexShrink: 0,
-});
-export const main = style({
-	flex: 1,
-	minHeight: 0,
-	minWidth: 0,
-	flexShrink: 1,
-});
+export const row = style([
+	rowBase,
+	{
+		width: "100%",
+		flexDirection: "row",
+		alignItems: "stretch",
+		flexShrink: 0,
+	},
+]);
+export const main = style([fill, { flexShrink: 1 }]);
