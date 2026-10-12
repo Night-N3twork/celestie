@@ -38,18 +38,20 @@ export function newScrollbar(options: {
 		const track = options.track();
 		const thumb = options.thumb();
 		if (!list || !track || !thumb) return;
-		const bar = track.parentElement;
-		if (bar) {
-			const barRect = bar.getBoundingClientRect();
-			const listRect = list.getBoundingClientRect();
-			track.style.left = `${listRect.left - barRect.left}px`;
-			track.style.width = `${listRect.width}px`;
-		}
+		// The track lives inside the scroller. Clear its old extent so it
+		// cannot preserve overflow after tabs close, then read the clamped offset.
+		track.style.width = "0px";
+		track.style.left = "0px";
+		const scrollWidth = list.scrollWidth;
+		const clientWidth = list.clientWidth;
+		const scrollLeft = list.scrollLeft;
+		track.style.left = `${scrollLeft}px`;
+		track.style.width = `${clientWidth}px`;
 		const geometry = scrollThumb(
-			list.scrollLeft,
-			list.scrollWidth,
-			list.clientWidth,
-			track.clientWidth,
+			scrollLeft,
+			scrollWidth,
+			clientWidth,
+			clientWidth,
 		);
 		options.scrollable(geometry.visible);
 		thumb.style.left = `${geometry.left}px`;

@@ -14,7 +14,7 @@ export interface TabsState {
 export function newTab(state: TabsState): TabsState {
 	const id = state.nextId;
 	return {
-		tabs: [...state.tabs, { id, title: `Untitled-${id}` }],
+		tabs: [...state.tabs, { id, title: `New Tab` }],
 		activeId: id,
 		nextId: id + 1,
 	};

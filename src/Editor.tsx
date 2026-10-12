@@ -1,6 +1,6 @@
-import Bar from "@components/nav/Bars";
-import { newTabs } from "@components/tabs/model";
-import Tabs from "@components/tabs/Tabs";
+import Bar from "@components/bars/Bars";
+import { newTabs } from "@components/workspace/tabs/model";
+import Workspace from "@components/workspace/Workspace";
 import { Link, Title } from "@solidjs/meta";
 import { onCleanup, onMount } from "solid-js";
 import { disposeRuntime, getRuntime } from "./runtime";
@@ -26,7 +26,7 @@ export default function Editor() {
 			</div>
 			<div class="editor-row editor-main">
 				<Bar vertical id="l" />
-				<Tabs tabs={tabs} />
+				<Workspace tabs={tabs} />
 				<Bar vertical id="r" />
 			</div>
 			<div class="editor-row">

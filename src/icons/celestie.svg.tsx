@@ -4,10 +4,15 @@ type SVGProps = JSX.SvgSVGAttributes<SVGSVGElement>;
 
 type Props = SVGProps & {
 	accents?: boolean;
+	bw?: boolean;
 };
 
 export function Icon(props: SVGProps) {
 	return <Celestie accents {...props} />;
+}
+
+export function BwIcon(props: SVGProps) {
+	return <Celestie accents bw {...props} />;
 }
 
 export function Favicon(props: SVGProps) {
@@ -15,7 +20,7 @@ export function Favicon(props: SVGProps) {
 }
 
 function Celestie(allProps: Props) {
-	const [local, props] = splitProps(allProps, ["accents"]);
+	const [local, props] = splitProps(allProps, ["accents", "bw"]);
 	const showAccents = local.accents ?? true;
 	const size = 24;
 	const coreId = createUniqueId();
@@ -24,11 +29,17 @@ function Celestie(allProps: Props) {
 	const mid = [12, 12];
 	const radius = [8, 9];
 
-	const colors = {
-		star: ["#ffeded", "#ffaded", "#ff4ded"],
-		trail: ["#ff8ded", "#ca73ff", "#00aaff"],
-		glow: "#ff8ae2",
-	};
+	const colors = local.bw
+		? {
+				star: ["currentColor", "currentColor", "currentColor"],
+				trail: ["currentColor", "currentColor", "currentColor"],
+				glow: "currentColor",
+			}
+		: {
+				star: ["#ffeded", "#ffaded", "#ff4ded"],
+				trail: ["#ff8ded", "#ca73ff", "#00aaff"],
+				glow: "#ff8ae2",
+			};
 
 	const trail = {
 		width: 2.75,
@@ -154,7 +165,7 @@ function Celestie(allProps: Props) {
 		const d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
 		const n = [(-(b[1] - a[1]) / d) * 3, ((b[0] - a[0]) / d) * 3];
 		return {
-			color: blend(colors.trail, t),
+			color: local.bw ? "currentColor" : blend(colors.trail, t),
 			points: points([
 				[a[0] + n[0], a[1] + n[1]],
 				[b[0] + n[0], b[1] + n[1]],

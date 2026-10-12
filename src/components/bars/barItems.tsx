@@ -1,4 +1,4 @@
-import { Icon as Logo } from "@icons/celestie.svg";
+import { BwIcon as Logo } from "@icons/celestie.svg";
 import type { ButtonOptions } from "./Button";
 
 const items = {

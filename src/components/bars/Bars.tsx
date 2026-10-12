@@ -40,16 +40,7 @@ export default function Bar(props: BarOptions) {
 					{(pos) => (
 						<div data-pos={pos} class={`bar-section bar-${pos}`}>
 							<For each={resolveItems(bar()[pos])}>
-								{(name) => (
-									<Button
-										{...items[name]}
-										onClick={
-											name === "new"
-												? props.onNew
-												: undefined
-										}
-									/>
-								)}
+								{(name) => <Button {...items[name]} />}
 							</For>
 						</div>
 					)}

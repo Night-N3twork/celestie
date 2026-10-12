@@ -1,15 +1,20 @@
 @use "Editor";
-@use "components/Page";
 @use "components/Tooltip";
-@use "components/nav/Bars";
-@use "components/nav/Button";
-@use "components/tabs/Tabs";
+@use "components/bars/Bars";
+@use "components/bars/Button";
+@use "components/workspace/tabs/Tabs";
+@use "components/workspace/pages/Page";
+@use "components/workspace/Workspace";
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
 	box-sizing: border-box;
 }
 
-html, body, #root {
+html,
+body,
+#root {
 	width: 100%;
 	height: 100%;
 }

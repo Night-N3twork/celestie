@@ -1,0 +1,67 @@
+@use "../../shared";
+
+.workspace {
+	@include shared.column;
+	@include shared.fill;
+}
+
+.tabs {
+	@include shared.row;
+	position: relative;
+	flex-shrink: 0;
+	background-color: var(--color-crust);
+	padding: 0 4px 4px;
+	gap: 4px;
+	overflow-x: auto;
+	overflow-y: clip;
+	scrollbar-width: none;
+	scrollbar-color: transparent transparent;
+
+	&[data-dragging="true"] {
+		cursor: grabbing;
+		user-select: none;
+	}
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+.scroll-track {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	height: 4px;
+	z-index: 4;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 150ms ease;
+
+	@media (prefers-reduced-motion: reduce) {
+		transition: none;
+	}
+
+	&[data-show="true"] {
+		opacity: 1;
+	}
+}
+
+.thumb {
+	position: absolute;
+	height: 4px;
+	border-radius: 8px;
+	background-color: color-mix(in srgb, var(--color-surface2) 65%, transparent);
+	pointer-events: auto;
+	cursor: grab;
+
+	&:hover {
+		background-color: var(--color-overlay0);
+	}
+
+	&:active {
+		cursor: grabbing;
+	}
+
+	&[data-show="false"] {
+		visibility: hidden;
+	}
+}

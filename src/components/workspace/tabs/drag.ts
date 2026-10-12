@@ -42,7 +42,6 @@ interface DragView {
 export function newDrag(options: {
 	tabs: TabsController;
 	list: () => HTMLDivElement;
-	bar: () => HTMLDivElement;
 	elements: Map<number, HTMLDivElement>;
 }) {
 	const [view, setView] = createSignal<DragView | null>(null);
@@ -105,7 +104,7 @@ export function newDrag(options: {
 			gap,
 			line:
 				Math.max(list.left, Math.min(preview.line, list.right)) -
-				options.bar().getBoundingClientRect().left,
+				list.left,
 			shifts: new Map(
 				tabs.map((tab, index) => [tab.id, preview.offsets[index]]),
 			),

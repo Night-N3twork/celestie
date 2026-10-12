@@ -8,7 +8,7 @@ async function icons(server: ViteDevServer) {
 	const input = resolve(root, "src/icons");
 	const output = resolve(root, "public/icons");
 
-	const variants = new Set(["Icon", "Favicon"]);
+	const variants = new Set(["Icon", "Favicon", "BwIcon"]);
 
 	const { createComponent, renderToString } = (await server.ssrLoadModule(
 		"solid-js/web",
@@ -31,7 +31,20 @@ async function icons(server: ViteDevServer) {
 
 			if (!/^<svg[\s>]/.test(svg) || !svg.endsWith("</svg>")) continue;
 
-			const suffix = name === "Favicon" ? ".fav" : "";
+			let suffix: string;
+
+			switch (name) {
+				case "Favicon":
+					suffix = ".fav";
+					break;
+				case "BwIcon":
+					suffix = ".bw";
+					break;
+				default:
+					suffix = "";
+					break;
+			}
+
 			const dest = resolve(output, `${base}${suffix}.svg`);
 
 			await mkdir(dirname(dest), { recursive: true });
