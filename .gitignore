@@ -1,4 +1,7 @@
 dist
+public/icons/*.svg
+
 node_modules
+
 .env
 .vscode/settings.json
