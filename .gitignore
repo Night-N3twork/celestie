@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 *.tsbuildinfo
+test-results/
+playwright-report/
 public/icons
 
 # Editor directories and files

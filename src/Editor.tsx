@@ -2,10 +2,17 @@ import Bar from "@components/nav/Bars";
 import { newTabs } from "@components/tabs/model";
 import Tabs from "@components/tabs/Tabs";
 import { Link, Title } from "@solidjs/meta";
-import { main, row } from "./style.css";
+import { onCleanup, onMount } from "solid-js";
+import { disposeRuntime, getRuntime } from "./runtime";
 
 export default function Editor() {
 	const tabs = newTabs();
+	onMount(() => {
+		getRuntime().catch((error: unknown) => {
+			console.error("Failed to start the Dusk runtime", error);
+		});
+	});
+	onCleanup(() => void disposeRuntime());
 	return (
 		<>
 			<Title>Celestie</Title>
@@ -14,15 +21,15 @@ export default function Editor() {
 				type="image/svg+xml"
 				href="/icons/celestie.fav.svg"
 			/>
-			<div class={row}>
+			<div class="editor-row">
 				<Bar id="t" onNew={tabs.add} />
 			</div>
-			<div class={[row, main].join(" ")}>
+			<div class="editor-row editor-main">
 				<Bar vertical id="l" />
 				<Tabs tabs={tabs} />
 				<Bar vertical id="r" />
 			</div>
-			<div class={row}>
+			<div class="editor-row">
 				<Bar id="b" />
 			</div>
 		</>

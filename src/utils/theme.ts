@@ -1,4 +1,4 @@
-import { themeData, themes } from "#theme.css";
+import { themeData } from "#theme";
 
 export type ThemeName = keyof typeof themeData;
 
@@ -11,8 +11,9 @@ export type ThemeSelection = {
 
 export function applyTheme(theme: ThemeName) {
 	const root = document.documentElement;
-	root.classList.remove(...Object.values(themes));
-	root.classList.add(themes[theme]);
+	for (const [name, value] of Object.entries(themeData[theme].color)) {
+		root.style.setProperty(`--color-${name}`, value);
+	}
 	root.style.colorScheme = themeData[theme].type;
 	root.dataset.theme = theme;
 	root.dataset.themeType = themeData[theme].type;

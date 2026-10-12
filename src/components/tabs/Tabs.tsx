@@ -9,7 +9,6 @@ import {
 import { newDrag } from "./drag";
 import type { TabsController } from "./model";
 import { newScrollbar } from "./scrollbar";
-import * as styles from "./Tabs.css";
 
 export default function Tabs(props: { tabs: TabsController }) {
 	const prefix = createUniqueId();
@@ -107,17 +106,17 @@ export default function Tabs(props: { tabs: TabsController }) {
 	});
 
 	return (
-		<div class={styles.workspace}>
+		<>
 			<div
 				ref={bar}
-				class={styles.bar}
+				class="tabs-bar"
 				data-dragging={!!drag.view()}
 				onPointerEnter={() => setHovering(true)}
 				onPointerLeave={() => setHovering(false)}
 			>
 				<div
 					ref={list}
-					class={styles.list}
+					class="tabs-list"
 					role="tablist"
 					aria-label="Open files"
 				>
@@ -126,7 +125,7 @@ export default function Tabs(props: { tabs: TabsController }) {
 							<div
 								ref={(element) => elements.set(tab.id, element)}
 								role="presentation"
-								class={styles.tab}
+								class="tabs-tab"
 								data-active={
 									props.tabs.state().activeId === tab.id
 								}
@@ -159,15 +158,18 @@ export default function Tabs(props: { tabs: TabsController }) {
 											? 0
 											: -1
 									}
-									class={styles.select}
+									class="tabs-select"
 									title={`${tab.title}`}
 									onClick={() => {
 										if (!drag.suppress(tab.id))
 											props.tabs.select(tab.id);
 									}}
-									onPointerDown={(event) =>
-										drag.start(event, tab.id)
-									}
+									onPointerDown={(event) => {
+										if (event.button !== 0 || !event.isPrimary)
+											return;
+										props.tabs.select(tab.id);
+										drag.start(event, tab.id);
+									}}
 									onKeyDown={(event) =>
 										keyDown(event, tab.id)
 									}
@@ -176,7 +178,7 @@ export default function Tabs(props: { tabs: TabsController }) {
 								</button>
 								<button
 									type="button"
-									class={styles.close}
+									class="tabs-close"
 									tabIndex={-1}
 									aria-label={`Close ${tab.title}`}
 									title={`Close ${tab.title}`}
@@ -188,25 +190,15 @@ export default function Tabs(props: { tabs: TabsController }) {
 						)}
 					</For>
 				</div>
-				<Show when={drag.view()}>
-					{(view) => (
-						<div
-							class={styles.insertionLine}
-							aria-hidden="true"
-							data-insertion-index={view().gap}
-							style={{ left: `${view().line}px` }}
-						/>
-					)}
-				</Show>
 				<div
 					ref={track}
-					class={styles.track}
+					class="tabs-track"
 					aria-hidden="true"
 					data-show={hovering() && scrollable()}
 				>
 					<div
 						ref={thumb}
-						class={styles.thumb}
+						class="tabs-thumb"
 						data-show={hovering() && scrollable()}
 						onPointerDown={(event) => scrollbar.grabThumb(event)}
 					/>
@@ -214,7 +206,7 @@ export default function Tabs(props: { tabs: TabsController }) {
 				<button
 					ref={add}
 					type="button"
-					class={styles.add}
+					class="tabs-add"
 					aria-label="New tab"
 					title="New tab"
 					onClick={newTab}
@@ -223,17 +215,8 @@ export default function Tabs(props: { tabs: TabsController }) {
 				</button>
 			</div>
 			<Show when={props.tabs.active()}>
-				{(active) => (
-					<div
-						class={styles.panel}
-						role="tabpanel"
-						id={panelId(active().id)}
-						aria-labelledby={tabId(active().id)}
-					>
-						<Page title={active().title} />
-					</div>
-				)}
+				{(active) => <Page title={active().title} />}
 			</Show>
-		</div>
+		</>
 	);
 }

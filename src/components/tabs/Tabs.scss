@@ -1,0 +1,160 @@
+@use "../../shared";
+
+.tabs-bar {
+	@include shared.row;
+	position: relative;
+	flex-shrink: 0;
+	background-color: var(--color-crust);
+	overflow: hidden;
+
+	&[data-dragging="true"] {
+		cursor: grabbing;
+		user-select: none;
+	}
+}
+
+.tabs-list {
+	@include shared.row;
+	position: relative;
+	flex: 1;
+	overflow-x: auto;
+	overflow-y: clip;
+	scrollbar-width: none;
+	scrollbar-color: transparent transparent;
+
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+.tabs-track {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	height: 4px;
+	z-index: 4;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 150ms ease;
+
+	@media (prefers-reduced-motion: reduce) {
+		transition: none;
+	}
+
+	&[data-show="true"] {
+		opacity: 1;
+	}
+}
+
+.tabs-thumb {
+	position: absolute;
+	top: 0;
+	height: 4px;
+	min-width: 24px;
+	border-radius: 8px;
+	background-clip: padding-box;
+	background-color: color-mix(in srgb, var(--color-surface2) 65%, transparent);
+	pointer-events: auto;
+	cursor: grab;
+
+	&:hover {
+		background-color: var(--color-overlay0);
+	}
+
+	&:active {
+		cursor: grabbing;
+	}
+
+	&[data-show="false"] {
+		visibility: hidden;
+	}
+}
+
+.tabs-tab {
+	@include shared.row;
+	position: relative;
+	color: var(--color-subtext0);
+	align-items: center;
+	flex-shrink: 0;
+	max-width: 240px;
+	cursor: grab;
+
+	border-radius: 6px;
+	margin: 0 4px 4px 4px;
+
+	&:hover {
+		background-color: var(--color-mantle);
+		color: var(--color-text);
+	}
+
+	&[data-preview="true"] {
+		cursor: grabbing;
+	}
+
+	&[data-preview="true"]:not([data-dragging="true"]) {
+		transition: transform 140ms ease;
+
+		@media (prefers-reduced-motion: reduce) {
+			transition: none;
+		}
+	}
+
+	&[data-active="true"] {
+		background-color: var(--color-base);
+		border-top-color: var(--color-blue);
+	}
+
+	&[data-dragging="true"] {
+		z-index: 2;
+		background-color: var(--color-surface0);
+		pointer-events: none;
+		cursor: grabbing;
+	}
+}
+
+@mixin button {
+	@include shared.buttonBase;
+	@include shared.focusable;
+	color: var(--color-subtext0);
+
+	&:hover {
+		background-color: var(--color-surface0);
+		color: var(--color-text);
+	}
+}
+
+.tabs-select {
+	@include shared.buttonBase;
+	@include shared.focusable;
+	color: inherit;
+	padding: 4px 8px;
+	min-width: 0;
+	flex-shrink: 1;
+	text-align: left;
+	font-size: 12px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	touch-action: none;
+	user-select: none;
+	cursor: inherit;
+
+	&[aria-selected="true"] {
+		color: var(--color-text);
+	}
+}
+
+.tabs-close {
+	@include button;
+	width: 24px;
+	height: 24px;
+	margin-right: 4px;
+	border-radius: 4px;
+}
+
+.tabs-add {
+	@include button;
+	width: 36px;
+	min-height: 36px;
+	font-size: 20px;
+}

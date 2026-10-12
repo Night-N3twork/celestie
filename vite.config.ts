@@ -1,15 +1,13 @@
 import { fileURLToPath } from "node:url";
-import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 import icons from "./plugins/icons.ts";
 
 export default defineConfig({
-	plugins: [
-		vanillaExtractPlugin(),
-		solid({ ssr: true, solid: { hydratable: false } }),
-		icons(),
-	],
+	plugins: [solid({ ssr: true, solid: { hydratable: false } }), icons()],
+	optimizeDeps: {
+		include: ["@nightnetwork/dusk"],
+	},
 	resolve: {
 		alias: [
 			{
@@ -25,5 +23,15 @@ export default defineConfig({
 	server: {
 		host: true,
 		allowedHosts: true,
+		headers: {
+			"Cross-Origin-Opener-Policy": "same-origin",
+			"Cross-Origin-Embedder-Policy": "require-corp",
+		},
+	},
+	preview: {
+		headers: {
+			"Cross-Origin-Opener-Policy": "same-origin",
+			"Cross-Origin-Embedder-Policy": "require-corp",
+		},
 	},
 });

@@ -1,0 +1,36 @@
+@mixin row {
+	display: flex;
+	min-width: 0;
+}
+
+@mixin column {
+	@include row;
+	flex-direction: column;
+	min-height: 0;
+}
+
+@mixin fill {
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+@mixin center {
+	justify-content: center;
+	align-items: center;
+}
+
+@mixin buttonBase {
+	border: 0;
+	background: transparent;
+	font: inherit;
+	flex-shrink: 0;
+	cursor: pointer;
+}
+
+@mixin focusable {
+	&:focus-visible {
+		outline: 2px solid var(--color-blue);
+		outline-offset: -2px;
+	}
+}

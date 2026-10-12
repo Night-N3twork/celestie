@@ -1,5 +1,4 @@
 import { type JSX, Show } from "solid-js";
-import { main, shortcut, tip } from "./Tooltip.css";
 
 export function Tooltip(props: {
 	text: string;
@@ -10,13 +9,13 @@ export function Tooltip(props: {
 	children: JSX.Element;
 }) {
 	return (
-		<div class={main} style={props.full ? { width: "100%" } : undefined}>
+		<div class="tooltip" style={props.full ? { width: "100%" } : undefined}>
 			{props.children}
 			<Show when={props.enabled !== false}>
-				<span id={props.id} class={tip} role="tooltip">
+				<span id={props.id} class="tooltip-tip" role="tooltip">
 					{props.text}
 					<Show when={props.shortcut}>
-						<kbd class={shortcut}>{props.shortcut}</kbd>
+						<kbd class="tooltip-shortcut">{props.shortcut}</kbd>
 					</Show>
 				</span>
 			</Show>

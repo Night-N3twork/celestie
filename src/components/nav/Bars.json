@@ -2,7 +2,7 @@
 	"top": {
 		"start": ["logo", "file", "edit", "view", "help"],
 		"middle": [],
-		"end": ["new"]
+		"end": []
 	},
 	"bottom": { "start": [], "middle": [], "end": [] },
 	"left": { "start": [], "middle": [], "end": [] },

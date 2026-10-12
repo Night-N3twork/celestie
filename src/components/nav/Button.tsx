@@ -8,7 +8,6 @@ import {
 	splitProps,
 } from "solid-js";
 import { Dynamic } from "solid-js/web";
-import { full, main, size, svg, text } from "./Button.css";
 
 export interface ButtonOptions
 	extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
@@ -81,11 +80,11 @@ export default function Button(allProps: ButtonOptions) {
 						.join(" ") || undefined
 				}
 				class={[
-					main,
-					size[props.size],
-					hasText() ? text : null,
-					props.svg ? svg : null,
-					props.full ? full : null,
+					"nav-button",
+					`nav-button-${props.size}`,
+					hasText() ? "nav-button-text" : null,
+					props.svg ? "nav-button-svg" : null,
+					props.full ? "nav-button-full" : null,
 					props.class,
 				]
 					.filter(Boolean)

@@ -1,0 +1,21 @@
+@use "shared";
+
+.editor-row {
+	@include shared.row;
+	width: 100%;
+	flex-direction: row;
+	align-items: stretch;
+	flex-shrink: 0;
+}
+
+.editor-main {
+	@include shared.fill;
+	flex-shrink: 1;
+	flex-direction: column;
+}
+
+.workspace {
+	@include shared.column;
+	@include shared.fill;
+	background-color: var(--color-base);
+}

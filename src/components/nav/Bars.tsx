@@ -1,5 +1,4 @@
 import { For, Show } from "solid-js";
-import { end, main, middle, section, start, vertical } from "./Bars.css";
 import bars from "./Bars.json";
 import Button from "./Button";
 import items, { type ItemName } from "./barItems";
@@ -24,29 +23,22 @@ function resolveItems(names: string[]): ItemName[] {
 		return name as ItemName;
 	});
 }
-const positions: Record<Position, string> = { start, middle, end };
+const positions: Position[] = ["start", "middle", "end"];
 
 export default function Bar(props: BarOptions) {
 	const bar = () => bars[sides[props.id]];
-	const populated = () =>
-		(Object.keys(positions) as Position[]).some(
-			(pos) => bar()[pos].length > 0,
-		);
+	const populated = () => positions.some((pos) => bar()[pos].length > 0);
 	return (
 		<Show when={populated()}>
 			<nav
 				aria-label={`${sides[props.id]} toolbar`}
 				data-side={sides[props.id]}
-				class={[main, props.vertical ? vertical : null]
-					.filter(Boolean)
-					.join(" ")}
+				class="bar"
+				classList={{ "bar-vertical": props.vertical }}
 			>
-				<For each={Object.keys(positions) as Position[]}>
+				<For each={positions}>
 					{(pos) => (
-						<div
-							data-pos={pos}
-							class={[section, positions[pos]].join(" ")}
-						>
+						<div data-pos={pos} class={`bar-section bar-${pos}`}>
 							<For each={resolveItems(bar()[pos])}>
 								{(name) => (
 									<Button
