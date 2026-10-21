@@ -1,22 +1,30 @@
-import { createUniqueId, For, type JSX } from "solid-js";
+import { createUniqueId, For, splitProps } from "solid-js";
+import { path, type SVGProps } from "./icons";
 
-type SVGProps = JSX.SvgSVGAttributes<SVGSVGElement>;
-type IconProps = SVGProps & {
+type Props = SVGProps & {
 	bw?: boolean;
 	mini?: boolean;
 };
 
-export function BwIcon(props: SVGProps) {
+export function bw(props: SVGProps) {
 	return <Icon bw={true} {...props} />;
 }
 
-export function Favicon(props: SVGProps) {
+export function fav(props: SVGProps) {
 	return <Icon {...props} />;
 }
 
-function Icon(props: IconProps) {
-	const { bw = false, mini = false } = props;
-	const size = 24;
+export default function Icon(props: Props) {
+	const scale = (value: number) => (value * props.size) / 24;
+	const [local, svgProps] = splitProps(props, [
+		"size",
+		"title",
+		"children",
+		"bw",
+		"mini",
+		"nobox",
+	]);
+	const { bw = false, mini = false } = local;
 	const coreId = createUniqueId();
 	const trailId = createUniqueId();
 	const glowId = createUniqueId();
@@ -108,7 +116,7 @@ function Icon(props: IconProps) {
 
 	const edges = taper(center, trail.width);
 
-	function path(
+	function starPath(
 		[cx, cy]: number[],
 		points: number,
 		radii: number[],
@@ -131,9 +139,11 @@ function Icon(props: IconProps) {
 			);
 			return at(angle + (i + 0.5) * step, 2 * inner - chordMid);
 		});
-		return `M ${tips[0]} ${tips
-			.map((_, i) => `Q ${ctrl[i]} ${tips[(i + 1) % points]}`)
-			.join(" ")} Z`;
+		return path([
+			["M", ...tips[0]],
+			...tips.map((_, i) => ["Q", ...ctrl[i], ...tips[(i + 1) % points]]),
+			["Z"],
+		]);
 	}
 
 	function blend(stops: string[], t: number) {
@@ -180,12 +190,12 @@ function Icon(props: IconProps) {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
-			width={size}
-			height={size}
-			viewBox={`0 0 ${size} ${size}`}
-			{...props}
+			width={scale(24)}
+			height={scale(24)}
+			viewBox="0 0 24 24"
+			{...svgProps}
 		>
-			<title>Celestie</title>
+			<title>{local.title ?? "Celestie"}</title>
 			<defs>
 				<radialGradient
 					id={coreId}
@@ -221,7 +231,7 @@ function Icon(props: IconProps) {
 			<For each={accents}>
 				{(a) => (
 					<path
-						d={path(a.pos, 4, [a.outer], a.outer * 0.4, -90)}
+						d={starPath(a.pos, 4, [a.outer], a.outer * 0.4, -90)}
 						fill={a.color}
 					/>
 				)}
@@ -236,7 +246,7 @@ function Icon(props: IconProps) {
 				filter={`url(#${glowId})`}
 			/>
 			<path
-				d={path(
+				d={starPath(
 					star.pos,
 					star.points,
 					[star.outer],
@@ -245,6 +255,7 @@ function Icon(props: IconProps) {
 				)}
 				fill={`url(#${coreId})`}
 			/>
+			{local.children}
 		</svg>
 	);
 }
