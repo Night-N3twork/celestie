@@ -1,0 +1,45 @@
+$light: (
+	background: #f7f5fa,
+	surface: #ffffff,
+	surface-raised: #eeebf3,
+	foreground: #24202c,
+	muted: #696273,
+	border: #d4cddd,
+	accent: #7735a8,
+	accent-hover: #602a89,
+	focus: #7735a8,
+	selection: #e3c5fa,
+	selection-foreground: #24202c,
+);
+
+$dark: (
+	background: #08080a,
+	surface: #101014,
+	surface-raised: #141419,
+	foreground: #d4d0dc,
+	muted: #b9b5c3,
+	border: #24242c,
+	accent: #d69aff,
+	accent-hover: #6ba8ff,
+	focus: #d69aff,
+	selection: #d69aff,
+	selection-foreground: #08080a,
+);
+
+@mixin apply($colors, $mode) {
+	color-scheme: $mode;
+
+	@each $token, $value in $colors {
+		--#{$token}: #{$value};
+	}
+}
+
+:root {
+	@include apply($light, light);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		@include apply($dark, dark);
+	}
+}

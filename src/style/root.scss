@@ -1,0 +1,43 @@
+@use "themes";
+
+:root {
+	--bar-width: 32px;
+}
+
+*, *:hover, *:active {
+	margin: 0px;
+	padding: 0px;
+	outline: 0px;
+	border: 0px;
+}
+
+html, body, #root {
+	background-color: var(--background);
+	color: var(--foreground);
+	
+	display: flex;
+	flex-direction: column;
+	justify-content: start;
+	align-items: stretch;
+
+	width: 100vw;
+	height: 100vh;
+}
+
+a {
+	color: var(--accent);
+
+	&:hover {
+		color: var(--accent-hover);
+	}
+}
+
+:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+
+::selection {
+	background-color: var(--selection);
+	color: var(--selection-foreground);
+}

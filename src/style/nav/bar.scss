@@ -1,0 +1,13 @@
+.bar {
+	background-color: var(--background)
+}
+
+.vertical {
+	width: var(--bar-width);
+	height: 100%;
+}
+
+.horizontal {
+	width: 100%;
+	height: var(--bar-width);
+}

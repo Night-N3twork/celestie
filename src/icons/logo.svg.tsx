@@ -7,11 +7,11 @@ type Props = SVGProps & {
 };
 
 export function bw(props: SVGProps) {
-	return <Icon bw={true} {...props} />;
+	return <Icon bw {...props} />;
 }
 
 export function fav(props: SVGProps) {
-	return <Icon {...props} />;
+	return <Icon mini {...props} />;
 }
 
 export default function Icon(props: Props) {
