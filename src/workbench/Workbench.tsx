@@ -33,9 +33,7 @@ export default function Workbench() {
 				}),
 			);
 		} catch {
-			setMessage(
-				"Browser storage error.",
-			);
+			setMessage("Browser storage error.");
 		}
 	};
 	const replace = (next: WorkspaceDocument) => {

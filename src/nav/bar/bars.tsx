@@ -14,8 +14,7 @@ export const bars: Record<string, Bar> = {
 	top: {
 		show: true,
 		align: "horizontal",
-		components: {
-		},
+		components: {},
 	},
 	bottom: {
 		show: true,
