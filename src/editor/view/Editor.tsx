@@ -1,4 +1,4 @@
-import { createEffect, createMemo, on, Show } from "solid-js";
+import { createEffect, createMemo, on, onCleanup, Show } from "solid-js";
 import type { EditorSettings } from "../../settings/editorSettings";
 import type { EditorSession } from "../core/editor";
 import {
@@ -7,6 +7,11 @@ import {
 	documentOffset,
 	inputEdit,
 } from "./textInput";
+
+const scrollPositions = new WeakMap<
+	EditorSession,
+	{ top: number; left: number }
+>();
 
 export default function Editor(props: {
 	session: EditorSession;
@@ -17,6 +22,13 @@ export default function Editor(props: {
 }) {
 	let input!: HTMLTextAreaElement;
 	let gutter!: HTMLPreElement;
+	let restoredScroll = false;
+	onCleanup(() => {
+		scrollPositions.set(props.session, {
+			top: input.scrollTop,
+			left: input.scrollLeft,
+		});
+	});
 	const lines = createMemo(() => {
 		props.revision;
 		return Array.from(
@@ -86,6 +98,12 @@ export default function Editor(props: {
 					displayOffset(text, Math.max(anchor, head)),
 					head < anchor ? "backward" : "forward",
 				);
+				const scroll = scrollPositions.get(props.session);
+				if (scroll && !restoredScroll) {
+					input.scrollTop = scroll.top;
+					input.scrollLeft = scroll.left;
+				}
+				restoredScroll = true;
 			},
 		),
 	);
@@ -107,6 +125,10 @@ export default function Editor(props: {
 				spellcheck={false}
 				wrap="off"
 				onScroll={() => {
+					scrollPositions.set(props.session, {
+						top: input.scrollTop,
+						left: input.scrollLeft,
+					});
 					if (gutter) gutter.scrollTop = input.scrollTop;
 				}}
 				style={{

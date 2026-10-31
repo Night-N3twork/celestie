@@ -51,6 +51,75 @@
 	background: var(--surface-raised);
 }
 
+.workspace-body {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+}
+
+.workspace-editor {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+.editor-tabs {
+	display: flex;
+	overflow-x: auto;
+	flex-shrink: 0;
+	background: var(--surface-raised);
+}
+
+.editor-tab {
+	display: flex;
+	gap: 8px;
+	white-space: nowrap;
+	border-bottom: 2px solid transparent;
+	&.active { border-color: var(--accent); background: var(--surface); }
+	button {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		background: transparent;
+		color: var(--foreground);
+		cursor: pointer;
+		font: inherit;
+	}
+}
+
+.file-explorer {
+	width: 220px;
+	min-width: 120px;
+	max-width: 35%;
+	overflow: auto;
+	border-right: 1px solid var(--border);
+	padding: 8px;
+	font-size: 12px;
+	ul { list-style: none; padding-left: 12px; }
+	> ul { padding-left: 0; }
+	p { padding: 4px; }
+}
+
+.explorer-entry {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	background: transparent;
+	color: var(--foreground);
+	font: inherit;
+	text-align: left;
+	white-space: nowrap;
+	padding: 5px;
+	cursor: pointer;
+	&:hover { background: var(--surface-raised); }
+}
+
+.explorer-entry svg, .editor-tab svg { flex-shrink: 0; }
+
+.editor-empty { padding: 24px; color: var(--muted); }
+
 .editor-input {
 	flex: 1;
 	min-height: 0;

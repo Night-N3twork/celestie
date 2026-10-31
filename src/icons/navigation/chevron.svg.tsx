@@ -9,9 +9,9 @@ export default function ChevronDownIcon(props: SVGProps) {
 			{!props.nobox && <Box size={s} />}
 			<polyline
 				points={points([
-					[scale(24), scale(20)],
-					[scale(40), scale(32)],
-					[scale(24), scale(44)],
+					[scale(26), scale(20)],
+					[scale(38), scale(32)],
+					[scale(26), scale(44)],
 				])}
 			/>
 		</Svg>
