@@ -4,6 +4,7 @@ import "@fontsource-variable/sora";
 import Bar from "@nav/bar/Bar";
 import { render } from "solid-js/web";
 import { name } from "../package.json";
+import Workbench from "./workbench/Workbench";
 import "@style/main.scss";
 
 const root = document.getElementById("root");
@@ -18,7 +19,9 @@ render(
 			<Bar top />
 			<div class="main-container">
 				<Bar left />
-				<div class="main"></div>
+				<div class="main">
+					<Workbench />
+				</div>
 				<Bar right />
 			</div>
 			<Bar bottom />
