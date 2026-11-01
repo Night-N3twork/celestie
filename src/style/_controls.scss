@@ -1,0 +1,103 @@
+.main-container {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+}
+.main {
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+.workbench {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+	font:
+		12px/1.5 "Sora Variable",
+		sans-serif;
+	color: var(--foreground);
+	background: var(--surface);
+	button,
+	summary,
+	input,
+	select { box-sizing: border-box; font: inherit; }
+	button,
+	summary { color: inherit; cursor: pointer; }
+	button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 5px;
+		min-height: 28px;
+		padding: 4px 9px;
+		border: 1px solid transparent;
+		border-radius: 5px;
+		background: transparent;
+		white-space: nowrap;
+	}
+	button:hover,
+	summary:hover { background: var(--surface-raised); }
+	button:disabled { opacity: 0.38; cursor: default; }
+	button.primary {
+		color: var(--selection-foreground);
+		background: var(--selection);
+		border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+		font-weight: 600;
+	}
+	button.primary:hover { background: color-mix(in srgb, var(--selection) 85%, var(--accent)); }
+	input:not([type="checkbox"]):not(.editor-input),
+	select {
+		min-height: 30px;
+		padding: 5px 9px;
+		border: 1px solid var(--border);
+		border-radius: 5px;
+		background: var(--surface);
+		color: var(--foreground);
+		min-width: 0;
+	}
+	input[type="checkbox"] {
+		accent-color: var(--accent);
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
+	}
+	label {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		color: var(--muted);
+	}
+	:is(button, summary):focus-visible { background: var(--surface-raised); }
+	input:not(.editor-input):focus-visible,
+	select:focus-visible { border-color: var(--focus); }
+	.editor-input:focus-visible { outline: none; }
+	svg { flex-shrink: 0; }
+	kbd {
+		font:
+			10px/1.6 "JetBrains Mono Variable",
+			monospace;
+		color: var(--muted);
+		padding: 0 5px;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		white-space: nowrap;
+	}
+	details > summary { list-style: none; }
+	details > summary::-webkit-details-marker { display: none; }
+	> p[role="alert"] {
+		padding: 10px 16px;
+		border-bottom: 1px solid var(--accent);
+		background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+	}
+	> p[role="alert"] button { border-color: var(--border); margin-left: 8px; }
+	::-webkit-scrollbar { width: 9px; height: 9px; }
+	::-webkit-scrollbar-thumb {
+		background: color-mix(in srgb, var(--muted) 28%, transparent);
+		border: 2px solid var(--surface);
+		border-radius: 8px;
+	}
+	::-webkit-scrollbar-track { background: var(--surface); }
+}
