@@ -1,0 +1,102 @@
+.file-explorer {
+	width: 254px;
+	min-width: 180px;
+	max-width: 35%;
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	border-right: 1px solid var(--border);
+	background: var(--background);
+}
+.explorer-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 39px;
+	padding: 0 10px 0 15px;
+	flex-shrink: 0;
+}
+.explorer-header > span {
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	font-size: 10px;
+	font-weight: 600;
+	color: var(--muted);
+}
+.explorer-actions {
+	display: flex;
+	align-items: center;
+	gap: 0;
+}
+.explorer-actions .action-button { width: 26px; min-width: 26px; }
+.entry-menu > summary { width: 26px; padding: 0; }
+.entry-menu > div { width: 165px; }
+.workbench .destructive:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.explorer-selection {
+	color: var(--muted);
+	padding: 2px 15px 8px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 10px;
+}
+.explorer-tree {
+	overflow: auto;
+	flex: 1;
+	padding: 0 7px 12px;
+}
+.explorer-tree ul { list-style: none; padding-left: 14px; }
+.workspace-root { position: relative; }
+.workspace-root > ul { padding-left: 0; }
+.workbench .root-remove {
+	position: absolute;
+	right: 4px;
+	top: 2px;
+	z-index: 1;
+	width: 24px;
+	min-height: 24px;
+	padding: 0;
+	opacity: 0.6;
+}
+.workspace-root:hover > .root-remove,
+.root-remove:focus-visible { opacity: 1; }
+.workspace-root > ul > li > .explorer-entry { padding-right: 30px; font-weight: 600; }
+.workbench .explorer-entry {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	width: 100%;
+	justify-content: flex-start;
+	padding: 2px 5px;
+	min-height: 28px;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	text-align: left;
+	font-size: 11px;
+}
+.explorer-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.workbench .explorer-entry.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: color-mix(in srgb, var(--accent) 15%, transparent); }
+.explorer-tree p {
+	color: var(--muted);
+	font-size: 10px;
+	padding: 5px 10px;
+}
+.explorer-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 12px;
+	padding: 20px 16px;
+	color: var(--muted);
+}
+.explorer-empty > svg { opacity: 0.45; margin-left: -10px; }
+.explorer-empty strong {
+	color: var(--foreground);
+	font-size: 12px;
+	font-weight: 500;
+}
+.explorer-empty p { line-height: 1.8; font-size: 11px; }

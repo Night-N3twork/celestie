@@ -32,6 +32,27 @@ export class Workspace {
 			this.activeId = id;
 	}
 
+	reorder(id: string, direction: -1 | 1): void {
+		const from = this.openDocuments.findIndex(
+			(document) => document.id === id,
+		);
+		const to = from + direction;
+		if (from < 0 || to < 0 || to >= this.openDocuments.length) return;
+		const documents = [...this.openDocuments];
+		[documents[from], documents[to]] = [documents[to], documents[from]];
+		this.openDocuments = documents;
+	}
+
+	relocate(from: string, to: string, name: string): void {
+		for (const document of this.openDocuments)
+			if (document.id === from || document.id.startsWith(`${from}/`)) {
+				const previous = document.id;
+				document.id = to + previous.slice(from.length);
+				if (previous === from) document.name = name;
+				if (this.activeId === previous) this.activeId = document.id;
+			}
+	}
+
 	close(id: string, discard = false): boolean {
 		const index = this.openDocuments.findIndex(
 			(document) => document.id === id,
@@ -58,6 +79,8 @@ export class Workspace {
 				name: file.name,
 				text: file.editor.snapshot.text,
 				dirty: file.dirty,
+				savedText: file.dirty ? file.baseline : undefined,
+				missing: file.missing,
 				selection: file.editor.selection,
 			})),
 		});
@@ -79,7 +102,13 @@ export class Workspace {
 			)
 				throw new Error("Invalid recovered document");
 			const document = workspace.open(file);
-			if (file.dirty) document.markUnsaved();
+			if (file.dirty)
+				document.markUnsaved(
+					typeof file.savedText === "string"
+						? file.savedText
+						: undefined,
+				);
+			if (file.missing === true) document.markMissing();
 			if (file.selection) document.editor.setSelection(file.selection);
 		}
 		workspace.activate(data.activeId);

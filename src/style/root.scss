@@ -1,20 +1,22 @@
 @use "themes";
 
-:root {
-	--bar-width: 32px;
-}
+:root { --bar-width: 32px; }
 
-*, *:hover, *:active {
+*,
+*:hover,
+*:active {
 	margin: 0px;
 	padding: 0px;
 	outline: 0px;
 	border: 0px;
 }
 
-html, body, #root {
+html,
+body,
+#root {
 	background-color: var(--background);
 	color: var(--foreground);
-	
+
 	display: flex;
 	flex-direction: column;
 	justify-content: start;
@@ -27,12 +29,7 @@ html, body, #root {
 a {
 	color: var(--accent);
 
-	&:hover {
-		color: var(--accent-hover);
-	}
+	&:hover { color: var(--accent-hover); }
 }
 
-::selection {
-	background-color: var(--selection);
-	color: var(--selection-foreground);
-}
+::selection { background-color: var(--selection); color: var(--selection-foreground); }

@@ -7,6 +7,10 @@ export interface Command {
 export class CommandRegistry {
 	private readonly commands = new Map<string, Command>();
 
+	list(): readonly Command[] {
+		return [...this.commands.values()];
+	}
+
 	register(command: Command): () => void {
 		if (this.commands.has(command.id)) {
 			throw new Error(`Command already registered: ${command.id}`);

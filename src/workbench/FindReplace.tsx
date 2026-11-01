@@ -15,6 +15,7 @@ import {
 } from "../editor/core/search";
 import { selectionRange } from "../editor/core/selection";
 import CloseIcon from "../icons/actions/close.svg";
+import ChevronIcon from "../icons/navigation/chevron.svg";
 
 export interface FindReplaceControl {
 	next(backwards: boolean): void;
@@ -174,6 +175,7 @@ export default function FindReplace(props: {
 	return (
 		<Show when={props.visible}>
 			<form
+				class="find-panel"
 				aria-label="Find and replace"
 				onSubmit={(event) => {
 					event.preventDefault();
@@ -212,8 +214,16 @@ export default function FindReplace(props: {
 						props.disabled || !matches().length || !props.session
 					}
 					onClick={() => next(true)}
+					class="icon-button"
+					aria-label="Previous match"
+					title="Previous match (Shift+Enter)"
 				>
-					Previous match
+					<ChevronIcon
+						size={24}
+						nobox
+						aria-hidden="true"
+						style={{ transform: "rotate(180deg)" }}
+					/>
 				</button>
 				<button
 					type="button"
@@ -221,8 +231,11 @@ export default function FindReplace(props: {
 						props.disabled || !matches().length || !props.session
 					}
 					onClick={() => next(false)}
+					class="icon-button"
+					aria-label="Next match"
+					title="Next match (Enter)"
 				>
-					Next match
+					<ChevronIcon size={24} nobox aria-hidden="true" />
 				</button>
 				<label>
 					<input

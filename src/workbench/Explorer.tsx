@@ -12,13 +12,16 @@ export default function Explorer(props: {
 	onOpen: (entry: ExplorerEntry) => void;
 	isExpanded: (id: string) => boolean;
 	onExpanded: (id: string, expanded: boolean) => void;
+	revision: number;
+	onSelect: (entry: ExplorerEntry) => void;
+	selectedId?: string;
 }) {
 	const expanded = () => props.isExpanded(props.entry.id);
 	const [entries, setEntries] = createSignal<ExplorerEntry[]>();
 	const [loading, setLoading] = createSignal(false);
 	const [error, setError] = createSignal("");
-	const load = async () => {
-		if (entries() || loading()) return;
+	const load = async (refresh = false) => {
+		if ((!refresh && entries()) || loading()) return;
 		setLoading(true);
 		try {
 			setEntries(await props.host.readDirectory(props.entry.id));
@@ -34,7 +37,17 @@ export default function Explorer(props: {
 			if (value && props.entry.kind === "directory") void load();
 		}),
 	);
+	createEffect(
+		on(
+			() => props.revision,
+			() => {
+				if (expanded() && props.entry.kind === "directory")
+					void load(true);
+			},
+		),
+	);
 	const toggle = () => {
+		props.onSelect(props.entry);
 		if (props.entry.kind === "file") return props.onOpen(props.entry);
 		props.onExpanded(props.entry.id, !expanded());
 	};
@@ -43,6 +56,8 @@ export default function Explorer(props: {
 			<button
 				type="button"
 				class="explorer-entry"
+				classList={{ selected: props.selectedId === props.entry.id }}
+				title={props.entry.name}
 				disabled={props.disabled || loading()}
 				aria-expanded={
 					props.entry.kind === "directory" ? expanded() : undefined
@@ -65,7 +80,7 @@ export default function Explorer(props: {
 					/>
 					<ExplorerIcon size={20} nobox aria-hidden="true" />
 				</Show>
-				{props.entry.name}
+				<span class="explorer-name">{props.entry.name}</span>
 			</button>
 			<Show when={expanded()}>
 				<Show when={loading()}>
@@ -84,6 +99,9 @@ export default function Explorer(props: {
 								onOpen={props.onOpen}
 								isExpanded={props.isExpanded}
 								onExpanded={props.onExpanded}
+								revision={props.revision}
+								onSelect={props.onSelect}
+								selectedId={props.selectedId}
 							/>
 						)}
 					</For>

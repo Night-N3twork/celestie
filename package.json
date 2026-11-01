@@ -26,6 +26,7 @@
 		"@nightnetwork/dusk": "1.0.1",
 		"@solidjs/meta": "^0.29.4",
 		"chalk": "^6.0.1",
+		"prettier": "^3.9.10",
 		"solid-js": "^1.9.17"
 	}
 }

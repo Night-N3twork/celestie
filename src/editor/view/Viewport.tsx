@@ -8,6 +8,7 @@ const overscan = 8;
 export default function Viewport(props: {
 	lines: LineIndex;
 	selection: Selection;
+	secondary: readonly Selection[];
 	scrollTop: number;
 	scrollLeft: number;
 	height: number;
@@ -52,6 +53,10 @@ export default function Viewport(props: {
 			),
 		);
 		const caret = props.selection.head - start;
+		const extra = props.secondary.flatMap((selection) => [
+			Math.max(0, Math.min(text.length, selection.anchor - start)),
+			Math.max(0, Math.min(text.length, selection.head - start)),
+		]);
 		const cuts = [
 			...new Set([
 				0,
@@ -59,21 +64,39 @@ export default function Viewport(props: {
 				from,
 				to,
 				...(caret >= 0 && caret <= text.length ? [caret] : []),
+				...extra,
 			]),
 		].sort((a, b) => a - b);
 		return cuts.map((offset, index) => ({
 			offset,
 			text: text.slice(offset, cuts[index + 1] ?? text.length),
-			selected: offset >= from && offset < to,
-			caret: offset === caret && props.focused && !props.composing,
+			selected:
+				(offset >= from && offset < to) ||
+				props.secondary.some(
+					(selection) =>
+						offset + start >=
+							Math.min(selection.anchor, selection.head) &&
+						offset + start <
+							Math.max(selection.anchor, selection.head),
+				),
+			caret:
+				(offset === caret ||
+					props.secondary.some(
+						(selection) => selection.head === offset + start,
+					)) &&
+				props.focused &&
+				!props.composing,
 		}));
 	};
 	const newlineSelected = (number: number) =>
 		number < props.lines.count - 1 &&
-		Math.min(props.selection.anchor, props.selection.head) <=
-			props.lines.ends[number] &&
-		Math.max(props.selection.anchor, props.selection.head) >
-			props.lines.ends[number];
+		[props.selection, ...props.secondary].some(
+			(selection) =>
+				Math.min(selection.anchor, selection.head) <=
+					props.lines.ends[number] &&
+				Math.max(selection.anchor, selection.head) >
+					props.lines.ends[number],
+		);
 	return (
 		<div
 			class="virtual-paint"

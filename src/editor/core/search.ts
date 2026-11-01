@@ -24,6 +24,7 @@ export function findMatches(
 	text: string,
 	query: string,
 	options: SearchOptions,
+	limit = Number.POSITIVE_INFINITY,
 ): SearchMatch[] {
 	if (!query) return [];
 	const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -42,6 +43,7 @@ export function findMatches(
 		)
 			continue;
 		matches.push({ from, to });
+		if (matches.length >= limit) break;
 	}
 	return matches;
 }

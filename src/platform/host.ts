@@ -6,7 +6,11 @@ export interface TextFile {
 
 export interface FileHost {
 	openTextFile(): Promise<TextFile | undefined>;
-	saveTextFile(id: string, text: string): Promise<void>;
+	saveTextFile(
+		id: string,
+		text: string,
+		options?: { expectedText?: string; overwrite?: boolean },
+	): Promise<void>;
 }
 
 export interface ExplorerEntry {

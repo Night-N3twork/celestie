@@ -1,0 +1,25 @@
+@media (max-width: 1000px) {
+	.workbench-header { gap: 12px; }
+	.brand { min-width: 160px; }
+	.workspace-name,
+	.brand-divider { display: none; }
+	.file-explorer { width: 220px; }
+	.toolbar-group:nth-child(3) button:last-child { display: none; }
+}
+@media (max-width: 720px) {
+	.workbench-header { padding: 0 9px; gap: 9px; }
+	.brand { min-width: auto; font-size: 12px; }
+	.brand > svg { width: 23px; height: 23px; }
+	.quick-open kbd { display: none; }
+	.editor-toolbar { padding: 5px 7px; }
+	.toolbar-group:nth-child(2),
+	.toolbar-group:nth-child(3) { display: none; }
+	.file-explorer { width: 190px; min-width: 160px; }
+	.workbench-header > .action-button span { display: none; }
+	.find-panel input[type="text"] { width: 150px; }
+}
+@media (max-width: 520px) {
+	.toolbar-group:first-child .action-button:not(.primary) { width: 28px; padding: 0; }
+	.toolbar-group:first-child .action-button:not(.primary) span { display: none; }
+	.file-explorer { width: 160px; }
+}

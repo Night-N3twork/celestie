@@ -3,6 +3,7 @@ export interface EditorSettings {
 	readonly insertSpaces: boolean;
 	readonly fontSize: number;
 	readonly lineNumbers: boolean;
+	readonly wordWrap: boolean;
 }
 
 export const defaultEditorSettings: Readonly<EditorSettings> = Object.freeze({
@@ -10,4 +11,5 @@ export const defaultEditorSettings: Readonly<EditorSettings> = Object.freeze({
 	insertSpaces: true,
 	fontSize: 14,
 	lineNumbers: true,
+	wordWrap: false,
 });
