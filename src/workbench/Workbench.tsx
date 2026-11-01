@@ -58,13 +58,16 @@ export default function Workbench() {
 		revision();
 		return document.dirty;
 	};
-	const changed = () => {
-		setRevision((value) => value + 1);
+	const persist = () => {
 		try {
 			localStorage.setItem(workspaceKey, workspace.serialize());
 		} catch {
 			setMessage("Browser storage error.");
 		}
+	};
+	const changed = () => {
+		setRevision((value) => value + 1);
+		persist();
 	};
 	const open = (file: TextFile) => {
 		host.remember(file);
@@ -351,6 +354,7 @@ export default function Workbench() {
 				>
 					Redo
 				</button>
+
 				<label>
 					Font{" "}
 					<input
@@ -524,6 +528,7 @@ export default function Workbench() {
 								settings={settings()}
 								readOnly={busy()}
 								onChange={changed}
+								onSelectionChange={persist}
 							/>
 						)}
 					</Show>
