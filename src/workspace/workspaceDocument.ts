@@ -67,6 +67,7 @@ export class WorkspaceDocument {
 				expectedText: this.savedText,
 				overwrite,
 			});
+			this.name = host.savedLocation?.(this.id)?.name ?? this.name;
 			this.savedText = text;
 			this.externalText = undefined;
 			this.missing = false;

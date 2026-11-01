@@ -9,8 +9,8 @@ import {
 } from "solid-js";
 import type { CommandRegistry } from "../commands/registry";
 import CloseIcon from "../icons/actions/close.svg";
-import type { BrowserFileHost } from "../platform/browser/fileHost";
 import type { ExplorerEntry } from "../platform/host";
+import type { WorkspaceHost } from "../platform/services";
 import { listFiles, symbols } from "../workspace/navigation";
 
 export type NavigationMode = "files" | "commands" | "symbols";
@@ -18,7 +18,7 @@ export type NavigationMode = "files" | "commands" | "symbols";
 export default function Navigator(props: {
 	mode: NavigationMode | undefined;
 	focusRequest: number;
-	host: BrowserFileHost;
+	host: WorkspaceHost;
 	roots: readonly ExplorerEntry[];
 	commands: CommandRegistry;
 	text: () => string;

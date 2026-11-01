@@ -9,12 +9,12 @@ import {
 } from "solid-js";
 import type { SearchMatch } from "../editor/core/search";
 import { LineIndex } from "../editor/view/lineIndex";
-import type { BrowserFileHost } from "../platform/browser/fileHost";
 import type { ExplorerEntry } from "../platform/host";
+import type { WorkspaceHost } from "../platform/services";
 import { type FolderMatch, searchFolders } from "../workspace/search";
 
 export default function WorkspaceSearch(props: {
-	host: BrowserFileHost;
+	host: WorkspaceHost;
 	roots: readonly ExplorerEntry[];
 	visible: boolean;
 	focusRequest: number;

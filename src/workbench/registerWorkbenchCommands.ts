@@ -128,10 +128,10 @@ export function registerWorkbenchCommands(services: Services): void {
 	commands.register({
 		id: "file.download",
 		title: "Download copy",
-		execute: () => {
+		execute: async () => {
 			const document = file();
 			if (!document) return;
-			host.download({
+			await host.download({
 				id: document.id,
 				name: document.name,
 				text: document.editor.snapshot.text,

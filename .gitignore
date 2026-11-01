@@ -6,3 +6,6 @@ node_modules
 .env
 .vscode/settings.json
 tsconfig.tsbuildinfo
+dist-electron
+release
+tsconfig.electron.tsbuildinfo

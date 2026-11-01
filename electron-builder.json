@@ -1,0 +1,30 @@
+{
+	"appId": "network.night.celestie",
+	"productName": "Celestie",
+	"directories": {
+		"output": "release"
+	},
+	"files": [
+		"dist/**/*",
+		"dist-electron/**/*",
+		"package.json",
+		"!node_modules/**/*"
+	],
+	"asar": true,
+	"npmRebuild": false,
+	"win": {
+		"icon": "dist-electron/icons/icon.ico",
+		"target": "nsis"
+	},
+	"mac": {
+		"icon": "dist-electron/icons/icon.icns",
+		"target": "dmg",
+		"category": "public.app-category.developer-tools"
+	},
+	"linux": {
+		"icon": "dist-electron/icons/512x512.png",
+		"target": "AppImage",
+		"category": "Development"
+	},
+	"electronDist": "node_modules/electron/dist"
+}

@@ -3,8 +3,8 @@ import {
 	type SearchMatch,
 	type SearchOptions,
 } from "../editor/core/search";
-import type { BrowserFileHost } from "../platform/browser/fileHost";
 import type { ExplorerEntry } from "../platform/host";
+import type { WorkspaceHost } from "../platform/services";
 
 export interface FolderMatch {
 	entry: ExplorerEntry;
@@ -48,7 +48,7 @@ export function exclusionMatcher(patterns: string): (path: string) => boolean {
 }
 
 export async function searchFolders(
-	host: BrowserFileHost,
+	host: WorkspaceHost,
 	roots: readonly ExplorerEntry[],
 	query: string,
 	options: SearchOptions,

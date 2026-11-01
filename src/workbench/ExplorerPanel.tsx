@@ -6,8 +6,8 @@ import RefreshIcon from "../icons/actions/refresh.svg";
 import NewFileIcon from "../icons/files/new-file.svg";
 import NewFolderIcon from "../icons/files/new-folder.svg";
 import ExplorerIcon from "../icons/panels/explorer.svg";
-import type { BrowserFileHost } from "../platform/browser/fileHost";
 import type { ExplorerEntry } from "../platform/host";
+import type { WorkspaceHost } from "../platform/services";
 import ActionButton from "./ActionButton";
 import Explorer from "./Explorer";
 
@@ -21,7 +21,7 @@ interface Props {
 	selectedEntry: Accessor<ExplorerEntry | undefined>;
 	run: (id: string) => Promise<unknown>;
 	perform: (action: () => void | Promise<void>) => Promise<void>;
-	host: BrowserFileHost;
+	host: WorkspaceHost;
 	setFolders: Setter<{ entry: ExplorerEntry; accessible: boolean }[]>;
 	setSelectedEntry: Setter<ExplorerEntry | undefined>;
 	openEntry: (entry: ExplorerEntry) => void;

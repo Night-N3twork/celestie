@@ -1,25 +1,11 @@
 import { BrowserFileHost } from "../browser/fileHost";
 import type { ExplorerEntry, TextFile } from "../host";
-import { DirectoryBackend } from "./directoryBackend";
 import { duskEnvironment, duskId, duskPath } from "./environment";
+import { workspaceRuntime } from "./workspaceRuntime";
 
 const key = "celestie.dusk.roots.v1";
 export class WorkspaceFileHost extends BrowserFileHost {
-	private runtimeMounts = new Map<string, string>();
-	async runtimeRoot(entry: ExplorerEntry): Promise<string> {
-		if (entry.id.startsWith("dusk:")) return entry.id;
-		const known = this.runtimeMounts.get(entry.id);
-		if (known) return known;
-		const directory = await this.nativeDirectory(entry.id);
-		const environment = await duskEnvironment();
-		const parent = `/home/user/projects/local-${encodeURIComponent(entry.id)}`;
-		await environment.fs.mkdir(parent, { recursive: true });
-		const path = `${parent}/${entry.name}`;
-		environment.mount(path, new DirectoryBackend(directory));
-		const id = duskId(path);
-		this.runtimeMounts.set(entry.id, id);
-		return id;
-	}
+	runtimeRoot = workspaceRuntime((id) => this.nativeDirectory(id));
 	private webRoots: string[] = [];
 	override async restoreFolders() {
 		const local = await super.restoreFolders();

@@ -1,11 +1,11 @@
 import { type Accessor, Show } from "solid-js";
-import type { BrowserFileHost } from "../platform/browser/fileHost";
+import type { WorkspaceHost } from "../platform/services";
 import type { WorkspaceDocument } from "../workspace/workspaceDocument";
 
 interface Props {
 	file: Accessor<WorkspaceDocument | undefined>;
 	busy: Accessor<boolean>;
-	host: BrowserFileHost;
+	host: WorkspaceHost;
 	changed: () => void;
 	perform: (action: () => void | Promise<void>) => Promise<void>;
 }

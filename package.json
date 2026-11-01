@@ -6,6 +6,9 @@
 		"@types/bun": "^1.4.2",
 		"@types/node": "^26.6.2",
 		"@types/shell-quote": "^1.7.5",
+		"electron": "^45.2.1",
+		"electron-builder": "^26.18.0",
+		"esbuild": "^0.28.2",
 		"sass": "^1.100.0",
 		"typescript": "~6.0.2",
 		"vite": "^8.3.0",
@@ -18,7 +21,11 @@
 		"build": "tsc -b && vite build",
 		"lint": "biome lint .",
 		"format": "biome format --write .",
-		"check": "biome check --write ."
+		"check": "biome check --write .",
+		"desktop:dev": "bun run scripts/desktop.ts --dev",
+		"desktop:build": "bun run build && tsc -p tsconfig.electron.json && bun run scripts/desktop.ts",
+		"desktop:start": "electron .",
+		"desktop:package": "bun run desktop:build && electron-builder"
 	},
 	"type": "module",
 	"dependencies": {
@@ -34,5 +41,12 @@
 		"prettier": "^3.9.10",
 		"shell-quote": "^1.12.0",
 		"solid-js": "^1.9.17"
-	}
+	},
+	"main": "dist-electron/main.mjs",
+	"trustedDependencies": [
+		"electron"
+	],
+	"description": "A security-focused IDE for the browser and desktop.",
+	"author": "Sylvia Calabrese",
+	"license": "AGPL-3.0-only"
 }

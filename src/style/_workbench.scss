@@ -8,6 +8,13 @@
 	border-bottom: 1px solid var(--border);
 	background: var(--background);
 }
+.workbench-header[data-platform] {
+	-webkit-app-region: drag;
+	user-select: none;
+	padding-right: calc(16px + 100vw - env(titlebar-area-width, calc(100vw - 138px)));
+}
+.workbench-header[data-platform="darwin"] { padding-left: 88px; padding-right: 16px; }
+.workbench-header[data-platform] :is(button, input, select, a, summary, details) { -webkit-app-region: no-drag; }
 .brand {
 	display: flex;
 	align-items: center;

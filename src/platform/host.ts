@@ -5,6 +5,7 @@ export interface TextFile {
 }
 
 export interface FileHost {
+	savedLocation?(id: string): Pick<TextFile, "id" | "name"> | undefined;
 	openTextFile(): Promise<TextFile | undefined>;
 	saveTextFile(
 		id: string,

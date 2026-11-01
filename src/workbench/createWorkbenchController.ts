@@ -4,7 +4,7 @@ import type { EditorSession } from "../editor/core/editor";
 import { replaceMatches, type SearchMatch } from "../editor/core/search";
 import type { EditorControl } from "../editor/view/Editor";
 import { createLanguageService } from "../language/service";
-import { WorkspaceFileHost } from "../platform/dusk/workspaceFileHost";
+import { createPlatform } from "../platform/createPlatform";
 import type { ExplorerEntry, TextFile } from "../platform/host";
 import { defaultEditorSettings } from "../settings/editorSettings";
 import { WorkspaceLayout } from "../workspace/layout";
@@ -21,7 +21,8 @@ const legacyDraftKey = "celestie.draft.v1";
 const explorerKey = "celestie.explorer.v1";
 
 export function createWorkbenchController() {
-	const host = new WorkspaceFileHost();
+	const platform = createPlatform();
+	const host = platform.files;
 	const commands = new CommandRegistry();
 	const editorControls = new Map<EditorSession, EditorControl>();
 	const history = new NavigationHistory();
@@ -101,6 +102,23 @@ export function createWorkbenchController() {
 		}
 	};
 	const changed = () => {
+		for (const document of workspace.documents) {
+			const saved = host.savedLocation?.(document.id);
+			if (
+				!saved ||
+				saved.id === document.id ||
+				workspace.documents.some(
+					(other) => other !== document && other.id === saved.id,
+				)
+			)
+				continue;
+			const previous = document.id;
+			workspace.relocate(previous, saved.id, saved.name);
+			history.relocate(previous, saved.id);
+			for (const group of layout.groups)
+				if (group.documentId === previous) group.documentId = saved.id;
+		}
+
 		layout.prune(workspace.documents.map((document) => document.id));
 		if (workspace.active) layout.show(workspace.active.id);
 		setRevision((value) => value + 1);
@@ -486,9 +504,11 @@ export function createWorkbenchController() {
 				polling = false;
 			}
 		};
+		const stopWatching = host.watch?.(() => void poll());
 		const pollingTimer = window.setInterval(() => void poll(), 4000);
 		window.addEventListener("focus", poll);
 		onCleanup(() => {
+			stopWatching?.();
 			window.clearInterval(pollingTimer);
 			window.removeEventListener("focus", poll);
 		});

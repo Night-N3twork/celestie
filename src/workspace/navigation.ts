@@ -1,7 +1,7 @@
 import type { Selection } from "../editor/core/selection";
 import { LineIndex } from "../editor/view/lineIndex";
-import type { BrowserFileHost } from "../platform/browser/fileHost";
 import type { ExplorerEntry } from "../platform/host";
+import type { WorkspaceHost } from "../platform/services";
 import { exclusionMatcher } from "./search";
 
 export interface Location {
@@ -70,7 +70,7 @@ export function symbols(
 }
 
 export async function listFiles(
-	host: BrowserFileHost,
+	host: WorkspaceHost,
 	roots: readonly ExplorerEntry[],
 	signal: AbortSignal,
 ): Promise<{ entry: ExplorerEntry; path: string }[]> {

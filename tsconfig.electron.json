@@ -1,0 +1,14 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"types": ["node"],
+		"lib": ["ES2022", "DOM", "DOM.Iterable"]
+	},
+	"include": [
+		"electron/**/*.ts",
+		"scripts/**/*.ts",
+		"src/platform/desktop/bridge.ts",
+		"src/platform/host.ts",
+		"src/platform/services.ts"
+	]
+}

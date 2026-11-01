@@ -1,10 +1,10 @@
 import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
-import type { BrowserFileHost } from "../platform/browser/fileHost";
 import type { ExplorerEntry } from "../platform/host";
+import type { WorkspaceHost } from "../platform/services";
 import type { WorkspaceDocument } from "../workspace/workspaceDocument";
 import type { LanguageDocument, LanguageResponse } from "./protocol";
 export function createLanguageService(options: {
-	host: BrowserFileHost;
+	host: WorkspaceHost;
 	roots: Accessor<ExplorerEntry[]>;
 	documents: Accessor<readonly WorkspaceDocument[]>;
 	revision: Accessor<number>;

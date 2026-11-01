@@ -13,7 +13,10 @@ interface Props {
 export default function WorkbenchHeader(props: Props) {
 	const { folder, run } = props;
 	return (
-		<header class="workbench-header">
+		<header
+			class="workbench-header"
+			data-platform={window.celestie?.platform}
+		>
 			<div class="brand">
 				<LogoIcon size={28} aria-hidden="true" />
 				<span>celestie</span>

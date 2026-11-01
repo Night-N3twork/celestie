@@ -2,12 +2,12 @@ import { createEffect, createSignal, For, on, Show } from "solid-js";
 import FileIcon from "../icons/files/file.svg";
 import ChevronIcon from "../icons/navigation/chevron.svg";
 import ExplorerIcon from "../icons/panels/explorer.svg";
-import type { BrowserFileHost } from "../platform/browser/fileHost";
 import type { ExplorerEntry } from "../platform/host";
+import type { WorkspaceHost } from "../platform/services";
 
 export default function Explorer(props: {
 	entry: ExplorerEntry;
-	host: BrowserFileHost;
+	host: WorkspaceHost;
 	disabled: boolean;
 	onOpen: (entry: ExplorerEntry) => void;
 	isExpanded: (id: string) => boolean;
