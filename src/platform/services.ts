@@ -49,9 +49,11 @@ export interface RunningProcess {
 }
 export interface ProcessHost {
 	spawn(options: ProcessOptions): Promise<RunningProcess>;
+	runScript(cwd: string, name: string): Promise<RunningProcess>;
 }
 export interface TerminalSession {
 	id: string;
+	exit: Promise<number>;
 	write(data: string): Promise<void>;
 	resize(cols: number, rows: number): Promise<void>;
 	onData(listener: (data: string) => void): () => void;

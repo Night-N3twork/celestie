@@ -95,6 +95,12 @@ export class NativeWorkspace {
 				return `${grant.id}/${path.relative(grant.path, target).split(path.sep).join("/")}`;
 		}
 	}
+	async workingDirectory(id: string) {
+		const target = await this.resolve(id);
+		if (!(await fs.stat(target)).isDirectory())
+			throw new Error("Select a workspace folder.");
+		return target;
+	}
 	private async resolve(id: string, follow = true): Promise<string> {
 		const [key, ...parts] = id.split("/"),
 			grant = this.grants.get(key);

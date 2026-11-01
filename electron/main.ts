@@ -12,6 +12,7 @@ import {
 } from "electron";
 import { NativeWorkspace } from "./files";
 import { registerFiles } from "./ipc";
+import { NativeRuntime } from "./runtime";
 
 protocol.registerSchemesAsPrivileged([
 	{
@@ -51,6 +52,8 @@ const csp =
 	"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob: data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:* https: wss: blob: data:; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 let window: BrowserWindow | undefined;
 let files: NativeWorkspace;
+let runtime: NativeRuntime;
+let quitting = false;
 const titleBarOverlay = () => ({
 	color: nativeTheme.shouldUseDarkColors ? "#08080a" : "#f7f5fa",
 	symbolColor: nativeTheme.shouldUseDarkColors ? "#d4d0dc" : "#24202c",
@@ -105,10 +108,18 @@ function createWindow() {
 	});
 	window.on("ready-to-show", () => window?.show());
 	window.on("closed", () => {
+		void runtime?.close();
 		window = undefined;
 	});
-	window.webContents.on("render-process-gone", (_event, details) =>
-		console.error("Renderer exited:", details.reason),
+	window.webContents.on("render-process-gone", (_event, details) => {
+		console.error("Renderer exited:", details.reason);
+		void runtime.close();
+	});
+	window.webContents.on(
+		"did-start-navigation",
+		(_event, _url, _inPlace, mainFrame) => {
+			if (mainFrame) void runtime.close();
+		},
 	);
 	void window.loadURL(url);
 }
@@ -207,6 +218,7 @@ else {
 				},
 			);
 			registerFiles(files, () => window, trustedOrigin);
+			runtime = new NativeRuntime(files, () => window, trustedOrigin);
 			Menu.setApplicationMenu(
 				Menu.buildFromTemplate([
 					{
@@ -256,5 +268,14 @@ else {
 		if (window && !window.isDestroyed() && process.platform !== "darwin")
 			window.setTitleBarOverlay(titleBarOverlay());
 	});
-	app.on("before-quit", () => files?.close());
+	app.on("before-quit", (event) => {
+		if (quitting) return;
+		event.preventDefault();
+		void (async () => {
+			await runtime?.close();
+			files?.close();
+			quitting = true;
+			app.quit();
+		})();
+	});
 }

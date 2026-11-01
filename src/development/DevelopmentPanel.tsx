@@ -4,7 +4,7 @@ import ActionButton from "../workbench/ActionButton";
 import type { WorkbenchController } from "../workbench/createWorkbenchController";
 import type { DevelopmentController } from "./createDevelopmentController";
 
-const TerminalPanel = lazy(() => import("./TerminalPanel"));
+const TerminalTabs = lazy(() => import("./TerminalTabs"));
 export default function DevelopmentPanel(props: {
 	controller: WorkbenchController;
 	development: DevelopmentController;
@@ -94,13 +94,26 @@ export default function DevelopmentPanel(props: {
 					>
 						<Show when={d.terminalStarted()}>
 							<Show
-								when={d.runtimeRoot()}
-								keyed
+								when={c.platform.terminals}
 								fallback={
-									<p>{d.error() || "Preparing terminal…"}</p>
+									<Show
+										when={d.runtimeRoot()}
+										keyed
+										fallback={
+											<p>
+												{d.error() ||
+													"Preparing terminal…"}
+											</p>
+										}
+									>
+										{(root) => <TerminalTabs root={root} />}
+									</Show>
 								}
 							>
-								{(root) => <TerminalPanel root={root} />}
+								<TerminalTabs
+									root={d.root()?.id ?? ""}
+									host={c.platform.terminals}
+								/>
 							</Show>
 						</Show>
 					</Show>

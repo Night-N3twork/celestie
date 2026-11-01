@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopBridge, Result } from "../src/platform/desktop/bridge";
+import type {
+	DesktopBridge,
+	Result,
+	RuntimeEvent,
+} from "../src/platform/desktop/bridge";
 import type { FileChange } from "../src/platform/services";
 
 const invoke = <T>(method: string, ...args: unknown[]): Promise<Result<T>> =>
@@ -7,6 +11,25 @@ const invoke = <T>(method: string, ...args: unknown[]): Promise<Result<T>> =>
 const bridge: DesktopBridge = {
 	kind: "electron",
 	platform: process.platform,
+	runtime: {
+		spawn: (options) => ipcRenderer.invoke("runtime.spawn", options),
+		runScript: (cwd, name) =>
+			ipcRenderer.invoke("runtime.runScript", cwd, name),
+		open: (options) => ipcRenderer.invoke("runtime.open", options),
+		listen: (id) => ipcRenderer.invoke("runtime.listen", id),
+		write: (id, data) => ipcRenderer.invoke("runtime.write", id, data),
+		resize: (id, cols, rows) =>
+			ipcRenderer.invoke("runtime.resize", id, cols, rows),
+		stop: (id) => ipcRenderer.invoke("runtime.stop", id),
+	},
+	onRuntimeEvent: (listener) => {
+		const receive = (
+			_event: Electron.IpcRendererEvent,
+			event: RuntimeEvent,
+		) => listener(event);
+		ipcRenderer.on("runtime.event", receive);
+		return () => ipcRenderer.removeListener("runtime.event", receive);
+	},
 	files: {
 		openFolder: () => invoke("openFolder"),
 		openFile: () => invoke("openFile"),

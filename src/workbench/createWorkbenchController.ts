@@ -580,6 +580,7 @@ export function createWorkbenchController() {
 		revision,
 	});
 	const controller = {
+		platform,
 		language,
 		commands,
 		openSearch,

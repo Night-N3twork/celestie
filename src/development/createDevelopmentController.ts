@@ -76,7 +76,10 @@ export function createDevelopmentController(c: WorkbenchController) {
 			setError("");
 			return;
 		}
-		if (terminalStarted() || sidebarView() === "git") {
+		if (
+			(!c.platform.terminals && terminalStarted()) ||
+			sidebarView() === "git"
+		) {
 			setError("");
 			void prepare().catch((error) => {
 				if (!disposed) setError(String(error));
@@ -138,13 +141,35 @@ export function createDevelopmentController(c: WorkbenchController) {
 				if (document.id.startsWith(`${entry.id}/`) && document.dirty)
 					await document.save(c.host);
 			c.changed();
-			const runtime = await c.host.runtimeRoot(entry);
-			const exit = await runPackageScript(
-				runtime,
-				selected,
-				write,
-				abort.signal,
-			);
+			const native = c.platform.processes;
+			let exit: number;
+			if (native) {
+				abort.signal.throwIfAborted();
+				const process = await native.runScript(entry.id, selected);
+				const remove = process.onOutput(({ text }) => write(text));
+				const stop = () => {
+					void process
+						.stop()
+						.catch((error) => setError(String(error)));
+				};
+				abort.signal.addEventListener("abort", stop, { once: true });
+				if (abort.signal.aborted) stop();
+				try {
+					exit = await process.exit;
+					abort.signal.throwIfAborted();
+				} finally {
+					remove();
+					abort.signal.removeEventListener("abort", stop);
+				}
+			} else {
+				const runtime = await c.host.runtimeRoot(entry);
+				exit = await runPackageScript(
+					runtime,
+					selected,
+					write,
+					abort.signal,
+				);
+			}
 			write(`\n[Exited ${exit}]\n`);
 			c.refreshExplorer();
 			await c.language.refresh();

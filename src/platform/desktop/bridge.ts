@@ -1,5 +1,5 @@
 import type { ExplorerEntry, TextFile } from "../host";
-import type { FileChange } from "../services";
+import type { FileChange, ProcessOptions } from "../services";
 export type Result<T> =
 	| { ok: true; value: T }
 	| { ok: false; error: { message: string; code?: string } };
@@ -54,10 +54,28 @@ export interface NativeFiles {
 	): Promise<Result<ExplorerEntry>>;
 	exportText(file: TextFile): Promise<Result<void>>;
 }
+export type RuntimeEvent =
+	| { id: string; type: "output"; stream: "stdout" | "stderr"; text: string }
+	| { id: string; type: "exit"; code: number };
+export interface NativeRuntime {
+	spawn(options: ProcessOptions): Promise<Result<string>>;
+	runScript(cwd: string, name: string): Promise<Result<string>>;
+	open(options: {
+		cwd: string;
+		cols: number;
+		rows: number;
+	}): Promise<Result<string>>;
+	listen(id: string): Promise<Result<void>>;
+	write(id: string, data: string): Promise<Result<void>>;
+	resize(id: string, cols: number, rows: number): Promise<Result<void>>;
+	stop(id: string): Promise<Result<void>>;
+}
 export interface DesktopBridge {
 	kind: "electron";
 	platform: string;
 	files: NativeFiles;
+	runtime: NativeRuntime;
+	onRuntimeEvent(listener: (event: RuntimeEvent) => void): () => void;
 	onFileChange(listener: (change: FileChange) => void): () => void;
 }
 export async function unwrap<T>(request: Promise<Result<T>>): Promise<T> {

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { cp } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { build } from "esbuild";
 import { createServer } from "vite";
@@ -6,6 +7,10 @@ import { createDesktopIcons } from "./icons";
 
 const development = process.argv.includes("--dev");
 await createDesktopIcons();
+await cp("node_modules/node-pty", "dist-electron/node_modules/node-pty", {
+	recursive: true,
+	dereference: true,
+});
 await build({
 	entryPoints: ["electron/main.ts"],
 	outfile: "dist-electron/main.mjs",
@@ -13,7 +18,7 @@ await build({
 	platform: "node",
 	format: "esm",
 	target: "node22",
-	external: ["electron"],
+	external: ["electron", "node-pty"],
 	sourcemap: development,
 });
 await build({

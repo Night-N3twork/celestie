@@ -78,30 +78,41 @@ export function registerFiles(
 			});
 		},
 	};
+	registerMethods("files", methods, getWindow, origin);
+}
+export function registerMethods(
+	prefix: string,
+	methods: Record<string, (...args: unknown[]) => unknown>,
+	getWindow: () => BrowserWindow | undefined,
+	origin: string,
+) {
 	for (const [method, handle] of Object.entries(methods))
-		ipcMain.handle(`files.${method}`, async (event, ...args: unknown[]) => {
-			try {
-				if (
-					event.sender !== window().webContents ||
-					event.senderFrame !== event.sender.mainFrame ||
-					(new URL(event.senderFrame.url).protocol === "celestie:"
-						? `celestie://${new URL(event.senderFrame.url).host}`
-						: new URL(event.senderFrame.url).origin) !== origin
-				)
-					throw new Error("Unauthorized IPC sender.");
-				return { ok: true, value: await handle(...args) };
-			} catch (error) {
-				const value = error as { message?: string; code?: string };
-				return {
-					ok: false,
-					error: {
-						message: value?.message ?? String(error),
-						code:
-							typeof value?.code === "string"
-								? value.code
-								: undefined,
-					},
-				};
-			}
-		});
+		ipcMain.handle(
+			`${prefix}.${method}`,
+			async (event, ...args: unknown[]) => {
+				try {
+					if (
+						event.sender !== getWindow()?.webContents ||
+						event.senderFrame !== event.sender.mainFrame ||
+						(new URL(event.senderFrame.url).protocol === "celestie:"
+							? `celestie://${new URL(event.senderFrame.url).host}`
+							: new URL(event.senderFrame.url).origin) !== origin
+					)
+						throw new Error("Unauthorized IPC sender.");
+					return { ok: true, value: await handle(...args) };
+				} catch (error) {
+					const value = error as { message?: string; code?: string };
+					return {
+						ok: false,
+						error: {
+							message: value?.message ?? String(error),
+							code:
+								typeof value?.code === "string"
+									? value.code
+									: undefined,
+						},
+					};
+				}
+			},
+		);
 }
