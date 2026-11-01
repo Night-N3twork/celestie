@@ -10,7 +10,18 @@ export default defineConfig({
 	resolve: {
 		tsconfigPaths: true,
 	},
+	worker: { format: "es" },
+	preview: {
+		headers: {
+			"Cross-Origin-Opener-Policy": "same-origin",
+			"Cross-Origin-Embedder-Policy": "require-corp",
+		},
+	},
 	server: {
+		headers: {
+			"Cross-Origin-Opener-Policy": "same-origin",
+			"Cross-Origin-Embedder-Policy": "require-corp",
+		},
 		host: true,
 		allowedHosts: true,
 	},

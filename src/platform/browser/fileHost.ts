@@ -1,7 +1,7 @@
 import type { ExplorerEntry, FileHost, TextFile } from "../host";
 import { readFolder, writeFolder } from "./folderStorage";
 
-interface FileHandle {
+export interface FileHandle {
 	readonly kind: "file";
 	readonly name: string;
 	isSameEntry?(other: FileHandle): Promise<boolean>;
@@ -12,13 +12,15 @@ interface FileHandle {
 		abort?(): Promise<void>;
 	}>;
 }
-interface DirectoryHandle {
+export interface DirectoryHandle {
 	readonly kind: "directory";
 	readonly name: string;
 	isSameEntry?(other: DirectoryHandle): Promise<boolean>;
 	values(): AsyncIterable<FileHandle | DirectoryHandle>;
-	queryPermission?(options: { mode: "read" }): Promise<PermissionState>;
-	requestPermission?(options: { mode: "read" }): Promise<PermissionState>;
+	queryPermission?(options: { mode: "readwrite" }): Promise<PermissionState>;
+	requestPermission?(options: {
+		mode: "readwrite";
+	}): Promise<PermissionState>;
 	getDirectoryHandle(
 		name: string,
 		options?: { create?: boolean },
@@ -37,7 +39,9 @@ interface StoredFolder {
 	files?: [string, File][];
 }
 interface PickerWindow {
-	showDirectoryPicker?: () => Promise<DirectoryHandle>;
+	showDirectoryPicker?: (options?: {
+		mode: "readwrite";
+	}) => Promise<DirectoryHandle>;
 	showOpenFilePicker?: () => Promise<FileHandle[]>;
 	showSaveFilePicker?: (options: {
 		suggestedName: string;
@@ -93,7 +97,7 @@ export class BrowserFileHost implements FileHost {
 		if (stored.handle) {
 			this.directories.set(stored.entry.id, stored.handle);
 			const permission = await stored.handle.queryPermission?.({
-				mode: "read",
+				mode: "readwrite",
 			});
 			return {
 				entry: stored.entry,
@@ -112,7 +116,8 @@ export class BrowserFileHost implements FileHost {
 		const handle = this.directories.get(id);
 		if (!handle) return false;
 		return (
-			(await handle.requestPermission?.({ mode: "read" })) === "granted"
+			(await handle.requestPermission?.({ mode: "readwrite" })) ===
+			"granted"
 		);
 	}
 
@@ -194,7 +199,9 @@ export class BrowserFileHost implements FileHost {
 		try {
 			let id: string = crypto.randomUUID();
 			if (this.pickers.showDirectoryPicker) {
-				const handle = await this.pickers.showDirectoryPicker();
+				const handle = await this.pickers.showDirectoryPicker({
+					mode: "readwrite",
+				});
 				if (handle.isSameEntry)
 					for (const [knownId, record] of this.storedRoots)
 						if (
@@ -297,6 +304,18 @@ export class BrowserFileHost implements FileHost {
 
 	refresh(): void {
 		for (const id of this.directories.keys()) this.children.delete(id);
+	}
+
+	async nativeDirectory(id: string): Promise<DirectoryHandle> {
+		const handle = await this.directory(id);
+		const permission = await handle.queryPermission?.({
+			mode: "readwrite",
+		});
+		if (permission !== undefined && permission !== "granted")
+			throw new Error(
+				"Reconnect this folder to grant read and write access.",
+			);
+		return handle;
 	}
 
 	private async directory(id: string): Promise<DirectoryHandle> {
@@ -508,6 +527,14 @@ export class BrowserFileHost implements FileHost {
 		} catch {
 			return;
 		}
+	}
+
+	async readFileBytes(id: string): Promise<Uint8Array> {
+		const file =
+			(await (await this.resolveFileHandle(id))?.getFile()) ??
+			this.imported.get(id);
+		if (!file) throw new Error("File is no longer available.");
+		return new Uint8Array(await file.arrayBuffer());
 	}
 
 	async readTextFile(id: string): Promise<TextFile> {

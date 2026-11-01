@@ -50,6 +50,19 @@ export default function ViewMenu(props: Props) {
 				<span>View</span>
 			</summary>
 			<div class="view-menu-content">
+				<div class="menu-heading">Panels</div>
+				<button
+					type="button"
+					onClick={() => void run("terminal.toggle")}
+				>
+					Terminal <kbd>Ctrl `</kbd>
+				</button>
+				<button type="button" onClick={() => void run("problems.show")}>
+					Problems
+				</button>
+				<button type="button" onClick={() => void run("git.show")}>
+					Source control
+				</button>
 				<div class="menu-heading">Navigation</div>
 				<button
 					type="button"

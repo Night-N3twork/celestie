@@ -1,8 +1,12 @@
 import type { Accessor, Setter } from "solid-js";
 import ExplorerIcon from "../icons/panels/explorer.svg";
+import GitIcon from "../icons/panels/git.svg";
 import SearchIcon from "../icons/panels/search.svg";
 
 interface Props {
+	sourceControlOpen: Accessor<boolean>;
+	onSourceControl: () => void;
+	onExplorer: () => void;
 	sidebarOpen: Accessor<boolean>;
 	setSidebarOpen: Setter<boolean>;
 	workspaceSearchOpen: Accessor<boolean>;
@@ -13,7 +17,6 @@ interface Props {
 export default function ActivityRail(props: Props) {
 	const {
 		sidebarOpen,
-		setSidebarOpen,
 		workspaceSearchOpen,
 		setWorkspaceSearchOpen,
 		setWorkspaceSearchFocus,
@@ -24,8 +27,8 @@ export default function ActivityRail(props: Props) {
 				type="button"
 				title="Explorer"
 				aria-label="Toggle explorer"
-				aria-pressed={sidebarOpen()}
-				onClick={() => setSidebarOpen((value) => !value)}
+				aria-pressed={sidebarOpen() && !props.sourceControlOpen()}
+				onClick={props.onExplorer}
 			>
 				<ExplorerIcon size={32} nobox aria-hidden="true" />
 			</button>
@@ -41,6 +44,15 @@ export default function ActivityRail(props: Props) {
 				}}
 			>
 				<SearchIcon size={32} nobox aria-hidden="true" />
+			</button>
+			<button
+				type="button"
+				title="Source control"
+				aria-label="Source control"
+				aria-pressed={props.sourceControlOpen()}
+				onClick={props.onSourceControl}
+			>
+				<GitIcon size={32} nobox aria-hidden="true" />
 			</button>
 		</nav>
 	);

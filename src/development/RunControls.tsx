@@ -1,0 +1,43 @@
+import { For, Show } from "solid-js";
+import RunIcon from "../icons/debug/run.svg";
+import StopIcon from "../icons/debug/stop.svg";
+import ActionButton from "../workbench/ActionButton";
+import type { DevelopmentController } from "./createDevelopmentController";
+export default function RunControls(props: {
+	development: DevelopmentController;
+}) {
+	const d = props.development;
+	return (
+		<Show when={d.scripts().length}>
+			<div class="toolbar-group">
+				<Show when={d.scripts().length > 1}>
+					<select
+						aria-label="Run script"
+						value={d.script()}
+						disabled={d.running()}
+						onChange={(event) =>
+							d.setScript(event.currentTarget.value)
+						}
+					>
+						<For each={d.scripts()}>
+							{(name) => <option>{name}</option>}
+						</For>
+					</select>
+				</Show>
+				<ActionButton
+					icon={RunIcon}
+					label="Run project"
+					disabled={d.running()}
+					onClick={() => void d.run()}
+				/>
+				<Show when={d.running()}>
+					<ActionButton
+						icon={StopIcon}
+						label="Stop task"
+						onClick={d.stopTask}
+					/>
+				</Show>
+			</div>
+		</Show>
+	);
+}

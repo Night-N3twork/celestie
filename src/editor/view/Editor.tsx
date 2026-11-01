@@ -9,6 +9,7 @@ import {
 	onMount,
 	Show,
 } from "solid-js";
+import type { LanguageDocument } from "../../language/protocol";
 import type { EditorSettings } from "../../settings/editorSettings";
 import { lexicalBrackets } from "../core/actions";
 import type { EditorSession } from "../core/editor";
@@ -47,6 +48,7 @@ const scrollPositions = new WeakMap<
 
 export default function Editor(props: {
 	session: EditorSession;
+	language?: LanguageDocument;
 	revision: number;
 	settings: EditorSettings;
 	readOnly: boolean;
@@ -69,6 +71,15 @@ export default function Editor(props: {
 		props.revision;
 		return new FoldProjection(props.session.snapshot.text, folds());
 	});
+	const syntaxTokens = createMemo(() =>
+		props.language?.text === props.session.snapshot.text
+			? props.language.tokens.map((token) => ({
+					...token,
+					from: projection().toView(token.from),
+					to: projection().toView(token.to),
+				}))
+			: [],
+	);
 	const sourceLines = createMemo(() => {
 		props.revision;
 		return folds().length
@@ -577,6 +588,7 @@ export default function Editor(props: {
 				</span>
 				<Show when={!props.settings.wordWrap}>
 					<Viewport
+						tokens={syntaxTokens()}
 						lines={lines().index}
 						selection={selected()}
 						secondary={extraSelections().map((selection) => ({

@@ -1,4 +1,5 @@
 import { createMemo, For, Show } from "solid-js";
+import type { SyntaxToken } from "../../language/protocol";
 import type { Selection } from "../core/selection";
 import type { LineIndex } from "./lineIndex";
 
@@ -7,6 +8,7 @@ const overscan = 8;
 
 export default function Viewport(props: {
 	lines: LineIndex;
+	tokens?: SyntaxToken[];
 	selection: Selection;
 	secondary: readonly Selection[];
 	scrollTop: number;
@@ -53,6 +55,21 @@ export default function Viewport(props: {
 			),
 		);
 		const caret = props.selection.head - start;
+		const allTokens = props.tokens ?? [];
+		let low = 0,
+			high = allTokens.length;
+		while (low < high) {
+			const middle = (low + high) >>> 1;
+			if (allTokens[middle].to <= start) low = middle + 1;
+			else high = middle;
+		}
+		const tokens: SyntaxToken[] = [];
+		for (
+			let i = low;
+			i < allTokens.length && allTokens[i].from < start + text.length;
+			i++
+		)
+			if (allTokens[i].to > allTokens[i].from) tokens.push(allTokens[i]);
 		const extra = props.secondary.flatMap((selection) => [
 			Math.max(0, Math.min(text.length, selection.anchor - start)),
 			Math.max(0, Math.min(text.length, selection.head - start)),
@@ -65,10 +82,18 @@ export default function Viewport(props: {
 				to,
 				...(caret >= 0 && caret <= text.length ? [caret] : []),
 				...extra,
+				...tokens.flatMap((token) => [
+					Math.max(0, token.from - start),
+					Math.min(text.length, token.to - start),
+				]),
 			]),
 		].sort((a, b) => a - b);
 		return cuts.map((offset, index) => ({
 			offset,
+			kind: tokens.find(
+				(token) =>
+					token.from <= start + offset && token.to > start + offset,
+			)?.kind,
 			text: text.slice(offset, cuts[index + 1] ?? text.length),
 			selected:
 				(offset >= from && offset < to) ||
@@ -125,6 +150,11 @@ export default function Viewport(props: {
 										<span class="virtual-caret" />
 									</Show>
 									<span
+										class={
+											piece.kind
+												? `syntax-${piece.kind.replaceAll(" ", "-")}`
+												: undefined
+										}
 										classList={{
 											"virtual-selected": piece.selected,
 										}}

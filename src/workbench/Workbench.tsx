@@ -1,38 +1,39 @@
-import { Show } from "solid-js";
-import ActivityRail from "./ActivityRail";
+import { createDevelopmentController } from "../development/createDevelopmentController";
+import DevelopmentPanel from "../development/DevelopmentPanel";
+import RunControls from "../development/RunControls";
 import { createWorkbenchBindings } from "./createWorkbenchBindings";
 import { createWorkbenchController } from "./createWorkbenchController";
 import DocumentAlerts from "./DocumentAlerts";
-import EditorGroups from "./EditorGroups";
-import EditorTabs from "./EditorTabs";
-import ExplorerPanel from "./ExplorerPanel";
 import FindReplace from "./FindReplace";
 import Navigator from "./Navigator";
 import WorkbenchHeader from "./WorkbenchHeader";
 import WorkbenchStatus from "./WorkbenchStatus";
 import WorkbenchToolbar from "./WorkbenchToolbar";
+import WorkspaceBody from "./WorkspaceBody";
 import WorkspaceSearch from "./WorkspaceSearch";
 export default function Workbench() {
 	const controller = createWorkbenchController();
 	const bindings = createWorkbenchBindings(controller);
+	const development = createDevelopmentController(controller);
 	return (
 		<section {...bindings.section}>
 			<WorkbenchHeader {...bindings.workbenchHeader} />
-			<WorkbenchToolbar {...bindings.workbenchToolbar} />
+			<WorkbenchToolbar {...bindings.workbenchToolbar}>
+				<RunControls development={development} />
+			</WorkbenchToolbar>
 			<Navigator {...bindings.navigator} />
 			<FindReplace {...bindings.findReplace} />
 			<WorkspaceSearch {...bindings.workspaceSearch} />
 			<DocumentAlerts {...bindings.documentAlerts} />
-			<div class="workspace-body">
-				<ActivityRail {...bindings.activityRail} />
-				<Show when={controller.sidebarOpen()}>
-					<ExplorerPanel {...bindings.explorerPanel} />
-				</Show>
-				<div class="workspace-editor editor-area">
-					<EditorTabs {...bindings.editorTabs} />
-					<EditorGroups {...bindings.editorGroups} />
-				</div>
-			</div>
+			<WorkspaceBody
+				controller={controller}
+				development={development}
+				bindings={bindings}
+			/>
+			<DevelopmentPanel
+				controller={controller}
+				development={development}
+			/>
 			<WorkbenchStatus {...bindings.workbenchStatus} />
 		</section>
 	);

@@ -1,10 +1,10 @@
-/* Own workbench state, file operations, recovery, and persistence. */
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { CommandRegistry } from "../commands/registry";
 import type { EditorSession } from "../editor/core/editor";
 import { replaceMatches, type SearchMatch } from "../editor/core/search";
 import type { EditorControl } from "../editor/view/Editor";
-import { BrowserFileHost } from "../platform/browser/fileHost";
+import { createLanguageService } from "../language/service";
+import { WorkspaceFileHost } from "../platform/dusk/workspaceFileHost";
 import type { ExplorerEntry, TextFile } from "../platform/host";
 import { defaultEditorSettings } from "../settings/editorSettings";
 import { WorkspaceLayout } from "../workspace/layout";
@@ -21,7 +21,7 @@ const legacyDraftKey = "celestie.draft.v1";
 const explorerKey = "celestie.explorer.v1";
 
 export function createWorkbenchController() {
-	const host = new BrowserFileHost();
+	const host = new WorkspaceFileHost();
 	const commands = new CommandRegistry();
 	const editorControls = new Map<EditorSession, EditorControl>();
 	const history = new NavigationHistory();
@@ -550,7 +550,17 @@ export function createWorkbenchController() {
 		});
 	});
 
+	const language = createLanguageService({
+		host,
+		roots: () =>
+			folders()
+				.filter((root) => root.accessible)
+				.map((root) => root.entry),
+		documents,
+		revision,
+	});
 	const controller = {
+		language,
 		commands,
 		openSearch,
 		setSearchOpen,

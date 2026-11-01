@@ -1,4 +1,4 @@
-import type { Accessor, Setter } from "solid-js";
+import type { Accessor, JSX, Setter } from "solid-js";
 import FileIcon from "../icons/files/file.svg";
 import NewFileIcon from "../icons/files/new-file.svg";
 import SplitIcon from "../icons/navigation/expand-all.svg";
@@ -12,6 +12,7 @@ import ActionButton from "./ActionButton";
 import ViewMenu from "./ViewMenu";
 
 interface Props {
+	children?: JSX.Element;
 	busy: Accessor<boolean>;
 	file: Accessor<WorkspaceDocument | undefined>;
 	run: (id: string) => Promise<unknown>;
@@ -90,6 +91,7 @@ export default function WorkbenchToolbar(props: Props) {
 					onClick={() => void run("search.replace")}
 				/>
 			</div>
+			{props.children}
 			<div class="toolbar-spacer" />
 			<ActionButton
 				label="Split editor"

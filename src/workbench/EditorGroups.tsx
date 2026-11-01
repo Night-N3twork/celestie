@@ -4,12 +4,14 @@ import type { EditorSession } from "../editor/core/editor";
 import Editor, { type EditorControl } from "../editor/view/Editor";
 import CloseIcon from "../icons/actions/close.svg";
 import FileIcon from "../icons/files/file.svg";
+import type { LanguageDocument } from "../language/protocol";
 import type { EditorSettings } from "../settings/editorSettings";
 import type { EditorGroup, WorkspaceLayout } from "../workspace/layout";
 import type { Workspace } from "../workspace/workspace";
 import type { WorkspaceDocument } from "../workspace/workspaceDocument";
 
 interface Props {
+	language: Accessor<Map<string, LanguageDocument>>;
 	splitDirection: Accessor<"row" | "column">;
 	groups: Accessor<EditorGroup[]>;
 	activeGroup: Accessor<string>;
@@ -112,6 +114,7 @@ export default function EditorGroups(props: Props) {
 						>
 							{(document) => (
 								<Editor
+									language={props.language().get(document.id)}
 									onReady={(control) => {
 										if (control)
 											editorControls.set(

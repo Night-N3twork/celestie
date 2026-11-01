@@ -15,27 +15,21 @@ import type WorkspaceSearch from "./WorkspaceSearch";
 export function createWorkbenchBindings(controller: WorkbenchController) {
 	return {
 		section: {
-			get class() {
-				return "workbench";
-			},
-			get "aria-label"() {
-				return "Editor workbench";
-			},
-			get onPointerDown() {
-				return (
-					event: PointerEvent & { currentTarget: HTMLElement },
-				) => {
-					const target = event.target as Element;
-					for (const menu of event.currentTarget.querySelectorAll<HTMLDetailsElement>(
-						"details.view-menu[open],details.entry-menu[open]",
-					))
-						if (!menu.contains(target)) menu.open = false;
-					if (
-						controller.navigationMode() &&
-						!target.closest(".navigation-palette")
-					)
-						controller.setNavigationMode(undefined);
-				};
+			class: "workbench",
+			"aria-label": "Editor workbench",
+			onPointerDown: (
+				event: PointerEvent & { currentTarget: HTMLElement },
+			) => {
+				const target = event.target as Element;
+				for (const menu of event.currentTarget.querySelectorAll<HTMLDetailsElement>(
+					"details.view-menu[open],details.entry-menu[open]",
+				))
+					if (!menu.contains(target)) menu.open = false;
+				if (
+					controller.navigationMode() &&
+					!target.closest(".navigation-palette")
+				)
+					controller.setNavigationMode(undefined);
 			},
 		} satisfies JSX.HTMLAttributes<HTMLElement>,
 		workbenchHeader: {
@@ -47,12 +41,8 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 			file: controller.file,
 			run: controller.run,
 			activeGroup: controller.activeGroup,
-			get workspace() {
-				return () => controller.workspace();
-			},
-			get layout() {
-				return () => controller.layout();
-			},
+			workspace: controller.workspace,
+			layout: controller.layout,
 			changed: controller.changed,
 			groups: controller.groups,
 			settings: controller.settings,
@@ -73,21 +63,15 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 					.map((root) => root.entry);
 			},
 			commands: controller.commands,
-			get text() {
-				return () => controller.file()?.editor.snapshot.text ?? "";
-			},
+			text: () => controller.file()?.editor.snapshot.text ?? "",
 			documents: controller.documents,
-			get onFile() {
-				return (id: string) =>
-					controller.perform(() => controller.navigateFile(id));
-			},
+			onFile: (id: string) =>
+				controller.perform(() => controller.navigateFile(id)),
 			onLocation: controller.navigateOffset,
 			onCommand: controller.run,
-			get onClose() {
-				return () => {
-					controller.setNavigationMode(undefined);
-					controller.setEditorFocus((value) => value + 1);
-				};
+			onClose: () => {
+				controller.setNavigationMode(undefined);
+				controller.setEditorFocus((value) => value + 1);
 			},
 		} satisfies ComponentProps<typeof Navigator>,
 		findReplace: {
@@ -112,23 +96,17 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 			get disabled() {
 				return controller.busy();
 			},
-			get onReady() {
-				return (control: FindReplaceControl) => {
-					controller.setSearchControl(control);
-				};
+			onReady: (control: FindReplaceControl) => {
+				controller.setSearchControl(control);
 			},
-			get onUpdate() {
-				return () => {
-					controller.setRevealRequest((value) => value + 1);
-					controller.setSelectionRevision((value) => value + 1);
-					controller.changed();
-				};
+			onUpdate: () => {
+				controller.setRevealRequest((value) => value + 1);
+				controller.setSelectionRevision((value) => value + 1);
+				controller.changed();
 			},
-			get onClose() {
-				return () => {
-					controller.setSearchOpen(false);
-					controller.setEditorFocus((value) => value + 1);
-				};
+			onClose: () => {
+				controller.setSearchOpen(false);
+				controller.setEditorFocus((value) => value + 1);
 			},
 		} satisfies ComponentProps<typeof FindReplace>,
 		workspaceSearch: {
@@ -148,22 +126,18 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 			get busy() {
 				return controller.busy();
 			},
-			get buffers() {
-				return () =>
-					new Map(
-						controller
-							.workspace()
-							.documents.map((document) => [
-								document.id,
-								document.editor.snapshot.text,
-							]),
-					);
-			},
+			buffers: () =>
+				new Map(
+					controller
+						.workspace()
+						.documents.map((document) => [
+							document.id,
+							document.editor.snapshot.text,
+						]),
+				),
 			onOpen: controller.openSearchResult,
 			onApply: controller.applySearchResult,
-			get onClose() {
-				return () => controller.setWorkspaceSearchOpen(false);
-			},
+			onClose: () => controller.setWorkspaceSearchOpen(false),
 		} satisfies ComponentProps<typeof WorkspaceSearch>,
 		documentAlerts: {
 			file: controller.file,
@@ -178,7 +152,14 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 			workspaceSearchOpen: controller.workspaceSearchOpen,
 			setWorkspaceSearchOpen: controller.setWorkspaceSearchOpen,
 			setWorkspaceSearchFocus: controller.setWorkspaceSearchFocus,
-		} satisfies ComponentProps<typeof ActivityRail>,
+		} satisfies Pick<
+			ComponentProps<typeof ActivityRail>,
+			| "sidebarOpen"
+			| "setSidebarOpen"
+			| "workspaceSearchOpen"
+			| "setWorkspaceSearchOpen"
+			| "setWorkspaceSearchFocus"
+		>,
 		explorerPanel: {
 			busy: controller.busy,
 			folders: controller.folders,
@@ -199,27 +180,22 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 			documents: controller.documents,
 			file: controller.file,
 			busy: controller.busy,
-			get workspace() {
-				return () => controller.workspace();
-			},
+			workspace: controller.workspace,
 			changed: controller.changed,
 			documentName: controller.documentName,
 			documentDirty: controller.documentDirty,
 			close: controller.close,
 		} satisfies ComponentProps<typeof EditorTabs>,
 		editorGroups: {
+			language: controller.language.results,
 			splitDirection: controller.splitDirection,
 			groups: controller.groups,
 			activeGroup: controller.activeGroup,
-			get layout() {
-				return () => controller.layout();
-			},
+			layout: controller.layout,
 			focusGroup: controller.focusGroup,
 			setEditorFocus: controller.setEditorFocus,
 			groupDocument: controller.groupDocument,
-			get workspace() {
-				return () => controller.workspace();
-			},
+			workspace: controller.workspace,
 			changed: controller.changed,
 			editorControls: controller.editorControls,
 			revision: controller.revision,

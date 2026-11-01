@@ -1,4 +1,9 @@
 $light: (
+	syntax-keyword: #7837a3,
+	syntax-string: #276e32,
+	syntax-number: #a34a0a,
+	syntax-comment: #69736b,
+	syntax-type: #165e8a,
 	background: #f7f5fa,
 	surface: #ffffff,
 	surface-raised: #eeebf3,
@@ -14,6 +19,11 @@ $light: (
 );
 
 $dark: (
+	syntax-keyword: #d69aff,
+	syntax-string: #9fcb98,
+	syntax-number: #edb67b,
+	syntax-comment: #8d9c8b,
+	syntax-type: #86cce3,
 	background: #08080a,
 	surface: #101014,
 	surface-raised: #141419,
