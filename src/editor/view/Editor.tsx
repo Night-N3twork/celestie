@@ -34,10 +34,13 @@ export default function Editor(props: {
 	readOnly: boolean;
 	onChange: () => void;
 	onSelectionChange: () => void;
+	revealRequest: number;
+	focusRequest: number;
 }) {
 	let input!: HTMLTextAreaElement;
 	let restoredScroll = false;
 	let renderedVersion = -1;
+	let lastRevealRequest = props.revealRequest;
 	let allowTabExit = false;
 	const helpId = createUniqueId();
 	const [renderText, setRenderText] = createSignal(
@@ -166,7 +169,7 @@ export default function Editor(props: {
 	};
 	createEffect(
 		on(
-			() => [props.session, props.revision],
+			() => [props.session, props.revision, props.revealRequest],
 			() => {
 				if (composing()) return;
 				const text = props.session.snapshot.text;
@@ -190,7 +193,9 @@ export default function Editor(props: {
 					input.scrollLeft = saved.left;
 				}
 				restoredScroll = true;
-				if (edited) revealSelection();
+				if (edited || lastRevealRequest !== props.revealRequest)
+					revealSelection();
+				lastRevealRequest = props.revealRequest;
 				savePosition();
 			},
 		),
@@ -216,6 +221,13 @@ export default function Editor(props: {
 		on(
 			() => props.settings.fontSize,
 			() => measure(),
+		),
+	);
+	createEffect(
+		on(
+			() => props.focusRequest,
+			() => input.focus({ preventScroll: true }),
+			{ defer: true },
 		),
 	);
 	return (

@@ -8,6 +8,7 @@ import type { ExplorerEntry, TextFile } from "../platform/host";
 import { defaultEditorSettings } from "../settings/editorSettings";
 import { Workspace } from "../workspace/workspace";
 import Explorer from "./Explorer";
+import FindReplace, { type FindReplaceControl } from "./FindReplace";
 
 const workspaceKey = "celestie.workspace.v1";
 const legacyDraftKey = "celestie.draft.v1";
@@ -21,6 +22,13 @@ export default function Workbench() {
 	const [settings, setSettings] = createSignal(defaultEditorSettings);
 	const [message, setMessage] = createSignal("");
 	const [busy, setBusy] = createSignal(false);
+	const [searchOpen, setSearchOpen] = createSignal(false);
+	const [replaceOpen, setReplaceOpen] = createSignal(false);
+	const [searchFocus, setSearchFocus] = createSignal(0);
+	const [editorFocus, setEditorFocus] = createSignal(0);
+	const [revealRequest, setRevealRequest] = createSignal(0);
+	const [selectionRevision, setSelectionRevision] = createSignal(0);
+	let searchControl: FindReplaceControl | undefined;
 	const [folder, setFolder] = createSignal<ExplorerEntry>();
 	const [folderAccessible, setFolderAccessible] = createSignal(true);
 	const [expandedDirectories, setExpandedDirectories] = createSignal(
@@ -69,6 +77,34 @@ export default function Workbench() {
 		setRevision((value) => value + 1);
 		persist();
 	};
+	const openSearch = (replace: boolean) => {
+		setReplaceOpen(replace);
+		setSearchOpen(true);
+		setSearchFocus((value) => value + 1);
+	};
+	commands.register({
+		id: "search.find",
+		title: "Find",
+		execute: () => openSearch(false),
+	});
+	commands.register({
+		id: "search.replace",
+		title: "Find and replace",
+		execute: () => openSearch(true),
+	});
+	for (const backwards of [false, true])
+		commands.register({
+			id: backwards ? "search.previous" : "search.next",
+			title: backwards ? "Previous match" : "Next match",
+			execute: () => {
+				if (!searchControl?.hasQuery()) {
+					openSearch(false);
+					return;
+				}
+				setSearchOpen(true);
+				searchControl.next(backwards);
+			},
+		});
 	const open = (file: TextFile) => {
 		host.remember(file);
 		workspace.open(file);
@@ -175,7 +211,18 @@ export default function Workbench() {
 			setBusy(false);
 		}
 	};
-	const run = (id: string) => perform(() => commands.execute(id));
+	const run = (id: string) => {
+		if (!id.startsWith("search."))
+			return perform(() => commands.execute(id));
+		if (busy()) return Promise.resolve();
+		return commands
+			.execute(id)
+			.catch((error) =>
+				setMessage(
+					error instanceof Error ? error.message : String(error),
+				),
+			);
+	};
 	const openEntry = (entry: ExplorerEntry) =>
 		void perform(async () => {
 			if (
@@ -237,6 +284,11 @@ export default function Workbench() {
 			}
 		};
 		const keydown = (event: KeyboardEvent) => {
+			if (!event.isComposing && event.key === "F3") {
+				event.preventDefault();
+				void run(event.shiftKey ? "search.previous" : "search.next");
+				return;
+			}
 			if (
 				event.isComposing ||
 				!(event.ctrlKey || event.metaKey) ||
@@ -244,6 +296,11 @@ export default function Workbench() {
 			)
 				return;
 			const key = event.key.toLowerCase();
+			if (key === "f" || key === "h") {
+				event.preventDefault();
+				void run(key === "h" ? "search.replace" : "search.find");
+				return;
+			}
 			const target = event.target;
 			if (
 				(key === "z" || key === "y") &&
@@ -355,6 +412,20 @@ export default function Workbench() {
 					Redo
 				</button>
 
+				<button
+					type="button"
+					disabled={busy() || !file()}
+					onClick={() => void run("search.find")}
+				>
+					Find
+				</button>
+				<button
+					type="button"
+					disabled={busy() || !file()}
+					onClick={() => void run("search.replace")}
+				>
+					Find and replace
+				</button>
 				<label>
 					Font{" "}
 					<input
@@ -416,6 +487,27 @@ export default function Workbench() {
 					Line numbers
 				</label>
 			</nav>
+			<FindReplace
+				session={file()?.editor}
+				revision={revision()}
+				selectionRevision={selectionRevision()}
+				visible={searchOpen()}
+				showReplace={replaceOpen()}
+				focusRequest={searchFocus()}
+				disabled={busy()}
+				onReady={(control) => {
+					searchControl = control;
+				}}
+				onUpdate={() => {
+					setRevealRequest((value) => value + 1);
+					setSelectionRevision((value) => value + 1);
+					changed();
+				}}
+				onClose={() => {
+					setSearchOpen(false);
+					setEditorFocus((value) => value + 1);
+				}}
+			/>
 			<div class="workspace-body">
 				<Show when={folder()} keyed>
 					{(root) => (
@@ -528,7 +620,12 @@ export default function Workbench() {
 								settings={settings()}
 								readOnly={busy()}
 								onChange={changed}
-								onSelectionChange={persist}
+								onSelectionChange={() => {
+									setSelectionRevision((value) => value + 1);
+									persist();
+								}}
+								revealRequest={revealRequest()}
+								focusRequest={editorFocus()}
 							/>
 						)}
 					</Show>
