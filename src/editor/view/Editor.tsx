@@ -24,6 +24,7 @@ import {
 } from "./folding";
 
 export interface EditorControl {
+	offsetAtPoint(x: number, y: number): number | undefined;
 	selectNext(): void;
 	selectAll(): void;
 	clearCursors(): void;
@@ -33,6 +34,7 @@ export interface EditorControl {
 
 import { indentSelection } from "./indentation";
 import { LineIndex } from "./lineIndex";
+import { pointerPosition } from "./pointerPosition";
 import {
 	displayOffset,
 	displayText,
@@ -47,6 +49,7 @@ const scrollPositions = new WeakMap<
 >();
 
 export default function Editor(props: {
+	documentId: string;
 	session: EditorSession;
 	language?: LanguageDocument;
 	revision: number;
@@ -65,6 +68,7 @@ export default function Editor(props: {
 	let allowTabExit = false;
 	let keepExtraVersion = -1;
 	let pointerSelection: Selection | undefined;
+	let selectionFrame: number | undefined;
 	let lastSource = props.session.snapshot.text;
 	const [folds, setFolds] = createSignal<FoldRange[]>([]);
 	const projection = createMemo(() => {
@@ -159,6 +163,22 @@ export default function Editor(props: {
 				props.onSelectionChange();
 			}
 		}
+	};
+	const paintDragSelection = () => {
+		const current = selection(),
+			previous = selected();
+		if (
+			current.anchor !== previous.anchor ||
+			current.head !== previous.head
+		)
+			setSelected(current);
+		selectionFrame = requestAnimationFrame(paintDragSelection);
+	};
+	const stopDragSelection = () => {
+		if (selectionFrame === undefined) return;
+		cancelAnimationFrame(selectionFrame);
+		selectionFrame = undefined;
+		syncSelection();
 	};
 	const savePosition = () => {
 		const position = { top: input.scrollTop, left: input.scrollLeft };
@@ -449,6 +469,14 @@ export default function Editor(props: {
 			input.focus({ preventScroll: true });
 		};
 		props.onReady({
+			offsetAtPoint: (x, y) => {
+				const offset = pointerPosition(input, x, y);
+				return offset === undefined
+					? undefined
+					: projection().toDocument(
+							documentOffset(projection().text, offset),
+						);
+			},
 			selectNext: () => chooseOccurrences(false),
 			selectAll: () => chooseOccurrences(true),
 			clearCursors: () => setExtraSelections([]),
@@ -495,6 +523,9 @@ export default function Editor(props: {
 			},
 		});
 		const observer = new ResizeObserver(measure);
+		window.addEventListener("pointerup", stopDragSelection);
+		window.addEventListener("pointercancel", stopDragSelection);
+		window.addEventListener("blur", stopDragSelection);
 		observer.observe(input);
 		measure();
 		let disposed = false;
@@ -502,6 +533,11 @@ export default function Editor(props: {
 			if (!disposed) measure();
 		});
 		onCleanup(() => {
+			if (selectionFrame !== undefined)
+				cancelAnimationFrame(selectionFrame);
+			window.removeEventListener("pointerup", stopDragSelection);
+			window.removeEventListener("pointercancel", stopDragSelection);
+			window.removeEventListener("blur", stopDragSelection);
 			props.onReady(undefined);
 			disposed = true;
 			observer.disconnect();
@@ -613,6 +649,7 @@ export default function Editor(props: {
 				<textarea
 					ref={input}
 					class="editor-input"
+					data-document-id={props.documentId}
 					classList={{
 						composing: composing() || props.settings.wordWrap,
 					}}
@@ -766,6 +803,12 @@ export default function Editor(props: {
 							]);
 					}}
 					onPointerDown={(event) => {
+						if (event.button === 0) {
+							if (selectionFrame !== undefined)
+								cancelAnimationFrame(selectionFrame);
+							selectionFrame =
+								requestAnimationFrame(paintDragSelection);
+						}
 						props.session.breakUndoGroup();
 						pointerSelection = { ...props.session.selection };
 						if (!event.altKey) setExtraSelections([]);

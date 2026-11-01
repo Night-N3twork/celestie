@@ -8,7 +8,8 @@ type Services = Pick<
 	| "commands"
 	| "openSearch"
 	| "searchControl"
-	| "setSearchOpen"
+	| "revealSearch"
+	| "openWorkspaceSearch"
 	| "newFile"
 	| "host"
 	| "open"
@@ -36,7 +37,8 @@ export function registerWorkbenchCommands(services: Services): void {
 		commands,
 		openSearch,
 		searchControl,
-		setSearchOpen,
+		revealSearch,
+		openWorkspaceSearch,
 		newFile,
 		host,
 		open,
@@ -61,13 +63,23 @@ export function registerWorkbenchCommands(services: Services): void {
 	} = services;
 	commands.register({
 		id: "search.find",
-		title: "Find",
+		title: "Search current file",
 		execute: () => openSearch(false),
 	});
 	commands.register({
 		id: "search.replace",
-		title: "Find and replace",
+		title: "Replace in current file",
 		execute: () => openSearch(true),
+	});
+	commands.register({
+		id: "search.workspace",
+		title: "Search workspace",
+		execute: () => openWorkspaceSearch(false),
+	});
+	commands.register({
+		id: "search.workspaceReplace",
+		title: "Replace in workspace",
+		execute: () => openWorkspaceSearch(true),
 	});
 	for (const backwards of [false, true])
 		commands.register({
@@ -78,7 +90,7 @@ export function registerWorkbenchCommands(services: Services): void {
 					openSearch(false);
 					return;
 				}
-				setSearchOpen(true);
+				revealSearch();
 				searchControl()?.next(backwards);
 			},
 		});

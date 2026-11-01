@@ -1,0 +1,120 @@
+.source-control { overflow-y: auto; }
+.git-panel { min-width: 0; }
+.git-panel-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 8px 6px 12px;
+	font-size: 11px;
+	color: var(--muted);
+}
+.git-notice { padding: 10px 12px; }
+.git-notice { font-size: 11px; overflow-wrap: anywhere; }
+.git-commit-form {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 4px 12px 12px;
+}
+.git-commit-form > input,
+.git-author input { width: 100%; }
+.git-author {
+	color: var(--muted);
+	font-size: 11px;
+	order: 3;
+}
+.git-author > summary { padding: 4px 0; }
+.git-author > label {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 4px;
+	margin-top: 8px;
+}
+.git-change-group { border-top: 1px solid var(--border); }
+.git-change-group > summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 7px 12px;
+	font-size: 11px;
+	font-weight: 600;
+}
+.git-count {
+	min-width: 20px;
+	padding: 0 5px;
+	border-radius: 8px;
+	text-align: center;
+	font-size: 10px;
+	background: var(--surface-raised);
+	color: var(--muted);
+}
+.git-change-group ul { list-style: none; padding: 0 4px 6px; }
+.git-change {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	height: 28px;
+	padding-right: 3px;
+	border-radius: 4px;
+}
+.git-change:hover,
+.git-change:focus-within { background: var(--surface-raised); }
+.workbench .git-file {
+	flex: 1;
+	min-width: 0;
+	justify-content: flex-start;
+	gap: 5px;
+	padding: 0 4px;
+	font-size: 11px;
+}
+.git-file-name,
+.git-file-directory {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.git-file-directory { flex: 1; color: var(--muted); }
+.git-change-status {
+	width: 12px;
+	flex-shrink: 0;
+	text-align: center;
+	font:
+		10px "JetBrains Mono Variable",
+		monospace;
+	color: var(--warning);
+}
+.git-change-status:is([data-status="A"], [data-status="?"]) { color: var(--success); }
+.git-change-status[data-status="D"] { color: var(--danger); }
+.git-file-actions { display: flex; opacity: 0; }
+.git-change:hover .git-file-actions,
+.git-change:focus-within .git-file-actions { opacity: 1; }
+.workbench .git-file-actions .icon-button {
+	width: 22px;
+	min-width: 22px;
+	min-height: 24px;
+}
+.source-control > p { padding: 10px 12px; }
+.git-author > summary { color: var(--muted); font-size: 11px; }
+.git-panel-actions {
+	min-height: 30px;
+	padding-top: 2px;
+	font-weight: 600;
+}
+.git-change-group > summary {
+	justify-content: flex-start;
+	gap: 6px;
+	background: var(--surface);
+}
+.git-change-group > summary .git-count { margin-left: auto; }
+.workbench .git-file { font-size: 12px; }
+.git-commit-form > button { min-height: 28px; }
+
+.git-author > summary {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.git-author[open] > summary svg,
+.git-change-group[open] > summary svg { transform: rotate(90deg); }

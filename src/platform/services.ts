@@ -1,3 +1,4 @@
+import type { LanguageHost } from "../language/lsp";
 import type { ExplorerEntry, FileHost, TextFile } from "./host";
 
 export interface FileChange {
@@ -67,6 +68,7 @@ export interface TerminalHost {
 	}): Promise<TerminalSession>;
 }
 export interface Platform {
+	languages?: LanguageHost;
 	kind: "browser" | "desktop";
 	files: WorkspaceHost;
 	processes?: ProcessHost;

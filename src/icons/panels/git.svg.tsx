@@ -1,8 +1,10 @@
 import { points, type SVGProps } from "@icons/icons";
 import Svg, { Box } from "@icons/Svg";
+import { createUniqueId } from "solid-js";
 
 export default function GitIcon(props: SVGProps) {
 	const s = props.size;
+	const id = createUniqueId();
 	const scale = (value: number) => (value * s) / 64;
 	return (
 		<Svg title="Open Git" {...props}>
@@ -11,7 +13,7 @@ export default function GitIcon(props: SVGProps) {
 			<circle cx={scale(22)} cy={scale(22)} r={scale(4)} />
 			<circle cx={scale(22)} cy={scale(42)} r={scale(4)} />
 			<mask
-				id="arc"
+				id={id}
 				maskUnits="userSpaceOnUse"
 				x={0}
 				y={0}
@@ -43,7 +45,7 @@ export default function GitIcon(props: SVGProps) {
 				/>
 			</g>
 			<circle
-				mask="url(#arc)"
+				mask={`url(#${id})`}
 				cx={scale(36)}
 				cy={scale(30)}
 				r={scale(6)}

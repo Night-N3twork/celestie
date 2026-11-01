@@ -1,7 +1,8 @@
-import type { Accessor } from "solid-js";
+import { type Accessor, onCleanup, onMount, Show } from "solid-js";
 import MoreIcon from "../icons/actions/more.svg";
 import LogoIcon from "../icons/logo.svg";
 import SearchIcon from "../icons/panels/search.svg";
+import { synchronizeTitlebar } from "../platform/desktop/titlebar";
 import type { ExplorerEntry } from "../platform/host";
 import ActionButton from "./ActionButton";
 
@@ -11,29 +12,37 @@ interface Props {
 }
 
 export default function WorkbenchHeader(props: Props) {
+	let header!: HTMLElement;
+	onMount(() => onCleanup(synchronizeTitlebar(header)));
 	const { folder, run } = props;
 	return (
 		<header
+			ref={header}
 			class="workbench-header"
 			data-platform={window.celestie?.platform}
 		>
 			<div class="brand">
-				<LogoIcon size={28} aria-hidden="true" />
+				<LogoIcon size={24} aria-hidden="true" />
 				<span>celestie</span>
-				<span class="brand-divider" />
-				<span class="workspace-name">
-					{folder()?.name ?? "Workspace"}
-				</span>
+				<Show
+					when={
+						folder()?.name &&
+						folder()?.name.toLowerCase() !== "celestie"
+					}
+				>
+					<span class="brand-divider" />
+					<span class="workspace-name">{folder()?.name}</span>
+				</Show>
 			</div>
 			<button
 				type="button"
 				class="quick-open"
 				aria-label="Quick open"
-				title="Quick open (Ctrl+P)"
+				title="Go to file (Ctrl+P)"
 				onClick={() => void run("navigation.files")}
 			>
-				<SearchIcon size={24} nobox aria-hidden="true" />
-				<span>Search files…</span>
+				<SearchIcon size={18} nobox aria-hidden="true" />
+				<span>Go to file…</span>
 				<kbd>Ctrl P</kbd>
 			</button>
 			<ActionButton

@@ -66,7 +66,12 @@ export default function Explorer(props: {
 			>
 				<Show
 					when={props.entry.kind === "directory"}
-					fallback={<FileIcon size={20} nobox aria-hidden="true" />}
+					fallback={
+						<>
+							<span class="explorer-chevron-spacer" />
+							<FileIcon size={20} nobox aria-hidden="true" />
+						</>
+					}
 				>
 					<ChevronIcon
 						size={20}

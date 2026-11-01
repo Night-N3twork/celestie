@@ -1,11 +1,12 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
+import stripAnsi from "strip-ansi";
 import type { WorkbenchController } from "../workbench/createWorkbenchController";
 import { runPackageScript } from "./runTask";
 export function createDevelopmentController(c: WorkbenchController) {
 	const [tab, setTab] = createSignal<"terminal" | "output" | "problems">();
-	const [sidebarView, setSidebarView] = createSignal<"explorer" | "git">(
-		"explorer",
-	);
+	const [sidebarView, setSidebarView] = createSignal<
+		"explorer" | "git" | "run"
+	>("explorer");
 	const [terminalStarted, setTerminalStarted] = createSignal(false);
 	const [scripts, setScripts] = createSignal<string[]>([]);
 	const [script, setScript] = createSignal("");
@@ -60,11 +61,22 @@ export function createDevelopmentController(c: WorkbenchController) {
 		setTab("terminal");
 	};
 	const showSourceControl = () => {
+		c.setWorkspaceSearchOpen(false);
 		setSidebarView("git");
 		c.setSidebarOpen(true);
 	};
+	const showRunAndDebug = () => {
+		c.setWorkspaceSearchOpen(false);
+		setSidebarView("run");
+		c.setSidebarOpen(true);
+	};
 	const showExplorer = () => {
-		if (sidebarView() === "explorer") c.setSidebarOpen((value) => !value);
+		if (c.workspaceSearchOpen()) {
+			c.setWorkspaceSearchOpen(false);
+			setSidebarView("explorer");
+			c.setSidebarOpen(true);
+		} else if (sidebarView() === "explorer")
+			c.setSidebarOpen((value) => !value);
 		else {
 			setSidebarView("explorer");
 			c.setSidebarOpen(true);
@@ -216,8 +228,23 @@ export function createDevelopmentController(c: WorkbenchController) {
 			title: "Show Source Control",
 			execute: showSourceControl,
 		}),
+		c.commands.register({
+			id: "debug.show",
+			title: "Show Run and Debug",
+			execute: showRunAndDebug,
+		}),
 	];
 	const keydown = (event: KeyboardEvent) => {
+		if (
+			(event.ctrlKey || event.metaKey) &&
+			event.shiftKey &&
+			event.code === "KeyD" &&
+			!event.altKey &&
+			!event.isComposing
+		) {
+			event.preventDefault();
+			showRunAndDebug();
+		}
 		if (
 			(event.ctrlKey || event.metaKey) &&
 			event.code === "Backquote" &&
@@ -249,11 +276,13 @@ export function createDevelopmentController(c: WorkbenchController) {
 		script,
 		setScript,
 		running,
-		output,
+		output: () => stripAnsi(output()),
+		rawOutput: output,
 		error,
 		run,
 		showTerminal,
 		showSourceControl,
+		showRunAndDebug,
 		showExplorer,
 		stopTask: () => stopTask?.(),
 		workspaceFile: (runtimeId: string) => {

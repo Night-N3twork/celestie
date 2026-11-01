@@ -1,16 +1,15 @@
 import { createDevelopmentController } from "../development/createDevelopmentController";
 import DevelopmentPanel from "../development/DevelopmentPanel";
-import RunControls from "../development/RunControls";
 import { createWorkbenchBindings } from "./createWorkbenchBindings";
 import { createWorkbenchController } from "./createWorkbenchController";
 import DocumentAlerts from "./DocumentAlerts";
-import FindReplace from "./FindReplace";
+import LanguageTools from "./LanguageTools";
 import Navigator from "./Navigator";
+import ToolWindowBar from "./ToolWindowBar";
 import WorkbenchHeader from "./WorkbenchHeader";
 import WorkbenchStatus from "./WorkbenchStatus";
 import WorkbenchToolbar from "./WorkbenchToolbar";
 import WorkspaceBody from "./WorkspaceBody";
-import WorkspaceSearch from "./WorkspaceSearch";
 export default function Workbench() {
 	const controller = createWorkbenchController();
 	const bindings = createWorkbenchBindings(controller);
@@ -18,12 +17,9 @@ export default function Workbench() {
 	return (
 		<section {...bindings.section}>
 			<WorkbenchHeader {...bindings.workbenchHeader} />
-			<WorkbenchToolbar {...bindings.workbenchToolbar}>
-				<RunControls development={development} />
-			</WorkbenchToolbar>
+			<WorkbenchToolbar {...bindings.workbenchToolbar} />
 			<Navigator {...bindings.navigator} />
-			<FindReplace {...bindings.findReplace} />
-			<WorkspaceSearch {...bindings.workspaceSearch} />
+			<LanguageTools controller={controller} />
 			<DocumentAlerts {...bindings.documentAlerts} />
 			<WorkspaceBody
 				controller={controller}
@@ -33,6 +29,10 @@ export default function Workbench() {
 			<DevelopmentPanel
 				controller={controller}
 				development={development}
+			/>
+			<ToolWindowBar
+				development={development}
+				problems={controller.language.problems().length}
 			/>
 			<WorkbenchStatus {...bindings.workbenchStatus} />
 		</section>

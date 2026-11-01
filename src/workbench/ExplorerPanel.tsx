@@ -10,8 +10,10 @@ import type { ExplorerEntry } from "../platform/host";
 import type { WorkspaceHost } from "../platform/services";
 import ActionButton from "./ActionButton";
 import Explorer from "./Explorer";
+import ToolWindowHeader from "./ToolWindowHeader";
 
 interface Props {
+	onHide: () => void;
 	busy: Accessor<boolean>;
 	folders: Accessor<{ entry: ExplorerEntry; accessible: boolean }[]>;
 	manageEntry: (
@@ -49,8 +51,8 @@ export default function ExplorerPanel(props: Props) {
 	} = props;
 	return (
 		<aside class="file-explorer" aria-label="File explorer">
-			<header class="explorer-header">
-				<span>Explorer</span>
+			<ToolWindowHeader title="Project" onHide={props.onHide} />
+			<div class="tool-window-toolbar">
 				<div class="explorer-actions">
 					<ActionButton
 						label="Create file"
@@ -120,12 +122,7 @@ export default function ExplorerPanel(props: Props) {
 						</div>
 					</details>
 				</div>
-			</header>
-			<Show when={selectedEntry()}>
-				<p class="explorer-selection" title={selectedEntry()?.id}>
-					{selectedEntry()?.name}
-				</p>
-			</Show>
+			</div>
 			<Show when={!folders().length}>
 				<div class="explorer-empty">
 					<ExplorerIcon size={48} nobox aria-hidden="true" />

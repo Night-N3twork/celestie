@@ -1,18 +1,16 @@
-import type { Accessor, JSX, Setter } from "solid-js";
-import FileIcon from "../icons/files/file.svg";
-import NewFileIcon from "../icons/files/new-file.svg";
-import SplitIcon from "../icons/navigation/expand-all.svg";
-import ExplorerIcon from "../icons/panels/explorer.svg";
-import SearchIcon from "../icons/panels/search.svg";
+import type { Accessor, Setter } from "solid-js";
+import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import SplitIcon from "../icons/navigation/split-editor.svg";
 import type { EditorSettings } from "../settings/editorSettings";
 import type { EditorGroup, WorkspaceLayout } from "../workspace/layout";
 import type { Workspace } from "../workspace/workspace";
 import type { WorkspaceDocument } from "../workspace/workspaceDocument";
 import ActionButton from "./ActionButton";
-import ViewMenu from "./ViewMenu";
+import CommandMenu, { type MenuAction } from "./CommandMenu";
+import EditorSettingsDialog from "./EditorSettingsDialog";
 
 interface Props {
-	children?: JSX.Element;
+	commands: import("../commands/registry").CommandRegistry;
 	busy: Accessor<boolean>;
 	file: Accessor<WorkspaceDocument | undefined>;
 	run: (id: string) => Promise<unknown>;
@@ -26,91 +24,253 @@ interface Props {
 }
 
 export default function WorkbenchToolbar(props: Props) {
-	const {
-		busy,
-		file,
-		run,
-		activeGroup,
-		workspace,
-		layout,
-		changed,
-		groups,
-		settings,
-		setSettings,
-	} = props;
+	const [settingsOpen, setSettingsOpen] = createSignal(false);
+	const command = (
+		label: string,
+		id: string,
+		shortcut?: string,
+		needsFile = false,
+	): MenuAction => ({
+		label,
+		shortcut,
+		disabled: props.busy() || (needsFile && !props.file()),
+		action: () => void props.run(id),
+	});
+	onMount(() => {
+		const unregister = props.commands.register({
+			id: "settings.editor",
+			title: "Open editor settings",
+			execute: () => {
+				setSettingsOpen(true);
+			},
+		});
+		onCleanup(unregister);
+		const keydown = (event: KeyboardEvent) => {
+			if (
+				(event.ctrlKey || event.metaKey) &&
+				event.code === "Comma" &&
+				!event.isComposing
+			) {
+				event.preventDefault();
+				setSettingsOpen(true);
+			}
+		};
+		window.addEventListener("keydown", keydown);
+		onCleanup(() => window.removeEventListener("keydown", keydown));
+	});
 	return (
-		<nav class="editor-toolbar" aria-label="File and edit commands">
-			<div class="toolbar-group">
-				<ActionButton
-					label="New"
-					icon={NewFileIcon}
-					disabled={busy()}
-					onClick={() => void run("file.new")}
+		<>
+			<nav
+				class="editor-toolbar main-menu-bar"
+				aria-label="File and edit commands"
+			>
+				<CommandMenu
+					label="File"
+					groups={[
+						[
+							command("New file", "file.new", "Ctrl+N"),
+							command("Open file…", "file.open", "Ctrl+O"),
+							command(
+								"Open folder…",
+								"folder.open",
+								"Ctrl+Shift+O",
+							),
+						],
+						[
+							command("Save", "file.save", "Ctrl+S", true),
+							command("Save all", "file.saveAll", "Ctrl+Shift+S"),
+							command(
+								"Download copy",
+								"file.download",
+								undefined,
+								true,
+							),
+						],
+						[
+							{
+								label: "Settings…",
+								shortcut: "Ctrl+,",
+								action: () => setSettingsOpen(true),
+							},
+						],
+					]}
 				/>
-				<ActionButton
-					label="Open"
-					icon={FileIcon}
-					disabled={busy()}
-					onClick={() => void run("file.open")}
+				<CommandMenu
+					label="Edit"
+					groups={[
+						[
+							command("Undo", "edit.undo", "Ctrl+Z", true),
+							command("Redo", "edit.redo", "Ctrl+Shift+Z", true),
+						],
+						[
+							command("Find…", "search.find", "Ctrl+F"),
+							command("Replace…", "search.replace", "Ctrl+H"),
+							command(
+								"Find in files…",
+								"search.workspace",
+								"Ctrl+Shift+F",
+							),
+						],
+						[
+							command(
+								"Format document",
+								"editor.format",
+								"Shift+Alt+F",
+								true,
+							),
+						],
+					]}
 				/>
-				<ActionButton
-					label="Open folder"
-					icon={ExplorerIcon}
-					disabled={busy()}
-					onClick={() => void run("folder.open")}
+				<CommandMenu
+					label="View"
+					groups={[
+						[
+							command(
+								"Command palette…",
+								"navigation.commands",
+								"Ctrl+Shift+P",
+							),
+						],
+						[
+							command(
+								"Search",
+								"search.workspace",
+								"Ctrl+Shift+F",
+							),
+							command("Source control", "git.show"),
+							command(
+								"Run and Debug",
+								"debug.show",
+								"Ctrl+Shift+D",
+							),
+						],
+						[
+							command("Terminal", "terminal.toggle", "Ctrl+`"),
+							command("Problems", "problems.show"),
+						],
+						[
+							{
+								label: "Word wrap",
+								checked: props.settings().wordWrap,
+								action: () =>
+									props.setSettings({
+										...props.settings(),
+										wordWrap: !props.settings().wordWrap,
+									}),
+							},
+							{
+								label: "Line numbers",
+								checked: props.settings().lineNumbers,
+								action: () =>
+									props.setSettings({
+										...props.settings(),
+										lineNumbers:
+											!props.settings().lineNumbers,
+									}),
+							},
+						],
+					]}
 				/>
-				<ActionButton
-					label="Save"
-					primary
-					disabled={busy() || !file()}
-					onClick={() => void run("file.save")}
+				<CommandMenu
+					label="Go"
+					groups={[
+						[
+							command("Back", "navigation.back", "Alt+Left"),
+							command(
+								"Forward",
+								"navigation.forward",
+								"Alt+Right",
+							),
+						],
+						[
+							command(
+								"Go to file…",
+								"navigation.files",
+								"Ctrl+P",
+							),
+							command("Go to line…", "navigation.line", "Ctrl+G"),
+							command("Go to symbol…", "navigation.symbols"),
+						],
+						[
+							command(
+								"Go to matching bracket",
+								"editor.bracket",
+								undefined,
+								true,
+							),
+						],
+					]}
 				/>
-			</div>
-			<div class="toolbar-group">
-				<ActionButton
-					label="Undo"
-					disabled={busy()}
-					onClick={() => void run("edit.undo")}
+				<CommandMenu
+					label="Run"
+					groups={[
+						[
+							command("Run project script", "task.run"),
+							command(
+								"Run and Debug",
+								"debug.show",
+								"Ctrl+Shift+D",
+							),
+						],
+						[command("Open terminal", "terminal.toggle", "Ctrl+`")],
+					]}
 				/>
-				<ActionButton
-					label="Redo"
-					disabled={busy()}
-					onClick={() => void run("edit.redo")}
+				<CommandMenu
+					label="Window"
+					groups={[
+						[
+							command("Split editor", "layout.split"),
+							command(
+								"Change split orientation",
+								"layout.orientation",
+							),
+						],
+						[
+							command(
+								"Move tab left",
+								"layout.tabLeft",
+								undefined,
+								true,
+							),
+							command(
+								"Move tab right",
+								"layout.tabRight",
+								undefined,
+								true,
+							),
+						],
+						props
+							.groups()
+							.filter((group) => group.id !== props.activeGroup())
+							.map((group) => ({
+								label: `Move tab to group ${props.groups().indexOf(group) + 1}`,
+								disabled: !props.file(),
+								action: () => {
+									const doc = props.workspace().active;
+									if (doc) {
+										props.layout().move(doc.id, group.id);
+										props.changed();
+									}
+								},
+							})),
+					].filter((group) => group.length)}
 				/>
-			</div>
-			<div class="toolbar-group">
+				<div class="toolbar-spacer" />
 				<ActionButton
-					label="Find"
-					icon={SearchIcon}
-					disabled={busy() || !file()}
-					onClick={() => void run("search.find")}
+					label="Split editor"
+					icon={SplitIcon}
+					compact
+					disabled={props.busy()}
+					onClick={() => void props.run("layout.split")}
 				/>
-				<ActionButton
-					label="Find and replace"
-					disabled={busy() || !file()}
-					onClick={() => void run("search.replace")}
+			</nav>
+			<Show when={settingsOpen()}>
+				<EditorSettingsDialog
+					settings={props.settings}
+					setSettings={props.setSettings}
+					onClose={() => setSettingsOpen(false)}
 				/>
-			</div>
-			{props.children}
-			<div class="toolbar-spacer" />
-			<ActionButton
-				label="Split editor"
-				icon={SplitIcon}
-				compact
-				disabled={busy()}
-				onClick={() => void run("layout.split")}
-			/>
-			<ViewMenu
-				run={run}
-				activeGroup={activeGroup}
-				workspace={workspace}
-				layout={layout}
-				changed={changed}
-				groups={groups}
-				settings={settings}
-				setSettings={setSettings}
-				busy={busy}
-			/>
-		</nav>
+			</Show>
+		</>
 	);
 }

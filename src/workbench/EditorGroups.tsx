@@ -114,6 +114,7 @@ export default function EditorGroups(props: Props) {
 						>
 							{(document) => (
 								<Editor
+									documentId={document.id}
 									language={props.language().get(document.id)}
 									onReady={(control) => {
 										if (control)

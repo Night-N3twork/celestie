@@ -44,6 +44,7 @@ export async function runPackageScript(
 					HOME: "/home/user",
 					PATH: `${cwd}/node_modules/.bin:/bin`,
 					USER: "user",
+					FORCE_COLOR: "1",
 					INIT_CWD: cwd,
 					npm_lifecycle_event: step,
 					npm_lifecycle_script: command,

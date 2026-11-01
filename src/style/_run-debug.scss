@@ -1,0 +1,36 @@
+.run-debug { overflow: hidden; }
+.run-controls {
+	display: flex;
+	gap: 4px;
+	width: 100%;
+}
+.run-selector { flex: 1; min-width: 0; }
+.run-selector select { width: 100%; }
+.run-actions { display: flex; gap: 2px; }
+.workbench .run-session {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	width: 100%;
+	padding: 8px 12px;
+	border-radius: 0;
+	text-align: left;
+}
+.run-session > span:first-of-type { flex: 1; min-width: 0; }
+.run-session small {
+	display: block;
+	color: var(--muted);
+	font-size: 11px;
+}
+.workbench .run-output-link {
+	margin: 0 8px 8px;
+	color: var(--accent);
+	font-size: 12px;
+}
+.running-indicator {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--accent);
+	flex-shrink: 0;
+}

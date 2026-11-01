@@ -3,6 +3,7 @@ import type { SVGProps } from "../icons/icons";
 
 export default function ActionButton(props: {
 	label: string;
+	text?: string;
 	icon?: Component<SVGProps>;
 	onClick: JSX.EventHandlerUnion<HTMLButtonElement, MouseEvent>;
 	disabled?: boolean;
@@ -19,8 +20,8 @@ export default function ActionButton(props: {
 			disabled={props.disabled}
 			onClick={props.onClick}
 		>
-			{props.icon && <props.icon size={24} nobox aria-hidden="true" />}
-			{!props.compact && <span>{props.label}</span>}
+			{props.icon && <props.icon size={20} nobox aria-hidden="true" />}
+			{!props.compact && <span>{props.text ?? props.label}</span>}
 		</button>
 	);
 }

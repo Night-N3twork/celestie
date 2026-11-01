@@ -1,0 +1,175 @@
+.tool-window-header,
+.explorer-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	box-sizing: border-box;
+	height: 35px;
+	min-height: 35px;
+	padding: 0 8px 0 12px;
+	border-bottom: 1px solid var(--border);
+	background: var(--tool-header);
+	flex-shrink: 0;
+}
+.tool-window-title,
+.explorer-header > span {
+	color: var(--foreground);
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0;
+	text-transform: none;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+.tool-window-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+.tool-window-actions .icon-button {
+	width: 24px;
+	min-width: 24px;
+	min-height: 24px;
+}
+.tool-window-toolbar,
+.git-panel-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 35px;
+	box-sizing: border-box;
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--border);
+	background: var(--tool-toolbar);
+	flex-shrink: 0;
+}
+.tool-section { border-bottom: 1px solid var(--border); }
+.tool-section > summary,
+.git-change-group > summary {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 5px;
+	min-height: 28px;
+	box-sizing: border-box;
+	padding: 4px 8px;
+	color: var(--foreground);
+	background: var(--tool-section);
+	font-size: 12px;
+	font-weight: 600;
+	border-bottom: 1px solid transparent;
+}
+.tool-section[open] > summary { border-bottom-color: var(--border); }
+.tool-section[open] > summary > svg { transform: rotate(90deg); }
+.tool-section-content { min-width: 0; }
+.tool-window-scroll {
+	min-height: 0;
+	flex: 1;
+	overflow: auto;
+}
+.tool-empty {
+	padding: 14px 12px;
+	color: var(--muted);
+	font-size: 12px;
+	line-height: 1.6;
+}
+.tool-empty p { margin-bottom: 10px; }
+.workbench .tool-empty button { border-color: var(--border); }
+.tool-window-bar {
+	display: flex;
+	align-items: center;
+	height: 30px;
+	min-height: 30px;
+	gap: 2px;
+	padding: 0 6px;
+	border-top: 1px solid var(--border);
+	background: var(--tool-header);
+}
+.workbench .tool-window-bar button {
+	height: 29px;
+	min-height: 29px;
+	padding: 0 10px;
+	border-radius: 0;
+	font-size: 12px;
+	color: var(--muted);
+	border-top: 2px solid transparent;
+}
+.workbench .tool-window-bar button[aria-pressed="true"] {
+	border-top-color: var(--accent);
+	color: var(--foreground);
+	background: var(--surface);
+}
+.tool-badge:empty { display: none; }
+.tool-badge {
+	min-width: 16px;
+	box-sizing: border-box;
+	padding: 0 5px;
+	border-radius: 8px;
+	font-size: 10px;
+	line-height: 16px;
+	text-align: center;
+	color: var(--muted);
+	background: var(--surface-raised);
+}
+.file-explorer {
+	width: var(--dock-width, 280px);
+	max-width: 50%;
+	border-right: 0;
+	background: var(--tool-background);
+}
+.workspace-body { position: relative; }
+.dock-resize {
+	position: relative;
+	flex-shrink: 0;
+	touch-action: none;
+	z-index: 3;
+}
+.dock-resize-horizontal {
+	width: 1px;
+	cursor: col-resize;
+	background: var(--border);
+}
+.dock-resize-horizontal::after {
+	position: absolute;
+	content: "";
+	top: 0;
+	bottom: 0;
+	left: -3px;
+	width: 7px;
+}
+.dock-resize-vertical {
+	height: 1px;
+	cursor: row-resize;
+	background: var(--border);
+}
+.dock-resize-vertical::after {
+	position: absolute;
+	content: "";
+	left: 0;
+	right: 0;
+	top: -3px;
+	height: 7px;
+}
+.dock-resize:hover,
+.dock-resize:focus-visible { background: var(--accent); }
+.development .tool-window-header { height: 32px; min-height: 32px; }
+.search-controls {
+	padding: 8px;
+	border-bottom: 1px solid var(--border);
+	background: var(--tool-toolbar);
+}
+.search-summary { margin-bottom: 0; }
+.git-commit-form { padding: 10px; }
+.git-change-group { border-top: 0; border-bottom: 1px solid var(--border); }
+.git-change-group ul { padding-top: 4px; }
+@media (max-width: 720px) {
+	.file-explorer { width: min(var(--dock-width, 240px), 45vw); min-width: 160px; }
+}
+
+.source-control { overflow: hidden; }
+.git-panel {
+	min-height: 0;
+	overflow: auto;
+	flex: 1;
+}

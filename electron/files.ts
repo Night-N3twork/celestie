@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
 import * as fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { type BrowserWindow, dialog } from "electron";
 import type { NativeStat } from "../src/platform/desktop/bridge";
 import type { ExplorerEntry, TextFile } from "../src/platform/host";
@@ -100,6 +101,19 @@ export class NativeWorkspace {
 		if (!(await fs.stat(target)).isDirectory())
 			throw new Error("Select a workspace folder.");
 		return target;
+	}
+	async uri(id: string) {
+		return pathToFileURL(await this.resolve(id)).href;
+	}
+	async fileId(uri: string) {
+		const target = fileURLToPath(uri);
+		const id = this.idForPath(target);
+		if (!id)
+			throw new Error(
+				"The language server location is outside the opened folders.",
+			);
+		await this.resolve(id);
+		return id;
 	}
 	private async resolve(id: string, follow = true): Promise<string> {
 		const [key, ...parts] = id.split("/"),

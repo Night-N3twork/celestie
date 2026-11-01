@@ -1,15 +1,17 @@
 import { path, type SVGProps } from "@icons/icons";
 import Svg, { Box } from "@icons/Svg";
+import { createUniqueId } from "solid-js";
 
 export default function CollapseAllIcon(props: SVGProps) {
 	const s = props.size;
+	const id = createUniqueId();
 	const scale = (value: number) => (value * s) / 64;
 	return (
 		<Svg title="Collapse All" {...props}>
 			{!props.nobox && <Box size={s} />}
 			<defs>
 				<path
-					id="sq"
+					id={id}
 					d={path([
 						["M", scale(21), scale(25)],
 						[
@@ -54,8 +56,11 @@ export default function CollapseAllIcon(props: SVGProps) {
 				height={scale(22)}
 				rx={s / 16}
 			/>
-			<use href="#sq" />
-			<use href="#sq" transform={`translate(${scale(5)},${-scale(5)})`} />
+			<use href={`#${id}`} />
+			<use
+				href={`#${id}`}
+				transform={`translate(${scale(5)},${-scale(5)})`}
+			/>
 			<path
 				d={path([
 					["M", scale(24), scale(37)],

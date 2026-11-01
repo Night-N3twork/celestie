@@ -11,7 +11,10 @@
 		"!node_modules/**/*"
 	],
 	"asar": true,
-	"asarUnpack": ["dist-electron/node_modules/node-pty/**/*"],
+	"asarUnpack": [
+		"dist-electron/node_modules/**/*",
+		"dist-electron/servers/**/*"
+	],
 	"npmRebuild": false,
 	"win": {
 		"icon": "dist-electron/icons/icon.ico",

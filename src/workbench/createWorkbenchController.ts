@@ -11,7 +11,8 @@ import { WorkspaceLayout } from "../workspace/layout";
 import { NavigationHistory } from "../workspace/navigation";
 import type { FolderMatch } from "../workspace/search";
 import { Workspace } from "../workspace/workspace";
-import type { FindReplaceControl } from "./FindReplace";
+import { createDiffController } from "./createDiffController";
+import type { SearchControl } from "./createSearchModel";
 import type { NavigationMode } from "./Navigator";
 import { registerWorkbenchCommands } from "./registerWorkbenchCommands";
 import { registerWorkbenchShortcuts } from "./registerWorkbenchShortcuts";
@@ -24,6 +25,7 @@ export function createWorkbenchController() {
 	const platform = createPlatform();
 	const host = platform.files;
 	const commands = new CommandRegistry();
+	const diffs = createDiffController();
 	const editorControls = new Map<EditorSession, EditorControl>();
 	const history = new NavigationHistory();
 	const [navigationMode, setNavigationMode] = createSignal<NavigationMode>();
@@ -35,13 +37,12 @@ export function createWorkbenchController() {
 	const [message, setMessage] = createSignal("");
 	const [busy, setBusy] = createSignal(false);
 	const [sidebarOpen, setSidebarOpen] = createSignal(true);
-	const [searchOpen, setSearchOpen] = createSignal(false);
 	const [replaceOpen, setReplaceOpen] = createSignal(false);
-	const [searchFocus, setSearchFocus] = createSignal(0);
+	const [searchCurrentFile, setSearchCurrentFile] = createSignal(false);
 	const [editorFocus, setEditorFocus] = createSignal(0);
 	const [revealRequest, setRevealRequest] = createSignal(0);
 	const [selectionRevision, setSelectionRevision] = createSignal(0);
-	let searchControl: FindReplaceControl | undefined;
+	let searchControl: SearchControl | undefined;
 	const [folders, setFolders] = createSignal<
 		{ entry: ExplorerEntry; accessible: boolean }[]
 	>([]);
@@ -75,7 +76,7 @@ export function createWorkbenchController() {
 	let untitledCount = 0;
 	const file = () => {
 		revision();
-		return workspace.active;
+		return diffs.active() ? undefined : workspace.active;
 	};
 	const documents = () => {
 		revision();
@@ -125,12 +126,26 @@ export function createWorkbenchController() {
 		persist();
 	};
 	const openSearch = (replace: boolean) => {
+		setSearchCurrentFile(true);
 		setReplaceOpen(replace);
-		setSearchOpen(true);
-		setSearchFocus((value) => value + 1);
+		setWorkspaceSearchOpen(true);
+		setSidebarOpen(true);
+		setWorkspaceSearchFocus((value) => value + 1);
+	};
+	const openWorkspaceSearch = (replace = false) => {
+		setSearchCurrentFile(false);
+		setReplaceOpen(replace);
+		setWorkspaceSearchOpen(true);
+		setSidebarOpen(true);
+		setWorkspaceSearchFocus((value) => value + 1);
+	};
+	const revealSearch = () => {
+		setWorkspaceSearchOpen(true);
+		setSidebarOpen(true);
 	};
 
 	const open = (file: TextFile) => {
+		diffs.activate(undefined);
 		if (workspace.active)
 			history.record({
 				id: workspace.active.id,
@@ -187,9 +202,15 @@ export function createWorkbenchController() {
 		}
 	};
 	const run = (id: string) => {
+		if (
+			diffs.active() &&
+			(id.startsWith("editor.") ||
+				id.startsWith("edit.") ||
+				id === "file.save")
+		)
+			return Promise.resolve();
 		if (!id.startsWith("search."))
 			return perform(() => commands.execute(id));
-		if (busy()) return Promise.resolve();
 		return commands
 			.execute(id)
 			.catch((error) =>
@@ -358,6 +379,7 @@ export function createWorkbenchController() {
 		);
 	};
 	const focusGroup = (id: string) => {
+		diffs.activate(undefined);
 		layout.active = id;
 		const document = groupDocument(id);
 		if (document) workspace.activate(document.id);
@@ -392,6 +414,7 @@ export function createWorkbenchController() {
 		);
 		if (known) workspace.activate(id);
 		else workspace.open(await host.readTextFile(id));
+		diffs.activate(undefined);
 		const document = workspace.active;
 		if (!document) return;
 		if (selection)
@@ -571,6 +594,7 @@ export function createWorkbenchController() {
 	});
 
 	const language = createLanguageService({
+		languages: platform.languages,
 		host,
 		roots: () =>
 			folders()
@@ -580,11 +604,13 @@ export function createWorkbenchController() {
 		revision,
 	});
 	const controller = {
+		diffs,
 		platform,
 		language,
 		commands,
 		openSearch,
-		setSearchOpen,
+		revealSearch,
+		openWorkspaceSearch,
 		newFile,
 		host,
 		open,
@@ -619,9 +645,10 @@ export function createWorkbenchController() {
 		setEditorFocus,
 		revision,
 		selectionRevision,
-		searchOpen,
 		replaceOpen,
-		searchFocus,
+		setReplaceOpen,
+		searchCurrentFile,
+		setSearchCurrentFile,
 		setSelectionRevision,
 		workspaceSearchFocus,
 		workspaceSearchOpen,
@@ -649,7 +676,7 @@ export function createWorkbenchController() {
 		workspace: () => workspace,
 		layout: () => layout,
 		searchControl: () => searchControl,
-		setSearchControl: (control: FindReplaceControl) => {
+		setSearchControl: (control: SearchControl | undefined) => {
 			searchControl = control;
 		},
 	};

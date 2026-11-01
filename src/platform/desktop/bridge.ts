@@ -1,3 +1,4 @@
+import type { LanguageEvent, OpenDocument } from "../../language/lsp";
 import type { ExplorerEntry, TextFile } from "../host";
 import type { FileChange, ProcessOptions } from "../services";
 export type Result<T> =
@@ -71,6 +72,24 @@ export interface NativeRuntime {
 	stop(id: string): Promise<Result<void>>;
 }
 export interface DesktopBridge {
+	window: {
+		theme(
+			color: string,
+			symbolColor: string,
+			height: number,
+		): Promise<Result<void>>;
+	};
+	languages: {
+		sync(documents: OpenDocument[]): Promise<Result<void>>;
+		request(
+			id: string,
+			method: string,
+			params?: Record<string, unknown>,
+		): Promise<Result<unknown>>;
+		fileId(uri: string): Promise<Result<string>>;
+		restart(): Promise<Result<void>>;
+	};
+	onDiagnostics(listener: (event: LanguageEvent) => void): () => void;
 	kind: "electron";
 	platform: string;
 	files: NativeFiles;

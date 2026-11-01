@@ -1,0 +1,66 @@
+.diff-editor {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+	background: var(--surface);
+}
+.diff-editor-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: 36px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--border);
+	font-size: 11px;
+}
+.diff-editor-toolbar > span:first-child {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.diff-summary { flex: 1; color: var(--muted); }
+.diff-pane-headings,
+.diff-panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.diff-pane-headings { border-bottom: 1px solid var(--border); background: var(--background); }
+.diff-pane-headings h3 {
+	padding: 7px 14px;
+	font-size: 11px;
+	font-weight: 500;
+	color: var(--muted);
+}
+.diff-pane-headings h3 + h3,
+.diff-pane + .diff-pane { border-left: 1px solid var(--border); }
+.diff-panes { flex: 1; min-height: 0; }
+.diff-pane { overflow: auto; padding: 8px 0; }
+.diff-lines { width: max-content; min-width: 100%; }
+.diff-line {
+	display: flex;
+	height: 22px;
+	font:
+		12px/22px "JetBrains Mono Variable",
+		monospace;
+	white-space: pre;
+}
+.diff-line.added { background: color-mix(in srgb, var(--success) 14%, var(--surface)); }
+.diff-line.removed { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); }
+.diff-line.empty { background: var(--background); }
+.diff-line-number {
+	width: 48px;
+	flex-shrink: 0;
+	text-align: right;
+	color: var(--muted);
+	user-select: none;
+}
+.diff-line-sign {
+	width: 24px;
+	flex-shrink: 0;
+	text-align: center;
+}
+.diff-line.added .diff-line-sign { color: var(--success); }
+.diff-line.removed .diff-line-sign { color: var(--danger); }
+.diff-line code { padding-right: 16px; font: inherit; }
+.diff-tab-label { font-size: 10px; color: var(--muted); }
+.diff-limit { padding: 20px; color: var(--muted); }

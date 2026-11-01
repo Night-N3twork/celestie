@@ -12,7 +12,9 @@ import {
 } from "electron";
 import { NativeWorkspace } from "./files";
 import { registerFiles } from "./ipc";
+import { NativeLanguages } from "./languages";
 import { NativeRuntime } from "./runtime";
+import { registerWindow } from "./window";
 
 protocol.registerSchemesAsPrivileged([
 	{
@@ -53,11 +55,12 @@ const csp =
 let window: BrowserWindow | undefined;
 let files: NativeWorkspace;
 let runtime: NativeRuntime;
+let languages: NativeLanguages;
 let quitting = false;
 const titleBarOverlay = () => ({
-	color: nativeTheme.shouldUseDarkColors ? "#08080a" : "#f7f5fa",
+	color: "#00000000",
 	symbolColor: nativeTheme.shouldUseDarkColors ? "#d4d0dc" : "#24202c",
-	height: 54,
+	height: 44,
 });
 function createWindow() {
 	window = new BrowserWindow({
@@ -90,6 +93,36 @@ function createWindow() {
 		},
 	});
 	window.setMenuBarVisibility(false);
+	window.webContents.on("before-input-event", (event, input) => {
+		if (
+			input.type !== "keyDown" ||
+			!(input.control || input.meta) ||
+			input.alt ||
+			![
+				"Equal",
+				"Minus",
+				"Digit0",
+				"NumpadAdd",
+				"NumpadSubtract",
+				"Numpad0",
+			].includes(input.code)
+		)
+			return;
+		const contents = window?.webContents;
+		if (!contents) return;
+		event.preventDefault();
+		const reset = input.code === "Digit0" || input.code === "Numpad0";
+		const direction =
+			input.code === "Minus" || input.code === "NumpadSubtract" ? -1 : 1;
+		contents.setZoomLevel(
+			reset
+				? 0
+				: Math.max(
+						-5,
+						Math.min(8, contents.getZoomLevel() + direction),
+					),
+		);
+	});
 	window.webContents.on("will-prevent-unload", (event) => {
 		if (!window) return;
 		const response = dialog.showMessageBoxSync(window, {
@@ -109,16 +142,21 @@ function createWindow() {
 	window.on("ready-to-show", () => window?.show());
 	window.on("closed", () => {
 		void runtime?.close();
+		void languages?.close();
 		window = undefined;
 	});
 	window.webContents.on("render-process-gone", (_event, details) => {
 		console.error("Renderer exited:", details.reason);
 		void runtime.close();
+		void languages.close();
 	});
 	window.webContents.on(
 		"did-start-navigation",
 		(_event, _url, _inPlace, mainFrame) => {
-			if (mainFrame) void runtime.close();
+			if (mainFrame) {
+				void runtime.close();
+				void languages.close();
+			}
 		},
 	);
 	void window.loadURL(url);
@@ -218,7 +256,19 @@ else {
 				},
 			);
 			registerFiles(files, () => window, trustedOrigin);
+			registerWindow(() => window, trustedOrigin);
 			runtime = new NativeRuntime(files, () => window, trustedOrigin);
+			languages = new NativeLanguages(
+				files,
+				app.isPackaged
+					? path.join(
+							process.resourcesPath,
+							"app.asar.unpacked/dist-electron",
+						)
+					: directory,
+				() => window,
+				trustedOrigin,
+			);
 			Menu.setApplicationMenu(
 				Menu.buildFromTemplate([
 					{
@@ -245,7 +295,7 @@ else {
 								? []
 								: [{ role: "toggleDevTools" as const }]),
 							{ role: "resetZoom" },
-							{ role: "zoomIn" },
+							{ role: "zoomIn", accelerator: "CmdOrCtrl+=" },
 							{ role: "zoomOut" },
 							{ role: "togglefullscreen" },
 						],
@@ -264,15 +314,12 @@ else {
 	app.on("window-all-closed", () => {
 		if (process.platform !== "darwin") app.quit();
 	});
-	nativeTheme.on("updated", () => {
-		if (window && !window.isDestroyed() && process.platform !== "darwin")
-			window.setTitleBarOverlay(titleBarOverlay());
-	});
 	app.on("before-quit", (event) => {
 		if (quitting) return;
 		event.preventDefault();
 		void (async () => {
 			await runtime?.close();
+			await languages?.close();
 			files?.close();
 			quitting = true;
 			app.quit();

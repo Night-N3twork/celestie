@@ -1,12 +1,9 @@
 import { onCleanup } from "solid-js";
 import type { WorkbenchController } from "./createWorkbenchController";
 
-type Services = Pick<
-	WorkbenchController,
-	"run" | "setWorkspaceSearchOpen" | "setWorkspaceSearchFocus"
->;
+type Services = Pick<WorkbenchController, "run" | "openWorkspaceSearch">;
 export function registerWorkbenchShortcuts(services: Services): void {
-	const { run, setWorkspaceSearchOpen, setWorkspaceSearchFocus } = services;
+	const { run, openWorkspaceSearch } = services;
 	const keydown = (event: KeyboardEvent) => {
 		if (event.isComposing) return;
 		const textField = event.target instanceof HTMLInputElement;
@@ -104,8 +101,7 @@ export function registerWorkbenchShortcuts(services: Services): void {
 		}
 		if (event.shiftKey && (key === "f" || key === "h")) {
 			event.preventDefault();
-			setWorkspaceSearchOpen(true);
-			setWorkspaceSearchFocus((value) => value + 1);
+			openWorkspaceSearch(key === "h");
 			return;
 		}
 		if (key === "f" || key === "h") {
@@ -122,18 +118,22 @@ export function registerWorkbenchShortcuts(services: Services): void {
 			return;
 		const id =
 			key === "s"
-				? "file.save"
-				: key === "o"
-					? event.shiftKey
-						? "folder.open"
-						: "file.open"
-					: key === "z"
+				? event.shiftKey
+					? "file.saveAll"
+					: "file.save"
+				: key === "n"
+					? "file.new"
+					: key === "o"
 						? event.shiftKey
-							? "edit.redo"
-							: "edit.undo"
-						: key === "y"
-							? "edit.redo"
-							: undefined;
+							? "folder.open"
+							: "file.open"
+						: key === "z"
+							? event.shiftKey
+								? "edit.redo"
+								: "edit.undo"
+							: key === "y"
+								? "edit.redo"
+								: undefined;
 		if (id) {
 			event.preventDefault();
 			void run(id);

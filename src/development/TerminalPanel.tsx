@@ -12,18 +12,31 @@ export default function TerminalPanel(props: {
 }) {
 	let container!: HTMLElement;
 	onMount(() => {
-		const style = getComputedStyle(container);
+		const theme = () => {
+			const style = getComputedStyle(container);
+			return {
+				background: style.getPropertyValue("--surface").trim(),
+				foreground: style.getPropertyValue("--foreground").trim(),
+			};
+		};
 		const terminal = new Terminal({
 			fontFamily: '"JetBrains Mono Variable",monospace',
 			fontSize: 12,
-			theme: {
-				background: style.getPropertyValue("--surface").trim(),
-				foreground: style.getPropertyValue("--foreground").trim(),
-			},
+			theme: theme(),
 		});
 		const fit = new FitAddon();
 		terminal.loadAddon(fit);
 		terminal.open(container);
+		const updateTheme = () => {
+			terminal.options.theme = theme();
+		};
+		const scheme = matchMedia("(prefers-color-scheme: dark)");
+		const themeObserver = new MutationObserver(updateTheme);
+		themeObserver.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ["class", "style"],
+		});
+		scheme.addEventListener("change", updateTheme);
 		let disposed = false,
 			session: TerminalSession | undefined,
 			remove: (() => void) | undefined;
@@ -68,6 +81,8 @@ export default function TerminalPanel(props: {
 		})();
 		onCleanup(() => {
 			disposed = true;
+			scheme.removeEventListener("change", updateTheme);
+			themeObserver.disconnect();
 			observer.disconnect();
 			input.dispose();
 			resize.dispose();

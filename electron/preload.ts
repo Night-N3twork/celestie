@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { LanguageEvent } from "../src/language/lsp";
 import type {
 	DesktopBridge,
 	Result,
@@ -9,6 +10,26 @@ import type { FileChange } from "../src/platform/services";
 const invoke = <T>(method: string, ...args: unknown[]): Promise<Result<T>> =>
 	ipcRenderer.invoke(`files.${method}`, ...args);
 const bridge: DesktopBridge = {
+	window: {
+		theme: (color, symbolColor, height) =>
+			ipcRenderer.invoke("window.theme", color, symbolColor, height),
+	},
+	languages: {
+		sync: (documents) => ipcRenderer.invoke("languages.sync", documents),
+		request: (id, method, params) =>
+			ipcRenderer.invoke("languages.request", id, method, params),
+		fileId: (uri) => ipcRenderer.invoke("languages.fileId", uri),
+		restart: () => ipcRenderer.invoke("languages.restart"),
+	},
+	onDiagnostics: (listener) => {
+		const receive = (
+			_event: Electron.IpcRendererEvent,
+			event: LanguageEvent,
+		) => listener(event);
+		ipcRenderer.on("languages.diagnostics", receive);
+		return () =>
+			ipcRenderer.removeListener("languages.diagnostics", receive);
+	},
 	kind: "electron",
 	platform: process.platform,
 	runtime: {

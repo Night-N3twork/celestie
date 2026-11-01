@@ -5,13 +5,12 @@ import type DocumentAlerts from "./DocumentAlerts";
 import type EditorGroups from "./EditorGroups";
 import type EditorTabs from "./EditorTabs";
 import type ExplorerPanel from "./ExplorerPanel";
-import type FindReplace from "./FindReplace";
-import type { FindReplaceControl } from "./FindReplace";
+
 import type Navigator from "./Navigator";
 import type WorkbenchHeader from "./WorkbenchHeader";
 import type WorkbenchStatus from "./WorkbenchStatus";
 import type WorkbenchToolbar from "./WorkbenchToolbar";
-import type WorkspaceSearch from "./WorkspaceSearch";
+
 export function createWorkbenchBindings(controller: WorkbenchController) {
 	return {
 		section: {
@@ -37,6 +36,7 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 			run: controller.run,
 		} satisfies ComponentProps<typeof WorkbenchHeader>,
 		workbenchToolbar: {
+			commands: controller.commands,
 			busy: controller.busy,
 			file: controller.file,
 			run: controller.run,
@@ -74,71 +74,6 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 				controller.setEditorFocus((value) => value + 1);
 			},
 		} satisfies ComponentProps<typeof Navigator>,
-		findReplace: {
-			get session() {
-				return controller.file()?.editor;
-			},
-			get revision() {
-				return controller.revision();
-			},
-			get selectionRevision() {
-				return controller.selectionRevision();
-			},
-			get visible() {
-				return controller.searchOpen();
-			},
-			get showReplace() {
-				return controller.replaceOpen();
-			},
-			get focusRequest() {
-				return controller.searchFocus();
-			},
-			get disabled() {
-				return controller.busy();
-			},
-			onReady: (control: FindReplaceControl) => {
-				controller.setSearchControl(control);
-			},
-			onUpdate: () => {
-				controller.setRevealRequest((value) => value + 1);
-				controller.setSelectionRevision((value) => value + 1);
-				controller.changed();
-			},
-			onClose: () => {
-				controller.setSearchOpen(false);
-				controller.setEditorFocus((value) => value + 1);
-			},
-		} satisfies ComponentProps<typeof FindReplace>,
-		workspaceSearch: {
-			get focusRequest() {
-				return controller.workspaceSearchFocus();
-			},
-			host: controller.host,
-			get roots() {
-				return controller
-					.folders()
-					.filter((root) => root.accessible)
-					.map((root) => root.entry);
-			},
-			get visible() {
-				return controller.workspaceSearchOpen();
-			},
-			get busy() {
-				return controller.busy();
-			},
-			buffers: () =>
-				new Map(
-					controller
-						.workspace()
-						.documents.map((document) => [
-							document.id,
-							document.editor.snapshot.text,
-						]),
-				),
-			onOpen: controller.openSearchResult,
-			onApply: controller.applySearchResult,
-			onClose: () => controller.setWorkspaceSearchOpen(false),
-		} satisfies ComponentProps<typeof WorkspaceSearch>,
 		documentAlerts: {
 			file: controller.file,
 			busy: controller.busy,
@@ -151,16 +86,17 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 			setSidebarOpen: controller.setSidebarOpen,
 			workspaceSearchOpen: controller.workspaceSearchOpen,
 			setWorkspaceSearchOpen: controller.setWorkspaceSearchOpen,
-			setWorkspaceSearchFocus: controller.setWorkspaceSearchFocus,
+			openWorkspaceSearch: controller.openWorkspaceSearch,
 		} satisfies Pick<
 			ComponentProps<typeof ActivityRail>,
 			| "sidebarOpen"
 			| "setSidebarOpen"
 			| "workspaceSearchOpen"
 			| "setWorkspaceSearchOpen"
-			| "setWorkspaceSearchFocus"
+			| "openWorkspaceSearch"
 		>,
 		explorerPanel: {
+			onHide: () => controller.setSidebarOpen(false),
 			busy: controller.busy,
 			folders: controller.folders,
 			manageEntry: controller.manageEntry,
@@ -177,6 +113,7 @@ export function createWorkbenchBindings(controller: WorkbenchController) {
 			explorerRevision: controller.explorerRevision,
 		} satisfies ComponentProps<typeof ExplorerPanel>,
 		editorTabs: {
+			diffs: controller.diffs,
 			documents: controller.documents,
 			file: controller.file,
 			busy: controller.busy,

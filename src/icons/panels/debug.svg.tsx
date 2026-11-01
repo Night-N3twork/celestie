@@ -1,14 +1,16 @@
 import { points, type SVGProps } from "@icons/icons";
 import Svg, { Box } from "@icons/Svg";
+import { createUniqueId } from "solid-js";
 
 export default function DebugIcon(props: SVGProps) {
 	const s = props.size;
+	const id = createUniqueId();
 	const scale = (value: number) => (value * s) / 64;
 	return (
-		<Svg title="Open Terminal" {...props}>
+		<Svg title="Run and Debug" {...props}>
 			{!props.nobox && <Box size={s} />}
 			<mask
-				id="head"
+				id={id}
 				maskUnits="userSpaceOnUse"
 				x={0}
 				y={0}
@@ -25,7 +27,7 @@ export default function DebugIcon(props: SVGProps) {
 				/>
 			</mask>
 			<circle cx={s / 2} cy={scale(36)} r={scale(32 / 3)} />
-			<g mask="url(#head)">
+			<g mask={`url(#${id})`}>
 				<circle cx={s / 2} cy={scale(24)} r={scale(32 / 5)} />
 				<polyline
 					points={points([

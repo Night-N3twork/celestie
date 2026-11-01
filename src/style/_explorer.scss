@@ -1,5 +1,6 @@
 .file-explorer {
-	width: 254px;
+	width: 244px;
+	box-sizing: border-box;
 	min-width: 180px;
 	max-width: 35%;
 	flex-shrink: 0;
@@ -12,8 +13,8 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	height: 39px;
-	padding: 0 10px 0 15px;
+	height: 34px;
+	padding: 0 8px 0 12px;
 	flex-shrink: 0;
 }
 .explorer-header > span {
@@ -32,18 +33,10 @@
 .entry-menu > summary { width: 26px; padding: 0; }
 .entry-menu > div { width: 165px; }
 .workbench .destructive:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
-.explorer-selection {
-	color: var(--muted);
-	padding: 2px 15px 8px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-size: 10px;
-}
 .explorer-tree {
 	overflow: auto;
 	flex: 1;
-	padding: 0 7px 12px;
+	padding: 4px 6px 12px;
 }
 .explorer-tree ul { list-style: none; padding-left: 14px; }
 .workspace-root { position: relative; }
@@ -56,24 +49,27 @@
 	width: 24px;
 	min-height: 24px;
 	padding: 0;
-	opacity: 0.6;
+	opacity: 0;
 }
-.workspace-root:hover > .root-remove,
+.workspace-root:has(> ul > li > .explorer-entry:hover) > .root-remove,
+.root-remove:hover,
 .root-remove:focus-visible { opacity: 1; }
 .workspace-root > ul > li > .explorer-entry { padding-right: 30px; font-weight: 600; }
 .workbench .explorer-entry {
 	display: flex;
 	align-items: center;
-	gap: 3px;
+	gap: 4px;
 	width: 100%;
 	justify-content: flex-start;
 	padding: 2px 5px;
-	min-height: 28px;
+	min-height: 26px;
 	border: 1px solid transparent;
 	border-radius: 4px;
 	text-align: left;
 	font-size: 11px;
 }
+.explorer-entry > svg:first-child:has(+ svg),
+.explorer-chevron-spacer { width: 14px; flex-shrink: 0; }
 .explorer-name {
 	overflow: hidden;
 	text-overflow: ellipsis;

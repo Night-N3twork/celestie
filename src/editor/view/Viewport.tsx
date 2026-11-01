@@ -141,6 +141,7 @@ export default function Viewport(props: {
 							top: `${editorPadding + number * props.lineHeight - props.scrollTop}px`,
 							left: `${editorPadding - props.scrollLeft}px`,
 							height: `${props.lineHeight}px`,
+							"min-width": `${Math.max(0, props.width - editorPadding + props.scrollLeft)}px`,
 						}}
 					>
 						<For each={pieces(number)}>
@@ -165,7 +166,12 @@ export default function Viewport(props: {
 							)}
 						</For>
 						<Show when={newlineSelected(number)}>
-							<span class="virtual-selected"> </span>
+							<span
+								class="virtual-selected virtual-selection-break"
+								aria-hidden="true"
+							>
+								{" "}
+							</span>
 						</Show>
 					</div>
 				)}

@@ -1,0 +1,25 @@
+.language-tools { overflow: auto; }
+.language-tools h2 { margin: 0 30px 12px 0; font-size: 14px; }
+.language-tools small { display: block; color: var(--muted); }
+.language-message {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	padding: 12px 0;
+	font: 12px/1.6 "JetBrains Mono Variable", monospace;
+}
+.language-edit-preview { max-height: 40vh; overflow: auto; }
+.language-edit-preview h3 { margin: 10px 0; font-size: 12px; }
+.language-edit-preview pre { white-space: pre; overflow: auto; }
+.language-hover {
+	position: fixed;
+	z-index: 55;
+	width: min(450px, calc(100vw - 16px));
+	max-height: 210px;
+	overflow: auto;
+	padding: 10px;
+	border: 1px solid var(--border);
+	border-radius: 5px;
+	background: var(--overlay);
+	box-shadow: 0 8px 30px var(--shadow);
+}
+.language-hover pre { white-space: pre-wrap; overflow-wrap: anywhere; }

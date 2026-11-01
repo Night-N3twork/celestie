@@ -15,6 +15,10 @@ export async function repository(root: string) {
 	const { fs } = await duskEnvironment();
 	return { fs: gitFilesystem(fs), dir: duskPath(root) };
 }
+export async function isRepository(root: string) {
+	const { fs } = await duskEnvironment();
+	return fs.exists(`${duskPath(root)}/.git`);
+}
 export async function changes(root: string): Promise<GitChange[]> {
 	return (await git.statusMatrix(await repository(root)))
 		.filter(
@@ -43,7 +47,7 @@ export async function stage(root: string, change: GitChange) {
 export async function unstage(root: string, path: string) {
 	await git.resetIndex({ ...(await repository(root)), filepath: path });
 }
-export async function diff(root: string, path: string) {
+export async function diff(root: string, path: string, staged = false) {
 	const options = await repository(root);
 	let before = "";
 	try {
@@ -61,9 +65,31 @@ export async function diff(root: string, path: string) {
 	}
 	const { fs } = await duskEnvironment(),
 		full = `${options.dir}/${path}`;
+	let indexText = "";
+	await git.walk({
+		...options,
+		trees: [git.STAGE()],
+		map: async (filepath, [entry]) => {
+			if (filepath === path) {
+				const oid = await entry?.oid();
+				if (oid)
+					indexText = new TextDecoder().decode(
+						(await git.readBlob({ ...options, oid })).blob,
+					);
+				return null;
+			}
+			return filepath === "." || path.startsWith(`${filepath}/`)
+				? undefined
+				: null;
+		},
+	});
 	return {
-		before,
-		after: (await fs.exists(full)) ? await fs.readFile(full) : "",
+		before: staged ? before : indexText,
+		after: staged
+			? indexText
+			: (await fs.exists(full))
+				? await fs.readFile(full)
+				: "",
 	};
 }
 export async function commit(

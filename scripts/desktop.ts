@@ -1,15 +1,27 @@
 import { spawn } from "node:child_process";
-import { cp } from "node:fs/promises";
+import { cp, readFile, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { build } from "esbuild";
 import { createServer } from "vite";
 import { createDesktopIcons } from "./icons";
+import { buildLanguageServers } from "./languages";
 
 const development = process.argv.includes("--dev");
 await createDesktopIcons();
+await buildLanguageServers();
 await cp("node_modules/node-pty", "dist-electron/node_modules/node-pty", {
 	recursive: true,
 	dereference: true,
+	filter: async (source, destination) => {
+		if (!(await stat(source)).isFile()) return true;
+		try {
+			return !(await readFile(source)).equals(
+				await readFile(destination),
+			);
+		} catch {
+			return true;
+		}
+	},
 });
 await build({
 	entryPoints: ["electron/main.ts"],
@@ -17,6 +29,9 @@ await build({
 	bundle: true,
 	platform: "node",
 	format: "esm",
+	banner: {
+		js: 'import { createRequire as createNodeRequire } from "node:module"; const require = createNodeRequire(import.meta.url);',
+	},
 	target: "node22",
 	external: ["electron", "node-pty"],
 	sourcemap: development,

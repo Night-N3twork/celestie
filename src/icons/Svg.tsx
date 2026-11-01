@@ -8,7 +8,11 @@ export default function Svg(props: SVGProps) {
 			xmlns="http://www.w3.org/2000/svg"
 			width={props.size}
 			height={props.size}
-			viewBox={`0 0 ${props.size} ${props.size}`}
+			viewBox={
+				props.nobox
+					? `${props.size / 8} ${props.size / 8} ${(props.size * 3) / 4} ${(props.size * 3) / 4}`
+					: `0 0 ${props.size} ${props.size}`
+			}
 			fill="none"
 			stroke="currentColor"
 			stroke-linecap="round"

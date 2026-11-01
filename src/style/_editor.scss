@@ -13,7 +13,7 @@
 	position: relative;
 	flex-shrink: 0;
 	overflow: hidden;
-	background: var(--surface-raised);
+	background: var(--surface);
 	color: var(--muted);
 	user-select: none;
 }
@@ -71,11 +71,21 @@
 		color: var(--foreground);
 		-webkit-text-fill-color: var(--foreground);
 		caret-color: var(--foreground);
-		&::selection { background: var(--selection); color: var(--selection-foreground); }
+		&::selection { background: var(--editor-selection); color: var(--foreground); }
 	}
 }
 
-.virtual-selected { background: var(--selection); color: var(--selection-foreground); }
+.virtual-selected {
+	display: inline-block;
+	height: 100%;
+	vertical-align: top;
+	background: var(--editor-selection);
+}
+.virtual-selection-break {
+	position: absolute;
+	top: 0;
+	width: 100%;
+}
 
 .virtual-caret {
 	display: inline-block;

@@ -32,4 +32,4 @@ a {
 	&:hover { color: var(--accent-hover); }
 }
 
-::selection { background-color: var(--selection); color: var(--selection-foreground); }
+::selection { background-color: var(--editor-selection); color: var(--foreground); }

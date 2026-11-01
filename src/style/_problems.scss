@@ -1,0 +1,41 @@
+.problems-panel { padding: 0 !important; }
+.problem-file > summary {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	height: 28px;
+	padding: 0 12px;
+	background: var(--background);
+}
+.problem-file[open] > summary > svg:first-child { transform: rotate(90deg); }
+.problem-file strong { font-size: 12px; font-weight: 600; }
+.problem-path {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--muted);
+	font-size: 11px;
+}
+.workbench .problem-row {
+	display: flex;
+	width: 100%;
+	justify-content: flex-start;
+	gap: 8px;
+	min-height: 27px;
+	padding: 3px 16px 3px 34px;
+	border-radius: 0;
+	text-align: left;
+}
+.problem-message {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.problem-severity { display: flex; flex-shrink: 0; }
+.problem-severity.error { color: var(--danger); }
+.problem-severity.warning { color: var(--warning); }
+.problem-location,
+.problem-code { color: var(--muted); font-size: 11px; }
+.problems-status { padding: 12px !important; color: var(--muted); }

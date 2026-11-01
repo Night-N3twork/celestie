@@ -1,321 +1,316 @@
-import {
-	createEffect,
-	createMemo,
-	createSignal,
-	For,
-	on,
-	onCleanup,
-	Show,
-} from "solid-js";
-import type { SearchMatch } from "../editor/core/search";
-import { LineIndex } from "../editor/view/lineIndex";
-import type { ExplorerEntry } from "../platform/host";
-import type { WorkspaceHost } from "../platform/services";
-import { type FolderMatch, searchFolders } from "../workspace/search";
+import { createEffect, createSignal, on, Show } from "solid-js";
+import MoreIcon from "../icons/actions/more.svg";
+import StopIcon from "../icons/debug/stop.svg";
+import FileIcon from "../icons/files/file.svg";
+import ChevronIcon from "../icons/navigation/chevron.svg";
+import SearchIcon from "../icons/panels/search.svg";
+import ActionButton from "./ActionButton";
+import { createSearchModel } from "./createSearchModel";
+import type { WorkbenchController } from "./createWorkbenchController";
+import SearchResults from "./SearchResults";
+import ToolWindowHeader from "./ToolWindowHeader";
 
 export default function WorkspaceSearch(props: {
-	host: WorkspaceHost;
-	roots: readonly ExplorerEntry[];
-	visible: boolean;
-	focusRequest: number;
-	busy: boolean;
-	buffers: () => ReadonlyMap<string, string>;
-	onOpen: (result: FolderMatch, match: SearchMatch) => Promise<void>;
-	onApply: (result: FolderMatch, replacement: string) => Promise<void>;
-	onClose: () => void;
+	controller: WorkbenchController;
 }) {
+	const c = props.controller,
+		search = createSearchModel(c);
 	let input!: HTMLInputElement;
-	const indexes = new WeakMap<FolderMatch, LineIndex>();
-	const indexFor = (result: FolderMatch) => {
-		let index = indexes.get(result);
-		if (!index) {
-			index = new LineIndex(result.text);
-			indexes.set(result, index);
-		}
-		return index;
+	const [filters, setFilters] = createSignal(false);
+	const visible = () => c.workspaceSearchOpen() && c.sidebarOpen();
+	const close = () => {
+		search.cancel();
+		c.setWorkspaceSearchOpen(false);
+		c.setSidebarOpen(false);
+		c.setEditorFocus((value) => value + 1);
 	};
-	const [query, setQuery] = createSignal("");
-	const [replacement, setReplacement] = createSignal("");
-	const [exclusions, setExclusions] = createSignal(
-		"**/node_modules/**, **/.git/**, **/dist/**",
-	);
-	const [matchCase, setMatchCase] = createSignal(false);
-	const [wholeWord, setWholeWord] = createSignal(false);
-	const [running, setRunning] = createSignal(false);
-	const [results, setResults] = createSignal<FolderMatch[]>([]);
-	const [preview, setPreview] = createSignal(false);
-	const [message, setMessage] = createSignal("");
-	let controller: AbortController | undefined;
 	createEffect(
-		on(
-			() => props.focusRequest,
-			() => {
-				if (props.visible) {
-					input.focus();
-					input.select();
+		on(c.workspaceSearchFocus, () =>
+			queueMicrotask(() => {
+				if (!visible()) return;
+				const doc = c.file();
+				if (c.searchCurrentFile() && doc) {
+					const { anchor, head } = doc.editor.selection;
+					const selected = doc.editor.snapshot.text.slice(
+						Math.min(anchor, head),
+						Math.max(anchor, head),
+					);
+					if (selected && !/[\r\n]/.test(selected))
+						search.setQuery(selected);
 				}
-			},
+				input.focus();
+				input.select();
+			}),
 		),
 	);
-	const invalidate = () => {
-		controller?.abort();
-		setResults([]);
-		setPreview(false);
-	};
-	onCleanup(() => controller?.abort());
-	const rootKey = createMemo(() =>
-		props.roots.map((root) => root.id).join("\0"),
-	);
-	createEffect(
-		on(
-			rootKey,
-			() => {
-				invalidate();
-				setMessage("Workspace folders changed. Search again.");
-			},
-			{ defer: true },
-		),
-	);
-	const search = async () => {
-		controller?.abort();
-		const current = new AbortController();
-		controller = current;
-		setRunning(true);
-		setPreview(false);
-		setResults([]);
-		setMessage("Searching…");
-		try {
-			const summary = await searchFolders(
-				props.host,
-				props.roots,
-				query(),
-				{ matchCase: matchCase(), wholeWord: wholeWord() },
-				exclusions(),
-				props.buffers(),
-				current.signal,
-				(result) => {
-					if (!current.signal.aborted)
-						setResults((previous) => [...previous, result]);
-				},
-			);
-			if (!current.signal.aborted)
-				setMessage(
-					`${summary.files} files searched; ${summary.skipped} binary, large, or unreadable files skipped.${summary.limited ? " Result or memory limit reached; narrow the query." : ""}`,
-				);
-		} catch (error) {
-			if (controller !== current) return;
-			if (current.signal.aborted)
-				setMessage("Search cancelled. Results are partial.");
-			else
-				setMessage(
-					error instanceof Error ? error.message : String(error),
-				);
-		} finally {
-			if (controller === current) setRunning(false);
-		}
-	};
-	const apply = async () => {
-		const current = new AbortController();
-		controller = current;
-		setRunning(true);
-		let applied = 0;
-		try {
-			for (const result of results()) {
-				current.signal.throwIfAborted();
-				await props.onApply(result, replacement());
-				applied++;
-			}
-			setResults([]);
-			setPreview(false);
-			setMessage(
-				`${applied} files updated in open buffers. Save files to write them to disk.`,
-			);
-		} catch (error) {
-			setResults([]);
-			setPreview(false);
-			setMessage(
-				`${applied} files updated; stopped: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		} finally {
-			setRunning(false);
-		}
+	const summary = () => {
+		if (search.applying()) return "Applying replacements…";
+		if (search.searching()) return "Searching…";
+		if (search.message()) return search.message();
+		if (c.searchCurrentFile() && !c.file())
+			return "Open a file to search its contents.";
+		if (!c.searchCurrentFile() && !search.roots().length)
+			return "Open a folder to search your workspace.";
+		if (!search.query())
+			return c.searchCurrentFile()
+				? "Search the current file."
+				: "Search your workspace.";
+		const total = search.choices().length,
+			index = search.selectedIndex();
+		return c.searchCurrentFile()
+			? total
+				? `${index < 0 ? total : `${index + 1} of ${total}`} matches`
+				: "No matches."
+			: `${total} results in ${search.results().length} files`;
 	};
 	return (
-		<Show when={props.visible}>
-			<section
-				class="workspace-search"
-				aria-label="Workspace search"
-				style={{
-					"max-height": "40vh",
-					overflow: "auto",
-					"flex-shrink": 0,
-				}}
-			>
+		<aside
+			class="file-explorer search-sidebar"
+			aria-label="Search sidebar"
+			hidden={!visible()}
+			onKeyDown={(event) => {
+				if (!event.isComposing && event.key === "Escape") {
+					event.preventDefault();
+					event.stopPropagation();
+					close();
+				}
+			}}
+		>
+			<ToolWindowHeader title="Search" onHide={close} />
+			<div class="search-controls">
 				<form
 					onSubmit={(event) => {
 						event.preventDefault();
-						void search();
+						void search.search();
 					}}
 				>
-					<label>
-						Search folder{" "}
-						<input
-							ref={input}
-							value={query()}
-							onInput={(event) => {
-								invalidate();
-								setQuery(event.currentTarget.value);
-							}}
-						/>
-					</label>
-					<label>
-						Exclude patterns{" "}
-						<input
-							value={exclusions()}
-							onInput={(event) => {
-								invalidate();
-								setExclusions(event.currentTarget.value);
-							}}
-						/>
-					</label>
-					<label>
-						<input
-							type="checkbox"
-							checked={matchCase()}
-							onChange={(event) => {
-								invalidate();
-								setMatchCase(event.currentTarget.checked);
-							}}
-						/>{" "}
-						Match case
-					</label>
-					<label>
-						<input
-							type="checkbox"
-							checked={wholeWord()}
-							onChange={(event) => {
-								invalidate();
-								setWholeWord(event.currentTarget.checked);
-							}}
-						/>{" "}
-						Whole word
-					</label>
-					<button
-						type="submit"
-						disabled={
-							running() ||
-							props.busy ||
-							!query() ||
-							!props.roots.length
-						}
-					>
-						Search folders
-					</button>
-					<button
-						type="button"
-						disabled={!running()}
-						onClick={() => controller?.abort()}
-					>
-						Cancel search
-					</button>
-					<label>
-						Folder replacement{" "}
-						<input
-							disabled={running()}
-							value={replacement()}
-							onInput={(event) => {
-								setReplacement(event.currentTarget.value);
-								setPreview(false);
-							}}
-						/>
-					</label>
-					<button
-						type="button"
-						disabled={running() || !results().length || props.busy}
-						onClick={() => setPreview(true)}
-					>
-						Preview replacements
-					</button>
-					<Show when={preview()}>
+					<div class="search-input-row">
 						<button
 							type="button"
-							disabled={running() || props.busy}
-							onClick={() => void apply()}
+							class="icon-button"
+							aria-label="Show replacement"
+							aria-pressed={c.replaceOpen()}
+							title="Show replacement"
+							onClick={() => c.setReplaceOpen((value) => !value)}
 						>
-							Apply preview to buffers
-						</button>
-					</Show>
-					<button
-						type="button"
-						onClick={() => {
-							controller?.abort();
-							props.onClose();
-						}}
-					>
-						Close workspace search
-					</button>
-				</form>
-				<p role="status">{message()}</p>
-				<For each={results()}>
-					{(result) => (
-						<details open>
-							<summary>
-								{result.path} ({result.matches.length})
-							</summary>
-							<For each={result.matches.slice(0, 100)}>
-								{(match) => {
-									const lines = indexFor(result);
-									const line = lines.lineAt(match.from);
-									return (
-										<div>
-											<button
-												type="button"
-												disabled={
-													running() || props.busy
-												}
-												onClick={() =>
-													void props
-														.onOpen(result, match)
-														.catch((error) =>
-															setMessage(
-																String(error),
-															),
-														)
-												}
-											>
-												{line + 1}:
-												{match.from -
-													lines.starts[line] +
-													1}{" "}
-												{lines.line(line).slice(0, 160)}
-											</button>
-										</div>
-									);
+							<ChevronIcon
+								size={18}
+								nobox
+								aria-hidden="true"
+								style={{
+									transform: c.replaceOpen()
+										? "rotate(90deg)"
+										: undefined,
 								}}
-							</For>
-							<Show when={preview()}>
-								<details>
-									<summary>
-										Review all {result.matches.length}{" "}
-										replacements
-									</summary>
-									<For each={result.matches}>
-										{(match) => {
-											const index = indexFor(result);
-											const line = index.lineAt(
-												match.from,
-											);
-											return (
-												<pre>{`${line + 1}:${match.from - index.starts[line] + 1}\n- ${result.text.slice(match.from, match.to)}\n+ ${replacement()}`}</pre>
-											);
-										}}
-									</For>
-								</details>
+							/>
+						</button>
+						<input
+							ref={input}
+							aria-label="Search text"
+							placeholder="Search"
+							value={search.query()}
+							disabled={search.applying()}
+							onInput={(event) =>
+								search.setQuery(event.currentTarget.value)
+							}
+							onKeyDown={(event) => {
+								if (event.key !== "Enter" || event.isComposing)
+									return;
+								event.preventDefault();
+								if (
+									c.searchCurrentFile() ||
+									search.choices().length
+								)
+									search.next(event.shiftKey);
+								else void search.search();
+							}}
+						/>
+						<ActionButton
+							label={
+								search.searching()
+									? "Cancel search"
+									: "Search again"
+							}
+							icon={search.searching() ? StopIcon : SearchIcon}
+							compact
+							disabled={
+								search.applying() ||
+								(!search.searching() &&
+									(!search.query() ||
+										c.searchCurrentFile() ||
+										!search.roots().length))
+							}
+							onClick={() =>
+								search.searching()
+									? search.cancel()
+									: void search.search()
+							}
+						/>
+					</div>
+					<Show when={c.replaceOpen()}>
+						<div class="search-replacement">
+							<input
+								aria-label="Replace with"
+								placeholder="Replace"
+								value={search.replacement()}
+								disabled={search.applying()}
+								onInput={(event) =>
+									search.setReplacement(
+										event.currentTarget.value,
+									)
+								}
+							/>
+						</div>
+						<div class="search-replacement-actions">
+							<Show when={c.searchCurrentFile()}>
+								<button
+									type="button"
+									disabled={
+										c.busy() ||
+										!search.choices().length ||
+										search.applying()
+									}
+									onClick={() => void search.replaceOne()}
+								>
+									Replace
+								</button>
 							</Show>
-						</details>
-					)}
-				</For>
-			</section>
-		</Show>
+							<button
+								type="button"
+								disabled={
+									c.busy() ||
+									!search.choices().length ||
+									search.searching() ||
+									search.applying()
+								}
+								onClick={() => void search.replaceAll()}
+							>
+								{c.searchCurrentFile()
+									? "Replace all"
+									: search.preview()
+										? "Apply replacements"
+										: "Preview replacements"}
+							</button>
+						</div>
+					</Show>
+					<fieldset
+						class="search-options"
+						aria-label="Search options"
+					>
+						<button
+							type="button"
+							class="search-scope"
+							aria-label="Current file"
+							aria-pressed={c.searchCurrentFile()}
+							title="Limit search to the current file"
+							disabled={search.applying()}
+							onClick={() =>
+								c.setSearchCurrentFile((value) => !value)
+							}
+						>
+							<FileIcon size={16} nobox aria-hidden="true" />
+							<span>Current file</span>
+						</button>
+						<button
+							type="button"
+							class="search-toggle"
+							aria-label="Match case"
+							aria-pressed={search.matchCase()}
+							title="Match case"
+							disabled={search.applying()}
+							onClick={() =>
+								search.setMatchCase((value) => !value)
+							}
+						>
+							Aa
+						</button>
+						<button
+							type="button"
+							class="search-toggle"
+							aria-label="Whole word"
+							aria-pressed={search.wholeWord()}
+							title="Match whole word"
+							disabled={search.applying()}
+							onClick={() =>
+								search.setWholeWord((value) => !value)
+							}
+						>
+							<span class="whole-word-symbol">ab</span>
+						</button>
+						<Show when={!c.searchCurrentFile()}>
+							<button
+								type="button"
+								class="icon-button"
+								aria-label="Search exclusions"
+								aria-pressed={filters()}
+								title="Files to exclude"
+								disabled={search.applying()}
+								onClick={() => setFilters((value) => !value)}
+							>
+								<MoreIcon size={18} nobox aria-hidden="true" />
+							</button>
+						</Show>
+					</fieldset>
+					<Show when={filters() && !c.searchCurrentFile()}>
+						<label class="search-exclusions">
+							Files to exclude
+							<input
+								aria-label="Files to exclude"
+								value={search.exclusions()}
+								disabled={search.applying()}
+								onInput={(event) =>
+									search.setExclusions(
+										event.currentTarget.value,
+									)
+								}
+							/>
+						</label>
+					</Show>
+				</form>
+				<div
+					class="search-summary"
+					classList={{ "search-idle": !search.query() }}
+				>
+					<p role="status">{summary()}</p>
+					<div>
+						<button
+							type="button"
+							class="icon-button"
+							aria-label="Previous match"
+							title="Previous match (Shift+F3)"
+							disabled={
+								!search.choices().length || search.applying()
+							}
+							onClick={() => search.next(true)}
+						>
+							<ChevronIcon
+								size={18}
+								nobox
+								aria-hidden="true"
+								style={{ transform: "rotate(270deg)" }}
+							/>
+						</button>
+						<button
+							type="button"
+							class="icon-button"
+							aria-label="Next match"
+							title="Next match (F3)"
+							disabled={
+								!search.choices().length || search.applying()
+							}
+							onClick={() => search.next(false)}
+						>
+							<ChevronIcon
+								size={18}
+								nobox
+								aria-hidden="true"
+								style={{ transform: "rotate(90deg)" }}
+							/>
+						</button>
+					</div>
+				</div>
+			</div>
+			<SearchResults search={search} />
+		</aside>
 	);
 }

@@ -220,6 +220,8 @@ export class NativeRuntime {
 			}
 		}
 		const env = environment();
+		if (env.FORCE_COLOR === undefined && env.NO_COLOR === undefined)
+			env.FORCE_COLOR = "1";
 		if (process.platform === "win32" && manager !== "bun")
 			return this.launch(
 				process.env.ComSpec || "cmd.exe",

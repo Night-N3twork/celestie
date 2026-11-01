@@ -9,10 +9,10 @@
 	border: 1px solid var(--border);
 	border-radius: 10px;
 	padding: 12px;
-	background: var(--surface);
+	background: var(--overlay);
 	box-shadow:
-		0 20px 80px #0005,
-		0 0 0 100vmax #0003;
+		0 20px 80px var(--shadow),
+		0 0 0 100vmax var(--backdrop);
 }
 .navigation-palette > label {
 	display: flex;

@@ -16,7 +16,8 @@
 	height: 100%;
 	overflow: hidden;
 	font:
-		12px/1.5 "Sora Variable",
+		13px/1.5 "Segoe UI",
+		system-ui,
 		sans-serif;
 	color: var(--foreground);
 	background: var(--surface);
@@ -30,9 +31,9 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		gap: 5px;
+		gap: 6px;
 		min-height: 28px;
-		padding: 4px 9px;
+		padding: 3px 8px;
 		border: 1px solid transparent;
 		border-radius: 5px;
 		background: transparent;
@@ -50,8 +51,8 @@
 	button.primary:hover { background: color-mix(in srgb, var(--selection) 85%, var(--accent)); }
 	input:not([type="checkbox"]):not(.editor-input),
 	select {
-		min-height: 30px;
-		padding: 5px 9px;
+		min-height: 28px;
+		padding: 4px 8px;
 		border: 1px solid var(--border);
 		border-radius: 5px;
 		background: var(--surface);
@@ -96,8 +97,9 @@
 	::-webkit-scrollbar { width: 9px; height: 9px; }
 	::-webkit-scrollbar-thumb {
 		background: color-mix(in srgb, var(--muted) 28%, transparent);
-		border: 2px solid var(--surface);
+		background-clip: content-box;
+		border: 2px solid transparent;
 		border-radius: 8px;
 	}
-	::-webkit-scrollbar-track { background: var(--surface); }
+	::-webkit-scrollbar-track { background: transparent; }
 }

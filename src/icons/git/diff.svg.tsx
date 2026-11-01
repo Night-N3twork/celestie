@@ -1,14 +1,16 @@
 import { path, type SVGProps } from "@icons/icons";
 import Svg, { Box } from "@icons/Svg";
+import { createUniqueId } from "solid-js";
 
 export default function DiffIcon(props: SVGProps) {
 	const s = props.size;
+	const id = createUniqueId();
 	const scale = (value: number) => (value * s) / 64;
 	return (
 		<Svg title="Diff" {...props}>
 			{!props.nobox && <Box size={s} />}
 			<defs>
-				<g id="diff">
+				<g id={id}>
 					<circle cx={scale(22)} cy={scale(22)} r={scale(4)} />
 					<path
 						d={path([
@@ -22,8 +24,8 @@ export default function DiffIcon(props: SVGProps) {
 					/>
 				</g>
 			</defs>
-			<use href="#diff" />
-			<use href="#diff" transform={`rotate(180,${s / 2},${s / 2})`} />
+			<use href={`#${id}`} />
+			<use href={`#${id}`} transform={`rotate(180,${s / 2},${s / 2})`} />
 		</Svg>
 	);
 }

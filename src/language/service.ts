@@ -2,17 +2,84 @@ import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
 import type { ExplorerEntry } from "../platform/host";
 import type { WorkspaceHost } from "../platform/services";
 import type { WorkspaceDocument } from "../workspace/workspaceDocument";
+import { type LanguageHost, offsets } from "./lsp";
 import type { LanguageDocument, LanguageResponse } from "./protocol";
 export function createLanguageService(options: {
 	host: WorkspaceHost;
 	roots: Accessor<ExplorerEntry[]>;
 	documents: Accessor<readonly WorkspaceDocument[]>;
 	revision: Accessor<number>;
+	languages?: LanguageHost;
 }) {
 	const [results, setResults] = createSignal(
 		new Map<string, LanguageDocument>(),
 	);
 	const [status, setStatus] = createSignal("");
+	const [native, setNative] = createSignal(
+		new Map<string, LanguageDocument>(),
+	);
+	const synchronize = async () => {
+		await options.languages?.sync(
+			options
+				.documents()
+				.filter(
+					(doc) =>
+						!doc.missing &&
+						options
+							.roots()
+							.some((root) => doc.id.startsWith(`${root.id}/`)),
+				)
+				.map((doc) => ({
+					saved: !doc.dirty,
+					id: doc.id,
+					name: doc.name,
+					text: doc.editor.snapshot.text,
+					version: doc.editor.snapshot.version,
+				})),
+		);
+	};
+	const removeDiagnostics = options.languages?.onDiagnostics((event) => {
+		setNative((before) =>
+			new Map(before).set(event.id, {
+				id: event.id,
+				text: event.text,
+				tokens: [],
+				problems: event.diagnostics
+					.filter(
+						(diagnostic) =>
+							diagnostic.severity === undefined ||
+							diagnostic.severity <= 2,
+					)
+					.map((diagnostic) => ({
+						id: event.id,
+						...offsets(event.text, diagnostic.range),
+						line: diagnostic.range.start.line + 1,
+						column: diagnostic.range.start.character + 1,
+						message:
+							typeof diagnostic.message === "string"
+								? diagnostic.message
+								: diagnostic.message.value,
+						code: diagnostic.code ?? "",
+						severity:
+							diagnostic.severity === 2
+								? ("warning" as const)
+								: ("error" as const),
+					})),
+			}),
+		);
+	});
+	const combined = () => {
+		const all = new Map(results());
+		for (const [id, result] of native())
+			all.set(id, {
+				...result,
+				tokens:
+					all.get(id)?.text === result.text
+						? (all.get(id)?.tokens ?? [])
+						: [],
+			});
+		return all;
+	};
 	let worker: Worker | undefined,
 		timer: ReturnType<typeof setTimeout> | undefined,
 		version = 0,
@@ -73,6 +140,15 @@ export function createLanguageService(options: {
 		const current = ++version;
 		timer = setTimeout(() => {
 			if (disposed) return;
+			if (options.languages)
+				void synchronize()
+					.then(() => {
+						if (!disposed) setStatus("");
+					})
+					.catch((error) => {
+						if (!disposed)
+							setStatus(`Language server: ${String(error)}`);
+					});
 			const documents = options.documents();
 			if (
 				!documents.some((document) =>
@@ -131,13 +207,16 @@ export function createLanguageService(options: {
 		scanVersion++;
 		clearTimeout(timer);
 		worker?.terminate();
+		removeDiagnostics?.();
 	});
 	return {
-		results,
+		results: combined,
+		host: options.languages,
+		synchronize,
 		status,
 		refresh: () => scan(options.roots()),
 		problems: () =>
-			[...results().values()]
+			[...combined().values()]
 				.filter((result) =>
 					options
 						.documents()

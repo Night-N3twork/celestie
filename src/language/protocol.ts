@@ -10,7 +10,7 @@ export interface Problem {
 	line: number;
 	column: number;
 	message: string;
-	code: number;
+	code: number | string;
 	severity: "error" | "warning";
 }
 export interface LanguageDocument {

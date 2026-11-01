@@ -1,21 +1,15 @@
-.development {
-	flex-shrink: 0;
-	border-top: 1px solid var(--border);
-	background: var(--background);
-}
-.development-actions,
-.git-panel form {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 6px;
-	padding: 6px 10px;
-}
+.development { flex-shrink: 0; background: var(--surface); }
 .development-content {
 	height: 260px;
-	max-height: 40vh;
+	max-height: 65vh;
+	overflow: hidden;
+}
+.development-content > section,
+.development-content > .task-output {
+	height: 100%;
+	box-sizing: border-box;
 	overflow: auto;
-	padding: 8px 12px;
+	padding: 12px 16px;
 }
 .terminal-panel { height: 100%; min-height: 100px; }
 .terminal-sessions {
@@ -25,10 +19,29 @@
 }
 .terminal-tabs,
 .terminal-tab { display: flex; align-items: center; }
-.terminal-tabs { gap: 6px; padding-bottom: 6px; }
-.terminal-tabs button[aria-pressed="true"] { color: var(--accent); }
-.terminal-session { flex: 1; min-height: 0; }
-.development p { padding: 5px 0; color: var(--muted); }
+.terminal-tabs {
+	flex-shrink: 0;
+	height: 32px;
+	gap: 4px;
+	padding: 0 10px;
+	border-bottom: 1px solid var(--border);
+	overflow-x: auto;
+}
+.terminal-tab {
+	flex-shrink: 0;
+	border-radius: 4px;
+	color: var(--muted);
+}
+.terminal-tab:has(button[aria-pressed="true"]) { color: var(--foreground); background: var(--surface-raised); }
+.workbench .terminal-tab > button { min-height: 24px; font-size: 11px; }
+.workbench .terminal-tab > .icon-button { width: 24px; min-width: 24px; }
+.terminal-tabs > .icon-button { margin-left: auto; }
+.terminal-session {
+	flex: 1;
+	min-height: 0;
+	padding: 8px 16px;
+}
+.development > p { padding: 6px 12px; color: var(--muted); }
 .task-output,
 .diff-preview pre {
 	white-space: pre-wrap;
@@ -36,18 +49,6 @@
 	font:
 		12px/1.6 "JetBrains Mono Variable",
 		monospace;
-}
-.workbench .problem {
-	display: block;
-	width: 100%;
-	text-align: left;
-	white-space: pre-wrap;
-	color: var(--danger);
-}
-.git-panel li {
-	display: flex;
-	align-items: center;
-	gap: 8px;
 }
 .diff-preview {
 	display: grid;
@@ -70,28 +71,4 @@
 	color: var(--muted);
 	font-size: 10px;
 }
-.development-actions > button[aria-pressed="true"] { color: var(--accent); }
 .terminal-container { height: 100%; }
-.source-control { overflow-y: auto; }
-.source-control .git-panel { padding: 0 8px; }
-.source-control .git-panel li { flex-wrap: wrap; padding: 5px 0; }
-.source-control .git-panel li > button:first-child {
-	width: 100%;
-	justify-content: flex-start;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-.source-control .git-panel form {
-	flex-direction: column;
-	align-items: stretch;
-	padding: 8px 0;
-}
-.source-control .git-panel label {
-	flex-direction: column;
-	align-items: stretch;
-	gap: 3px;
-}
-.source-control .git-panel input { width: 100%; }
-.source-control .diff-preview { grid-template-columns: 1fr; }
-.source-control .diff-preview pre { max-height: 220px; overflow: auto; }
-.source-control > p { padding: 10px 15px; }
