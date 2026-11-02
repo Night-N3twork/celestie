@@ -1,4 +1,5 @@
 import type { Disposable, TextSelection } from "../api/types";
+import { findTextChange } from "../view/input";
 import type { KeyboardShortcuts } from "./keyboard-shortcuts";
 import { findLiteralMatches, type SearchMatch } from "./search";
 
@@ -9,6 +10,7 @@ export interface SearchEdit {
 }
 
 interface FindReplaceHost {
+	onOpen(): void;
 	getText(): string;
 	getSelection(): TextSelection;
 	selectMatch(match: SearchMatch): void;
@@ -32,6 +34,11 @@ export class FindReplace implements Disposable {
 	private current = -1;
 	private truncated = false;
 	private disposed = false;
+	private readonly matchCase: HTMLInputElement;
+	private readonly wholeWord: HTMLInputElement;
+	private readonly inSelection: HTMLInputElement;
+	private scope: { from: number; to: number } | undefined;
+	private previousText = "";
 
 	constructor(
 		container: HTMLElement,
@@ -46,7 +53,7 @@ export class FindReplace implements Disposable {
 		this.panel.hidden = true;
 		this.query = document.createElement("input");
 		this.query.type = "search";
-		this.query.placeholder = "Find (literal, case-sensitive)";
+		this.query.placeholder = "Find text";
 		this.query.setAttribute("aria-label", "Find text");
 		this.replacement = document.createElement("input");
 		this.replacement.placeholder = "Replace with";
@@ -90,7 +97,26 @@ export class FindReplace implements Disposable {
 			this.replaceOne,
 			this.replaceAll,
 		);
-		this.panel.append(findRow, this.replacementRow);
+		const optionsRow = document.createElement("div");
+		optionsRow.className = "editor-find-row editor-find-options";
+		const option = (name: string, checked = false): HTMLInputElement => {
+			const label = document.createElement("label");
+			const input = document.createElement("input");
+			input.type = "checkbox";
+			input.checked = checked;
+			label.append(input, name);
+			optionsRow.append(label);
+			input.addEventListener("change", this.queryChanged);
+			this.subscriptions.push({
+				dispose: () =>
+					input.removeEventListener("change", this.queryChanged),
+			});
+			return input;
+		};
+		this.matchCase = option("Match case", true);
+		this.wholeWord = option("Whole word");
+		this.inSelection = option("In selection");
+		this.panel.append(findRow, optionsRow, this.replacementRow);
 		container.prepend(this.panel);
 		this.query.addEventListener("input", this.queryChanged);
 
@@ -170,7 +196,17 @@ export class FindReplace implements Disposable {
 
 	open(replace = false): void {
 		if (this.disposed) return;
+		this.host.onOpen();
 		const selection = this.host.getSelection();
+		if (!this.isOpen) {
+			this.scope =
+				selection.start !== selection.end
+					? { from: selection.start, to: selection.end }
+					: undefined;
+			this.previousText = this.host.getText();
+			this.inSelection.checked = false;
+			this.inSelection.disabled = !this.scope;
+		}
 		const seed = this.host.getText().slice(selection.start, selection.end);
 		if (!this.isOpen && seed && !seed.includes("\n"))
 			this.query.value = seed;
@@ -181,18 +217,37 @@ export class FindReplace implements Disposable {
 		this.query.select();
 	}
 
-	close(): void {
+	close(focus = true): void {
 		this.panel.hidden = true;
 		this.host.highlight([], -1);
-		this.host.focusEditor();
+		if (focus) this.host.focusEditor();
 	}
 
 	refresh(select = false, anchor = this.host.getSelection().start): void {
 		if (this.disposed || !this.isOpen) return;
-		const result = findLiteralMatches(
-			this.host.getText(),
-			this.query.value,
-		);
+		const text = this.host.getText();
+		const change = findTextChange(this.previousText, text);
+		if (change && this.scope) {
+			const delta = change.text.length - (change.to - change.from);
+			const map = (offset: number, end: boolean): number =>
+				offset < change.from
+					? offset
+					: offset > change.to
+						? offset + delta
+						: change.from + (end ? change.text.length : 0);
+			this.scope = {
+				from: map(this.scope.from, false),
+				to: map(this.scope.to, true),
+			};
+		}
+		this.previousText = text;
+		const result = findLiteralMatches(text, this.query.value, {
+			matchCase: this.matchCase.checked,
+			wholeWord: this.wholeWord.checked,
+			...(this.inSelection.checked && this.scope
+				? { scope: this.scope }
+				: {}),
+		});
 		this.matches = result.matches;
 		this.truncated = result.truncated;
 		const index = this.matches.findIndex((match) => match.from >= anchor);

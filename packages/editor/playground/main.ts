@@ -46,18 +46,21 @@ view.focus();
 const indentButton = document.getElementById("indent");
 const outdentButton = document.getElementById("outdent");
 const findButton = document.getElementById("find");
-if (!indentButton || !outdentButton || !findButton)
+const goToButton = document.getElementById("go-to");
+if (!indentButton || !outdentButton || !findButton || !goToButton)
 	throw new Error("Indentation controls were not found.");
 
 const indent = () => view.indent();
 const outdent = () => view.outdent();
 const find = () => view.openFind();
+const goTo = () => view.openGoTo();
 const preserveSelection = (event: PointerEvent) => {
 	if (event.button === 0) event.preventDefault();
 };
 indentButton.addEventListener("click", indent);
 outdentButton.addEventListener("click", outdent);
 findButton.addEventListener("click", find);
+goToButton.addEventListener("click", goTo);
 indentButton.addEventListener("pointerdown", preserveSelection);
 outdentButton.addEventListener("pointerdown", preserveSelection);
 
@@ -65,6 +68,7 @@ import.meta.hot?.dispose(() => {
 	indentButton.removeEventListener("click", indent);
 	outdentButton.removeEventListener("click", outdent);
 	findButton.removeEventListener("click", find);
+	goToButton.removeEventListener("click", goTo);
 	indentButton.removeEventListener("pointerdown", preserveSelection);
 	outdentButton.removeEventListener("pointerdown", preserveSelection);
 	view.dispose();

@@ -132,7 +132,7 @@
 	margin-top: 8px;
 }
 
-.editor-find-panel input {
+.editor-find-panel input:not([type="checkbox"]) {
 	flex: 1;
 	min-width: 180px;
 	border: 1px solid #666;
@@ -140,6 +140,21 @@
 	background: #1e1e1e;
 	color: #ddd;
 	font: inherit;
+}
+
+.editor-find-options label {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	cursor: pointer;
+}
+
+.editor-find-options input {
+	accent-color: #75beff;
+}
+
+.editor-find-panel input[aria-invalid="true"] {
+	border-color: #f48771;
 }
 
 .editor-find-panel button {

@@ -4,6 +4,7 @@ import type {
 	ModelChangeEvent,
 } from "../api/types";
 import { FindReplace, type SearchEdit } from "../features/find-replace";
+import { GoToLine } from "../features/go-to-line";
 import { planIndentation, type TextSelection } from "../features/indentation";
 import { KeyboardShortcuts } from "../features/keyboard-shortcuts";
 import { TextBuffer } from "../model/text-buffer";
@@ -25,6 +26,7 @@ export class EditorView implements Disposable {
 	private readonly cursorLabel: HTMLDivElement;
 	private readonly frame: HTMLDivElement;
 	private readonly find: FindReplace;
+	private readonly goTo: GoToLine;
 	private disposed = false;
 	private composing = false;
 	private pendingSelection: TextSelection | undefined;
@@ -97,6 +99,7 @@ export class EditorView implements Disposable {
 		this.find = new FindReplace(
 			this.frame,
 			{
+				onOpen: () => this.goTo.close(false),
 				getText: () => this.element.value,
 				getSelection: () => this.captureState().selection,
 				selectMatch: (match) => {
@@ -109,6 +112,28 @@ export class EditorView implements Disposable {
 					this.replaceSearch(edits, expectedText),
 				highlight: (matches, current) =>
 					this.renderer.setSearchMatches(matches, current),
+				focusEditor: () => this.focus(),
+			},
+			this.shortcuts,
+		);
+		this.goTo = new GoToLine(
+			this.frame,
+			{
+				onOpen: () => this.find.close(false),
+				getText: () => this.element.value,
+				getPosition: () =>
+					getInputPosition(
+						this.element.value,
+						this.element.selectionDirection === "backward"
+							? this.element.selectionStart
+							: this.element.selectionEnd,
+					),
+				selectOffset: (offset) => {
+					this.breakHistoryGroup();
+					this.element.setSelectionRange(offset, offset);
+					this.revealCursor();
+					this.updateCursor();
+				},
 				focusEditor: () => this.focus(),
 			},
 			this.shortcuts,
@@ -139,6 +164,10 @@ export class EditorView implements Disposable {
 
 	openFind(replace = false): void {
 		this.find.open(replace);
+	}
+
+	openGoTo(): void {
+		this.goTo.open();
 	}
 
 	private replaceSearch(
@@ -600,6 +629,7 @@ export class EditorView implements Disposable {
 		this.disposed = true;
 		this.element.removeEventListener("input", this.handleInput);
 		this.find.dispose();
+		this.goTo.dispose();
 		this.shortcuts.dispose();
 		this.element.removeEventListener("beforeinput", this.handleBeforeInput);
 		this.element.removeEventListener(
