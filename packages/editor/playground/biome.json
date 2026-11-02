@@ -1,0 +1,22 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+	"root": false,
+	"extends": ["../../../biome.json"],
+	"files": {
+		"includes": ["**", "!**/dist/**"]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"indentWidth": 4,
+		"lineEnding": "lf"
+	},
+	"html": {
+		"experimentalFullSupportEnabled": true,
+		"formatter": {
+			"enabled": true,
+			"indentScriptAndStyle": true,
+			"selfCloseVoidElements": "always"
+		}
+	}
+}
