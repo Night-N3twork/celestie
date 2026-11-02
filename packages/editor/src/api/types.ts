@@ -15,6 +15,25 @@ export interface TextEdit {
 	readonly text: string;
 }
 
+export interface TextSelection {
+	readonly start: number;
+	readonly end: number;
+	readonly direction: "forward" | "backward" | "none";
+}
+
+export interface HistoryViewState {
+	readonly owner: string;
+	readonly selection: TextSelection;
+	readonly scrollTop: number;
+	readonly scrollLeft: number;
+}
+
+export interface EditHistoryOptions {
+	readonly before?: HistoryViewState;
+	readonly after?: HistoryViewState;
+	readonly group?: string;
+}
+
 export interface ContentChange {
 	readonly offset: number;
 	readonly length: number;
@@ -27,6 +46,7 @@ export interface ModelChangeEvent {
 	readonly undoing: boolean;
 	readonly redoing: boolean;
 	readonly flush: boolean;
+	readonly historyState?: HistoryViewState;
 }
 
 export interface Disposable {

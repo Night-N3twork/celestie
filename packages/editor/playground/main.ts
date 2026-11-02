@@ -43,7 +43,26 @@ const model = new TextModel(text);
 const view = new EditorView(container, model);
 view.focus();
 
+const indentButton = document.getElementById("indent");
+const outdentButton = document.getElementById("outdent");
+if (!indentButton || !outdentButton)
+	throw new Error("Indentation controls were not found.");
+
+const indent = () => view.indent();
+const outdent = () => view.outdent();
+const preserveSelection = (event: PointerEvent) => {
+	if (event.button === 0) event.preventDefault();
+};
+indentButton.addEventListener("click", indent);
+outdentButton.addEventListener("click", outdent);
+indentButton.addEventListener("pointerdown", preserveSelection);
+outdentButton.addEventListener("pointerdown", preserveSelection);
+
 import.meta.hot?.dispose(() => {
+	indentButton.removeEventListener("click", indent);
+	outdentButton.removeEventListener("click", outdent);
+	indentButton.removeEventListener("pointerdown", preserveSelection);
+	outdentButton.removeEventListener("pointerdown", preserveSelection);
 	view.dispose();
 	model.dispose();
 });

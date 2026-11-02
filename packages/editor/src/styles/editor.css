@@ -1,0 +1,113 @@
+.editor-renderer {
+	display: flex;
+	min-height: 240px;
+	overflow: hidden;
+	background: #1e1e1e;
+	color: #d4d4d4;
+	font: 16px / 24px monospace;
+	tab-size: 4;
+}
+
+.editor-text-viewport {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	overflow: auto;
+}
+
+.editor-text-surface {
+	position: relative;
+}
+
+.editor-text-rows {
+	position: absolute;
+	min-width: 100%;
+	width: max-content;
+	white-space: pre;
+}
+
+.editor-active-line {
+	position: absolute;
+	left: 0;
+	right: 0;
+	box-sizing: border-box;
+	height: 24px;
+	border-block: 1px solid rgb(255 255 255 / 5%);
+	background: rgb(255 255 255 / 3%);
+	pointer-events: none;
+}
+
+.editor-gutter-interactive {
+	cursor: pointer;
+}
+
+.editor-gutter [data-line].is-active {
+	color: #d4d4d4;
+	background: rgb(255 255 255 / 5%);
+}
+
+.editor-renderer-with-input .editor-text-viewport {
+	overflow: hidden;
+}
+
+.editor-renderer-with-input .editor-text-surface {
+	position: absolute;
+	top: 0;
+	left: 0;
+	overflow: hidden;
+	pointer-events: none;
+}
+
+.editor-native-input {
+	position: absolute;
+	inset: 0;
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	border: 0;
+	padding: 16px;
+	resize: none;
+	overflow: auto;
+	background: transparent;
+	color: transparent;
+	caret-color: #fff;
+	font: inherit;
+	tab-size: inherit;
+	scrollbar-color: #666 #1e1e1e;
+	-webkit-text-fill-color: transparent;
+}
+
+.editor-native-input::selection {
+	background: rgb(57 115 185 / 50%);
+	color: transparent;
+	-webkit-text-fill-color: transparent;
+}
+
+.editor-cursor-label {
+	border-top: 1px solid #3c3c3c;
+	padding: 8px 12px;
+	background: #252526;
+	color: #ccc;
+	font: 12px monospace;
+	text-align: right;
+}
+
+@media (forced-colors: active) {
+	.editor-native-input {
+		background: Canvas;
+		color: CanvasText;
+		caret-color: CanvasText;
+		-webkit-text-fill-color: CanvasText;
+	}
+
+	.editor-native-input::selection {
+		background: Highlight;
+		color: HighlightText;
+		-webkit-text-fill-color: HighlightText;
+	}
+
+	.editor-renderer-with-input .editor-text-surface {
+		visibility: hidden;
+	}
+}

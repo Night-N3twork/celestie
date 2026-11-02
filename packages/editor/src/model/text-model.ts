@@ -1,6 +1,8 @@
 import type {
 	ContentChange,
 	Disposable,
+	EditHistoryOptions,
+	HistoryViewState,
 	ModelChangeEvent,
 	Position,
 	Range,
@@ -71,7 +73,7 @@ export class TextModel implements Disposable {
 		this.publish(next, [change], false, false, true);
 	}
 
-	edit(edits: readonly TextEdit[]): void {
+	edit(edits: readonly TextEdit[], history: EditHistoryOptions = {}): void {
 		this.assertWritable();
 		const changes = edits
 			.map((edit) => {
@@ -84,36 +86,25 @@ export class TextModel implements Disposable {
 					text: edit.text,
 				};
 			})
-			.sort(
-				(a, b) =>
-					a.offset - b.offset ||
-					a.length - b.length,
-			);
+			.sort((a, b) => a.offset - b.offset || a.length - b.length);
 		for (let index = 1; index < changes.length; index++) {
 			const previous = changes[index - 1];
 			const current = changes[index];
 			if (
 				previous &&
 				current &&
-				(current.offset <
-					previous.offset + previous.length ||
-					(current.offset ===
-						previous.offset + previous.length &&
-						(previous.length === 0 ||
-							current.length === 0)))
+				(current.offset < previous.offset + previous.length ||
+					(current.offset === previous.offset + previous.length &&
+						(previous.length === 0 || current.length === 0)))
 			) {
-				throw new RangeError(
-					"Edits overlap.",
-				);
+				throw new RangeError("Edits overlap.");
 			}
 		}
 		const before = this.buffer.getValue();
 		const effective = changes.filter(
 			(change) =>
-				before.slice(
-					change.offset,
-					change.offset + change.length,
-				) !== change.text,
+				before.slice(change.offset, change.offset + change.length) !==
+				change.text,
 		);
 		if (effective.length === 0) return;
 		const parts: string[] = [];
@@ -125,7 +116,7 @@ export class TextModel implements Disposable {
 		parts.push(before.slice(cursor));
 		const after = parts.join("");
 		const next = new TextBuffer(after);
-		this.history.record(before, after);
+		this.history.record(before, after, history);
 		this.publish(next, effective, false, false, false);
 	}
 
@@ -141,8 +132,9 @@ export class TextModel implements Disposable {
 
 	undo(): void {
 		this.assertWritable();
-		const text = this.history.peekUndo();
-		if (text === undefined) return;
+		const entry = this.history.peekUndo();
+		if (!entry) return;
+		const text = entry.before;
 		const next = new TextBuffer(text);
 		const change = {
 			offset: 0,
@@ -150,13 +142,14 @@ export class TextModel implements Disposable {
 			text,
 		};
 		this.history.undo();
-		this.publish(next, [change], true, false, false);
+		this.publish(next, [change], true, false, false, entry.beforeState);
 	}
 
 	redo(): void {
 		this.assertWritable();
-		const text = this.history.peekRedo();
-		if (text === undefined) return;
+		const entry = this.history.peekRedo();
+		if (!entry) return;
+		const text = entry.after;
 		const next = new TextBuffer(text);
 		const change = {
 			offset: 0,
@@ -164,7 +157,7 @@ export class TextModel implements Disposable {
 			text,
 		};
 		this.history.redo();
-		this.publish(next, [change], false, true, false);
+		this.publish(next, [change], false, true, false, entry.afterState);
 	}
 
 	createSnapshot(): { read(): string | null } {
@@ -210,6 +203,7 @@ export class TextModel implements Disposable {
 		undoing: boolean,
 		redoing: boolean,
 		flush: boolean,
+		historyState?: HistoryViewState,
 	): void {
 		this.buffer = buffer;
 		this.version++;
@@ -221,6 +215,7 @@ export class TextModel implements Disposable {
 			undoing,
 			redoing,
 			flush,
+			...(historyState ? { historyState } : {}),
 		});
 		this.notifying = true;
 		try {
@@ -230,8 +225,7 @@ export class TextModel implements Disposable {
 				} catch (error) {
 					try {
 						this.reportError(error);
-					} catch {
-					}
+					} catch {}
 				}
 			}
 		} finally {
