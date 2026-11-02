@@ -1,4 +1,4 @@
-import type { Disposable } from "../api/types";
+import type { Disposable, Position } from "../api/types";
 import type { SearchMatch } from "../features/search";
 import type { TextModel } from "../model/text-model";
 import "../styles/editor.css";
@@ -27,6 +27,8 @@ export class TextRenderer implements Disposable {
 	private readonly lineHeight = 24;
 	private disposed = false;
 	private activeLine = 0;
+	private bracketKey = "";
+	private readonly bracketHighlights = new Map<number, number[]>();
 	private readonly searchHighlights = new Map<
 		number,
 		{ from: number; to: number; current: boolean }[]
@@ -111,29 +113,73 @@ export class TextRenderer implements Disposable {
 			row.dataset.line = String(line);
 			row.style.height = `${this.lineHeight}px`;
 			const text = this.model.getLineContent(line);
-			let cursor = 0;
-			for (const highlight of this.searchHighlights.get(line) ?? []) {
-				row.appendChild(
-					this.scroller.ownerDocument.createTextNode(
-						text.slice(cursor, highlight.from),
-					),
-				);
-				const mark = this.scroller.ownerDocument.createElement("span");
-				mark.className = highlight.current
-					? "editor-find-match editor-find-match-current"
-					: "editor-find-match";
-				mark.textContent = text.slice(highlight.from, highlight.to);
-				row.appendChild(mark);
-				cursor = highlight.to;
-			}
-			row.appendChild(
-				this.scroller.ownerDocument.createTextNode(text.slice(cursor)),
-			);
+			this.appendHighlightedText(row, text, line);
 			fragment.appendChild(row);
 		}
 		this.rows.replaceChildren(fragment);
 		this.positionActiveLine();
 	};
+
+	private appendHighlightedText(
+		row: HTMLElement,
+		text: string,
+		line: number,
+	): void {
+		const events = new Map<number, { add: string[]; remove: string[] }>();
+		const eventAt = (offset: number) => {
+			const event = events.get(offset) ?? { add: [], remove: [] };
+			events.set(offset, event);
+			return event;
+		};
+		const mark = (from: number, to: number, name: string) => {
+			eventAt(from).add.push(name);
+			eventAt(to).remove.push(name);
+		};
+		for (const highlight of this.searchHighlights.get(line) ?? []) {
+			mark(highlight.from, highlight.to, "editor-find-match");
+			if (highlight.current)
+				mark(highlight.from, highlight.to, "editor-find-match-current");
+		}
+		for (const column of this.bracketHighlights.get(line) ?? [])
+			mark(column, column + 1, "editor-matching-bracket");
+		const active = new Set<string>();
+		let cursor = 0;
+		const append = (end: number) => {
+			if (end <= cursor) return;
+			const content = text.slice(cursor, end);
+			if (active.size) {
+				const span = row.ownerDocument.createElement("span");
+				span.className = [...active].join(" ");
+				span.textContent = content;
+				row.append(span);
+			} else row.append(row.ownerDocument.createTextNode(content));
+			cursor = end;
+		};
+		for (const [offset, event] of [...events].sort(
+			([left], [right]) => left - right,
+		)) {
+			append(Math.min(text.length, offset));
+			for (const name of event.remove) active.delete(name);
+			for (const name of event.add) active.add(name);
+		}
+		append(text.length);
+	}
+
+	setBracketMatches(positions: readonly Position[]): void {
+		const key = positions
+			.map(({ line, column }) => `${line}:${column}`)
+			.sort()
+			.join(",");
+		if (this.disposed || key === this.bracketKey) return;
+		this.bracketKey = key;
+		this.bracketHighlights.clear();
+		for (const { line, column } of positions) {
+			const list = this.bracketHighlights.get(line) ?? [];
+			list.push(column - 1);
+			this.bracketHighlights.set(line, list);
+		}
+		this.render();
+	}
 
 	setSearchMatches(matches: readonly SearchMatch[], current: number): void {
 		if (this.disposed) return;

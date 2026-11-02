@@ -3,10 +3,22 @@ import type {
 	HistoryViewState,
 	ModelChangeEvent,
 } from "../api/types";
+import { BracketAnalysis } from "../features/bracket-analysis";
+import { planBracketInput } from "../features/bracket-editing";
+import { planBlockComment, planLineComment } from "../features/comments";
+import type { EditingPlan } from "../features/editing-plan";
 import { FindReplace, type SearchEdit } from "../features/find-replace";
 import { GoToLine } from "../features/go-to-line";
 import { planIndentation, type TextSelection } from "../features/indentation";
-import { KeyboardShortcuts } from "../features/keyboard-shortcuts";
+import {
+	KeyboardShortcuts,
+	registerCommentShortcuts,
+} from "../features/keyboard-shortcuts";
+import {
+	type LanguageConfiguration,
+	plainTextConfiguration,
+	resolveLanguageConfiguration,
+} from "../languages/configuration";
 import { TextBuffer } from "../model/text-buffer";
 import type { TextModel } from "../model/text-model";
 import {
@@ -50,11 +62,19 @@ export class EditorView implements Disposable {
 	private compositionGroup: string | undefined;
 	private compositionEndText = "";
 	private compositionEndTime = 0;
+	private analysis: BracketAnalysis | undefined;
+	private readonly language: LanguageConfiguration;
 
 	constructor(
 		container: HTMLElement,
 		private readonly model: TextModel,
+		options: {
+			readonly languageConfiguration?: LanguageConfiguration;
+		} = {},
 	) {
+		this.language = resolveLanguageConfiguration(
+			options.languageConfiguration ?? plainTextConfiguration,
+		);
 		const document = container.ownerDocument;
 		this.frame = document.createElement("div");
 		this.frame.className = "editor-view-frame";
@@ -64,7 +84,7 @@ export class EditorView implements Disposable {
 		this.element.setAttribute("aria-label", "Editor");
 		this.element.setAttribute(
 			"aria-description",
-			"Tab indents; Shift+Tab outdents. Control or Command Z undoes. Add Shift to redo. Press Escape, then Tab to move focus.",
+			"Tab indents; Shift+Tab outdents. Control or Command Z undoes. Add Shift to redo. Control or Command slash toggles line comments; Shift Alt A toggles block comments. Press Escape, then Tab to move focus.",
 		);
 		this.element.title =
 			"Tab: indent · Shift+Tab: outdent · Escape, then Tab: move focus";
@@ -95,6 +115,10 @@ export class EditorView implements Disposable {
 			redo: () => this.redo(),
 			isComposing: () => this.composing,
 			breakHistoryGroup: this.breakHistoryGroup,
+		});
+		registerCommentShortcuts(this.shortcuts, {
+			line: () => this.toggleLineComment(),
+			block: () => this.toggleBlockComment(),
 		});
 		this.find = new FindReplace(
 			this.frame,
@@ -170,9 +194,59 @@ export class EditorView implements Disposable {
 		this.goTo.open();
 	}
 
+	toggleLineComment(): void {
+		if (this.composing) return;
+		this.applyEditingPlan(
+			planLineComment(
+				this.element.value,
+				this.captureState().selection,
+				this.language,
+			),
+		);
+	}
+
+	toggleBlockComment(): void {
+		if (this.composing) return;
+		this.applyEditingPlan(
+			planBlockComment(
+				this.element.value,
+				this.captureState().selection,
+				this.language,
+			),
+		);
+	}
+
+	private getAnalysis(): BracketAnalysis {
+		if (this.analysis?.text !== this.element.value)
+			this.analysis = new BracketAnalysis(
+				this.element.value,
+				this.language,
+			);
+		return this.analysis;
+	}
+
+	private applyEditingPlan(plan: EditingPlan | undefined): void {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		if (!plan || this.composing) return;
+		this.beforeInputState = undefined;
+		this.breakHistoryGroup();
+		if (plan.edits.length)
+			this.replaceSearch(plan.edits, this.element.value, plan.selection);
+		else {
+			this.element.setSelectionRange(
+				plan.selection.start,
+				plan.selection.end,
+				plan.selection.direction,
+			);
+			this.updateCursor();
+			this.revealCursor();
+		}
+	}
+
 	private replaceSearch(
 		edits: readonly SearchEdit[],
 		expectedText: string,
+		desiredSelection?: TextSelection,
 	): void {
 		if (this.composing || !edits.length) return;
 		if (
@@ -185,7 +259,7 @@ export class EditorView implements Disposable {
 		const before = this.captureState();
 		const first = edits[0];
 		const offset = (first?.from ?? 0) + (first?.text.length ?? 0);
-		const selection: TextSelection = {
+		const selection: TextSelection = desiredSelection ?? {
 			start: offset,
 			end: offset,
 			direction: "none",
@@ -213,6 +287,12 @@ export class EditorView implements Disposable {
 		} finally {
 			this.pendingSelection = undefined;
 		}
+		this.element.setSelectionRange(
+			selection.start,
+			selection.end,
+			selection.direction,
+		);
+		this.updateCursor();
 		this.revealCursor();
 	}
 
@@ -330,6 +410,13 @@ export class EditorView implements Disposable {
 		const position = getInputPosition(this.element.value, offset);
 		this.cursorLabel.textContent = `Ln ${position.line}, Col ${position.column}`;
 		this.renderer.setActiveLine(position.line);
+		const matches =
+			selection.start === selection.end
+				? this.getAnalysis().matchingAt(offset)
+				: [];
+		this.renderer.setBracketMatches(
+			matches.map((match) => getInputPosition(this.element.value, match)),
+		);
 	};
 
 	private readonly handleDocumentSelection = (): void => {
@@ -376,26 +463,25 @@ export class EditorView implements Disposable {
 		if (
 			this.composing ||
 			event.isComposing ||
+			(this.compositionGroup &&
+				event.data === this.compositionEndText &&
+				Date.now() - this.compositionEndTime < 100) ||
 			!event.cancelable ||
 			event.defaultPrevented
 		)
 			return;
-		if (
-			event.inputType !== "insertLineBreak" &&
-			event.inputType !== "insertParagraph"
-		)
-			return;
-		event.preventDefault();
-		const { selectionStart, selectionEnd, value } = this.element;
-		const indent = getLineIndent(value, selectionStart);
-		this.element.setRangeText(
-			`\n${indent}`,
-			selectionStart,
-			selectionEnd,
-			"end",
+		const plan = planBracketInput(
+			this.element.value,
+			this.captureState().selection,
+			event.inputType,
+			event.data,
+			this.language,
+			this.getAnalysis(),
 		);
-		this.handleInput();
-		this.revealCursor();
+		if (plan) {
+			event.preventDefault();
+			this.applyEditingPlan(plan);
+		}
 	};
 
 	private revealCursor(): void {
@@ -627,6 +713,7 @@ export class EditorView implements Disposable {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.analysis = undefined;
 		this.element.removeEventListener("input", this.handleInput);
 		this.find.dispose();
 		this.goTo.dispose();

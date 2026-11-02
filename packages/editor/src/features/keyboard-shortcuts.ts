@@ -21,6 +21,46 @@ interface EditorShortcutCommands {
 	readonly breakHistoryGroup: () => void;
 }
 
+export function registerCommentShortcuts(
+	shortcuts: KeyboardShortcuts,
+	commands: { line: () => void; block: () => void },
+): Disposable {
+	const subscriptions = [
+		shortcuts.register({
+			id: "editor.toggleLineComment",
+			key: "/",
+			primary: true,
+			run: commands.line,
+		}),
+		shortcuts.register({
+			id: "editor.toggleBlockComment",
+			key: "?",
+			primary: true,
+			shift: true,
+			run: commands.block,
+		}),
+		shortcuts.register({
+			id: "editor.toggleBlockCommentSlash",
+			key: "/",
+			primary: true,
+			shift: true,
+			run: commands.block,
+		}),
+		shortcuts.register({
+			id: "editor.toggleBlockCommentAlt",
+			key: "a",
+			shift: true,
+			alt: true,
+			run: commands.block,
+		}),
+	];
+	return {
+		dispose: () => {
+			for (const subscription of subscriptions) subscription.dispose();
+		},
+	};
+}
+
 export class KeyboardShortcuts implements Disposable {
 	private readonly bindings: KeyboardShortcut[] = [];
 	private readonly scopes = new Set<Disposable>();

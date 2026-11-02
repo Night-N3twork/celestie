@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
+import { typescriptConfiguration } from "../src/languages/configuration";
 import { TextModel } from "../src/model/text-model";
 import { EditorView } from "../src/view/editor-view";
 
@@ -40,20 +41,39 @@ console.log(getRemainingTasks());
 `;
 
 const model = new TextModel(text);
-const view = new EditorView(container, model);
+const view = new EditorView(container, model, {
+	languageConfiguration: typescriptConfiguration,
+});
 view.focus();
 
 const indentButton = document.getElementById("indent");
 const outdentButton = document.getElementById("outdent");
 const findButton = document.getElementById("find");
 const goToButton = document.getElementById("go-to");
-if (!indentButton || !outdentButton || !findButton || !goToButton)
+const lineCommentButton = document.getElementById("line-comment");
+const blockCommentButton = document.getElementById("block-comment");
+if (
+	!indentButton ||
+	!outdentButton ||
+	!findButton ||
+	!goToButton ||
+	!lineCommentButton ||
+	!blockCommentButton
+)
 	throw new Error("Indentation controls were not found.");
 
 const indent = () => view.indent();
 const outdent = () => view.outdent();
 const find = () => view.openFind();
 const goTo = () => view.openGoTo();
+const lineComment = () => {
+	view.toggleLineComment();
+	view.focus();
+};
+const blockComment = () => {
+	view.toggleBlockComment();
+	view.focus();
+};
 const preserveSelection = (event: PointerEvent) => {
 	if (event.button === 0) event.preventDefault();
 };
@@ -61,6 +81,10 @@ indentButton.addEventListener("click", indent);
 outdentButton.addEventListener("click", outdent);
 findButton.addEventListener("click", find);
 goToButton.addEventListener("click", goTo);
+lineCommentButton.addEventListener("click", lineComment);
+blockCommentButton.addEventListener("click", blockComment);
+lineCommentButton.addEventListener("pointerdown", preserveSelection);
+blockCommentButton.addEventListener("pointerdown", preserveSelection);
 indentButton.addEventListener("pointerdown", preserveSelection);
 outdentButton.addEventListener("pointerdown", preserveSelection);
 
@@ -69,6 +93,10 @@ import.meta.hot?.dispose(() => {
 	outdentButton.removeEventListener("click", outdent);
 	findButton.removeEventListener("click", find);
 	goToButton.removeEventListener("click", goTo);
+	lineCommentButton.removeEventListener("click", lineComment);
+	blockCommentButton.removeEventListener("click", blockComment);
+	lineCommentButton.removeEventListener("pointerdown", preserveSelection);
+	blockCommentButton.removeEventListener("pointerdown", preserveSelection);
 	indentButton.removeEventListener("pointerdown", preserveSelection);
 	outdentButton.removeEventListener("pointerdown", preserveSelection);
 	view.dispose();

@@ -5,11 +5,6 @@
 	min-height: 240px;
 }
 
-.editor-view-frame > .editor-renderer {
-	flex: 1;
-	min-height: 0;
-}
-
 .editor-renderer {
 	display: flex;
 	min-height: 240px;
@@ -18,6 +13,11 @@
 	color: #d4d4d4;
 	font: 16px / 24px monospace;
 	tab-size: 4;
+}
+
+.editor-view-frame > .editor-renderer {
+	flex: 1;
+	min-height: 0;
 }
 
 .editor-text-viewport {
@@ -180,6 +180,11 @@
 .editor-find-match-current {
 	background: #785020;
 	outline-color: #edb665;
+}
+
+.editor-matching-bracket {
+	background: rgb(117 190 255 / 18%);
+	outline: 1px solid #75beff;
 }
 
 @media (forced-colors: active) {
