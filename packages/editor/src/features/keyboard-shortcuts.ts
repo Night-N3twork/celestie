@@ -23,6 +23,7 @@ interface EditorShortcutCommands {
 
 export class KeyboardShortcuts implements Disposable {
 	private readonly bindings: KeyboardShortcut[] = [];
+	private readonly scopes = new Set<Disposable>();
 	private releaseTabFocus = false;
 	private disposed = false;
 
@@ -79,6 +80,26 @@ export class KeyboardShortcuts implements Disposable {
 		};
 	}
 
+	registerScope(
+		target: HTMLElement,
+		bindings: readonly KeyboardShortcut[],
+	): Disposable {
+		if (this.disposed) throw new Error("Keyboard shortcuts disposed.");
+		const listener = (event: KeyboardEvent): void => {
+			if (!event.defaultPrevented && !event.isComposing)
+				this.execute(event, bindings);
+		};
+		target.addEventListener("keydown", listener);
+		const scope = {
+			dispose: () => {
+				target.removeEventListener("keydown", listener);
+				this.scopes.delete(scope);
+			},
+		};
+		this.scopes.add(scope);
+		return scope;
+	}
+
 	private readonly reset = (): void => {
 		this.releaseTabFocus = false;
 		this.commands.breakHistoryGroup();
@@ -92,6 +113,7 @@ export class KeyboardShortcuts implements Disposable {
 		)
 			return;
 		if (event.key === "Escape") {
+			if (this.execute(event, this.bindings)) return;
 			this.releaseTabFocus = true;
 			this.commands.breakHistoryGroup();
 			return;
@@ -122,8 +144,15 @@ export class KeyboardShortcuts implements Disposable {
 		) {
 			this.commands.breakHistoryGroup();
 		}
-		for (let index = this.bindings.length - 1; index >= 0; index--) {
-			const binding = this.bindings[index];
+		this.execute(event, this.bindings);
+	};
+
+	private execute(
+		event: KeyboardEvent,
+		bindings: readonly KeyboardShortcut[],
+	): boolean {
+		for (let index = bindings.length - 1; index >= 0; index--) {
+			const binding = bindings[index];
 			if (
 				!binding ||
 				!this.matches(binding, event) ||
@@ -132,9 +161,10 @@ export class KeyboardShortcuts implements Disposable {
 				continue;
 			event.preventDefault();
 			binding.run();
-			return;
+			return true;
 		}
-	};
+		return false;
+	}
 
 	private matches(binding: KeyboardShortcut, event: KeyboardEvent): boolean {
 		if (binding.key.toLowerCase() !== event.key.toLowerCase()) return false;
@@ -157,5 +187,6 @@ export class KeyboardShortcuts implements Disposable {
 		this.target.removeEventListener("blur", this.reset);
 		this.target.removeEventListener("pointerdown", this.reset);
 		this.bindings.length = 0;
+		for (const scope of [...this.scopes]) scope.dispose();
 	}
 }

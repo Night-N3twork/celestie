@@ -1,4 +1,5 @@
 import type { Disposable } from "../api/types";
+import type { SearchMatch } from "../features/search";
 import type { TextModel } from "../model/text-model";
 import "../styles/editor.css";
 import { calculateViewport } from "./layout";
@@ -26,6 +27,10 @@ export class TextRenderer implements Disposable {
 	private readonly lineHeight = 24;
 	private disposed = false;
 	private activeLine = 0;
+	private readonly searchHighlights = new Map<
+		number,
+		{ from: number; to: number; current: boolean }[]
+	>();
 
 	constructor(
 		container: HTMLElement,
@@ -105,12 +110,58 @@ export class TextRenderer implements Disposable {
 			const row = this.scroller.ownerDocument.createElement("div");
 			row.dataset.line = String(line);
 			row.style.height = `${this.lineHeight}px`;
-			row.textContent = this.model.getLineContent(line);
+			const text = this.model.getLineContent(line);
+			let cursor = 0;
+			for (const highlight of this.searchHighlights.get(line) ?? []) {
+				row.appendChild(
+					this.scroller.ownerDocument.createTextNode(
+						text.slice(cursor, highlight.from),
+					),
+				);
+				const mark = this.scroller.ownerDocument.createElement("span");
+				mark.className = highlight.current
+					? "editor-find-match editor-find-match-current"
+					: "editor-find-match";
+				mark.textContent = text.slice(highlight.from, highlight.to);
+				row.appendChild(mark);
+				cursor = highlight.to;
+			}
+			row.appendChild(
+				this.scroller.ownerDocument.createTextNode(text.slice(cursor)),
+			);
 			fragment.appendChild(row);
 		}
 		this.rows.replaceChildren(fragment);
 		this.positionActiveLine();
 	};
+
+	setSearchMatches(matches: readonly SearchMatch[], current: number): void {
+		if (this.disposed) return;
+		this.searchHighlights.clear();
+		for (let index = 0; index < matches.length; index++) {
+			const match = matches[index];
+			if (!match) continue;
+			for (
+				let line = match.range.startLine;
+				line <= match.range.endLine;
+				line++
+			) {
+				const from =
+					line === match.range.startLine
+						? match.range.startColumn - 1
+						: 0;
+				const to =
+					line === match.range.endLine
+						? match.range.endColumn - 1
+						: this.model.getLineContent(line).length;
+				if (to <= from) continue;
+				const list = this.searchHighlights.get(line) ?? [];
+				list.push({ from, to, current: index === current });
+				this.searchHighlights.set(line, list);
+			}
+		}
+		this.render();
+	}
 
 	setActiveLine(line: number): void {
 		if (line === this.activeLine || this.disposed) return;

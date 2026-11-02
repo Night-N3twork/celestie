@@ -3,8 +3,10 @@ import type {
 	HistoryViewState,
 	ModelChangeEvent,
 } from "../api/types";
+import { FindReplace, type SearchEdit } from "../features/find-replace";
 import { planIndentation, type TextSelection } from "../features/indentation";
 import { KeyboardShortcuts } from "../features/keyboard-shortcuts";
+import { TextBuffer } from "../model/text-buffer";
 import type { TextModel } from "../model/text-model";
 import {
 	findTextChange,
@@ -21,6 +23,8 @@ export class EditorView implements Disposable {
 	private readonly subscription: Disposable;
 	private readonly renderer: TextRenderer;
 	private readonly cursorLabel: HTMLDivElement;
+	private readonly frame: HTMLDivElement;
+	private readonly find: FindReplace;
 	private disposed = false;
 	private composing = false;
 	private pendingSelection: TextSelection | undefined;
@@ -50,6 +54,9 @@ export class EditorView implements Disposable {
 		private readonly model: TextModel,
 	) {
 		const document = container.ownerDocument;
+		this.frame = document.createElement("div");
+		this.frame.className = "editor-view-frame";
+		container.appendChild(this.frame);
 		this.element = document.createElement("textarea");
 		this.element.className = "editor-native-input";
 		this.element.setAttribute("aria-label", "Editor");
@@ -66,15 +73,15 @@ export class EditorView implements Disposable {
 		this.element.wrap = "off";
 		this.element.value = normalizeInputText(model.getValue());
 		this.element.setSelectionRange(0, 0);
-		this.renderer = new TextRenderer(container, model, {
+		this.renderer = new TextRenderer(this.frame, model, {
 			input: this.element,
 			padding: 16,
-			height: "min(75vh, 800px)",
+			height: "100%",
 			onSelectLine: this.selectLine,
 		});
 		this.cursorLabel = document.createElement("div");
 		this.cursorLabel.className = "editor-cursor-label";
-		container.appendChild(this.cursorLabel);
+		this.frame.appendChild(this.cursorLabel);
 		for (const event of ["click", "keyup", "select", "selectionchange"]) {
 			this.element.addEventListener(event, this.updateCursor);
 		}
@@ -87,6 +94,25 @@ export class EditorView implements Disposable {
 			isComposing: () => this.composing,
 			breakHistoryGroup: this.breakHistoryGroup,
 		});
+		this.find = new FindReplace(
+			this.frame,
+			{
+				getText: () => this.element.value,
+				getSelection: () => this.captureState().selection,
+				selectMatch: (match) => {
+					this.breakHistoryGroup();
+					this.element.setSelectionRange(match.from, match.to);
+					this.revealCursor();
+					this.updateCursor();
+				},
+				replace: (edits, expectedText) =>
+					this.replaceSearch(edits, expectedText),
+				highlight: (matches, current) =>
+					this.renderer.setSearchMatches(matches, current),
+				focusEditor: () => this.focus(),
+			},
+			this.shortcuts,
+		);
 		this.element.addEventListener("beforeinput", this.handleBeforeInput);
 		this.element.addEventListener(
 			"compositionstart",
@@ -109,6 +135,56 @@ export class EditorView implements Disposable {
 
 	focus(): void {
 		this.element.focus();
+	}
+
+	openFind(replace = false): void {
+		this.find.open(replace);
+	}
+
+	private replaceSearch(
+		edits: readonly SearchEdit[],
+		expectedText: string,
+	): void {
+		if (this.composing || !edits.length) return;
+		if (
+			this.element.value !== expectedText ||
+			normalizeInputText(this.model.getValue()) !== expectedText
+		) {
+			throw new Error("Document changed. Run the search again.");
+		}
+		this.breakHistoryGroup();
+		const before = this.captureState();
+		const first = edits[0];
+		const offset = (first?.from ?? 0) + (first?.text.length ?? 0);
+		const selection: TextSelection = {
+			start: offset,
+			end: offset,
+			direction: "none",
+		};
+		const buffer = new TextBuffer(expectedText);
+		const eol = this.model.getValue().match(/\r\n|\r|\n/)?.[0] ?? "\n";
+		this.pendingSelection = selection;
+		try {
+			this.model.edit(
+				edits.map((edit) => {
+					const start = buffer.getPositionAt(edit.from);
+					const end = buffer.getPositionAt(edit.to);
+					return {
+						range: {
+							startLine: start.line,
+							startColumn: start.column,
+							endLine: end.line,
+							endColumn: end.column,
+						},
+						text: edit.text.replace(/\n/g, eol),
+					};
+				}),
+				{ before, after: { ...before, selection } },
+			);
+		} finally {
+			this.pendingSelection = undefined;
+		}
+		this.revealCursor();
 	}
 
 	indent(): void {
@@ -516,12 +592,14 @@ export class EditorView implements Disposable {
 		}
 		this.renderer.render();
 		this.updateCursor();
+		this.find.refresh();
 	}
 
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.element.removeEventListener("input", this.handleInput);
+		this.find.dispose();
 		this.shortcuts.dispose();
 		this.element.removeEventListener("beforeinput", this.handleBeforeInput);
 		this.element.removeEventListener(
@@ -542,5 +620,6 @@ export class EditorView implements Disposable {
 		this.subscription.dispose();
 		this.renderer.dispose();
 		this.cursorLabel.remove();
+		this.frame.remove();
 	}
 }

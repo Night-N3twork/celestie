@@ -1,3 +1,15 @@
+.editor-view-frame {
+	display: flex;
+	flex-direction: column;
+	height: min(75vh, 800px);
+	min-height: 240px;
+}
+
+.editor-view-frame > .editor-renderer {
+	flex: 1;
+	min-height: 0;
+}
+
 .editor-renderer {
 	display: flex;
 	min-height: 240px;
@@ -85,12 +97,74 @@
 }
 
 .editor-cursor-label {
+	flex: none;
 	border-top: 1px solid #3c3c3c;
 	padding: 8px 12px;
 	background: #252526;
 	color: #ccc;
 	font: 12px monospace;
 	text-align: right;
+}
+
+.editor-find-panel {
+	flex: none;
+	border-bottom: 1px solid #3c3c3c;
+	padding: 10px 12px;
+	background: #252526;
+	color: #d4d4d4;
+	font:
+		13px system-ui,
+		sans-serif;
+}
+
+.editor-find-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.editor-find-row[hidden] {
+	display: none;
+}
+
+.editor-find-row + .editor-find-row {
+	margin-top: 8px;
+}
+
+.editor-find-panel input {
+	flex: 1;
+	min-width: 180px;
+	border: 1px solid #666;
+	padding: 6px 8px;
+	background: #1e1e1e;
+	color: #ddd;
+	font: inherit;
+}
+
+.editor-find-panel button {
+	border: 1px solid #555;
+	border-radius: 3px;
+	padding: 6px 8px;
+	background: #333;
+	color: #ddd;
+	font: inherit;
+	cursor: pointer;
+}
+
+.editor-find-panel button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.editor-find-match {
+	background: #513e16;
+	outline: 1px solid #9a7430;
+}
+
+.editor-find-match-current {
+	background: #785020;
+	outline-color: #edb665;
 }
 
 @media (forced-colors: active) {
