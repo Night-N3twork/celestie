@@ -1,4 +1,6 @@
 dist
+public/icons/**/*.svg
+tsconfig.tsbuildinfo
 node_modules
 .env
 .vscode/settings.json
