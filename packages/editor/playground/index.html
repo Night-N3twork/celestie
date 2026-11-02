@@ -34,6 +34,7 @@
 			}
 
 			.editor-actions {
+				flex-wrap: wrap;
 				display: flex;
 				gap: 8px;
 				min-width: 0;
@@ -52,6 +53,28 @@
 				font-size: 12px;
 				cursor: pointer;
 			}
+
+			.editor-settings {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: center;
+				gap: 16px;
+				margin: 0;
+				border: 1px solid #3c3c3c;
+				border-bottom: 0;
+				padding: 8px 12px;
+				font-size: 12px;
+			}
+			.editor-settings label {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+			}
+			.editor-settings select {
+				background: #252526;
+				color: #ddd;
+				border: 1px solid #666;
+			}
 		</style>
 	</head>
 	<body>
@@ -59,6 +82,13 @@
 			<header class="file-header">
 				<h1 class="file-tab">example.ts</h1>
 				<fieldset class="editor-actions" aria-label="Editor actions">
+					<button
+						type="button"
+						id="commands"
+						title="Show commands (F1 or Ctrl/Cmd+Shift+P)"
+					>
+						Commands
+					</button>
 					<button type="button" id="indent">Indent</button>
 					<button type="button" id="outdent">Outdent</button>
 					<button
@@ -87,6 +117,21 @@
 					</button>
 				</fieldset>
 			</header>
+			<fieldset class="editor-settings" aria-label="Editor settings">
+				<label
+					>Tab size
+					<select id="tab-size" aria-label="Tab size"></select></label
+				>
+				<label
+					><input type="checkbox" id="insert-spaces" />Insert
+					spaces</label
+				>
+				<label><input type="checkbox" id="read-only" />Read-only</label>
+				<label
+					><input type="checkbox" id="tab-focus" />Tab moves
+					focus</label
+				>
+			</fieldset>
 			<div id="editor"></div>
 		</main>
 		<script type="module" src="/main.ts"></script>

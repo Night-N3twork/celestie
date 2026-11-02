@@ -1,4 +1,10 @@
 import type { TextSelection } from "../api/types";
+import {
+	defaultIndentation,
+	type IndentationOptions,
+	indentationUnit,
+	indentationWidth,
+} from "./indentation-options";
 
 export type { TextSelection } from "../api/types";
 
@@ -17,11 +23,26 @@ export function planIndentation(
 	text: string,
 	selection: TextSelection,
 	direction: "indent" | "outdent",
+	options: IndentationOptions = defaultIndentation,
 ): IndentationPlan {
 	const collapsed = selection.start === selection.end;
 	const edits: IndentationEdit[] = [];
 	if (collapsed && direction === "indent") {
-		edits.push({ from: selection.start, to: selection.end, text: "\t" });
+		const from =
+			selection.start === 0
+				? 0
+				: text.lastIndexOf("\n", selection.start - 1) + 1;
+		const column = indentationWidth(
+			text.slice(from, selection.start),
+			options.tabSize,
+		);
+		edits.push({
+			from: selection.start,
+			to: selection.end,
+			text: options.insertSpaces
+				? " ".repeat(options.tabSize - (column % options.tabSize))
+				: "\t",
+		});
 	} else {
 		let lineStart =
 			selection.start === 0
@@ -33,15 +54,22 @@ export function planIndentation(
 				: selection.end;
 		while (lineStart <= lastOffset) {
 			if (direction === "indent") {
-				edits.push({ from: lineStart, to: lineStart, text: "\t" });
+				edits.push({
+					from: lineStart,
+					to: lineStart,
+					text: indentationUnit(options),
+				});
 			} else {
 				let end = lineStart;
 				let columns = 0;
 				while (
-					columns < 4 &&
+					columns < options.tabSize &&
 					(text[end] === " " || text[end] === "\t")
 				) {
-					columns += text[end] === "\t" ? 4 - (columns % 4) : 1;
+					columns +=
+						text[end] === "\t"
+							? options.tabSize - (columns % options.tabSize)
+							: 1;
 					end++;
 				}
 				if (end > lineStart)

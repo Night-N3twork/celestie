@@ -1,6 +1,12 @@
 import type { TextSelection } from "../api/types";
 import { TextBuffer } from "../model/text-buffer";
 import type { EditingPlan } from "./editing-plan";
+import {
+	defaultIndentation,
+	type IndentationOptions,
+	indentationText,
+	indentationWidth,
+} from "./indentation-options";
 
 export type LineCommand =
 	| "moveUp"
@@ -15,6 +21,7 @@ export function planLineCommand(
 	text: string,
 	selection: TextSelection,
 	command: LineCommand,
+	options: IndentationOptions = defaultIndentation,
 ): EditingPlan | undefined {
 	const buffer = new TextBuffer(text);
 	const start = buffer.getPositionAt(selection.start);
@@ -116,15 +123,19 @@ export function planLineCommand(
 	const above = command === "insertAbove";
 	const indent =
 		buffer.getLineContent(above ? first : last).match(/^[\t ]*/)?.[0] ?? "";
+	const nextIndent = indentationText(
+		indentationWidth(indent, options.tabSize),
+		options,
+	);
 	const offset = above ? from : to;
 	return {
 		edits: [
 			{
 				from: offset,
 				to: offset,
-				text: above ? `${indent}\n` : `\n${indent}`,
+				text: above ? `${nextIndent}\n` : `\n${nextIndent}`,
 			},
 		],
-		selection: collapsed(offset + indent.length + (above ? 0 : 1)),
+		selection: collapsed(offset + nextIndent.length + (above ? 0 : 1)),
 	};
 }

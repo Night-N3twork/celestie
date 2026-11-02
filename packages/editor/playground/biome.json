@@ -3,7 +3,7 @@
 	"root": false,
 	"extends": ["../../../biome.json"],
 	"files": {
-		"includes": ["**", "!**/dist/**"]
+		"includes": ["**", "!**/dist"]
 	},
 	"formatter": {
 		"enabled": true,

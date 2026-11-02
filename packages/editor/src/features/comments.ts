@@ -7,6 +7,7 @@ export function planLineComment(
 	text: string,
 	selection: TextSelection,
 	configuration: LanguageConfiguration,
+	mode?: "add" | "remove",
 ): EditingPlan | undefined {
 	const marker = configuration.lineComment;
 	if (!marker) return planBlockComment(text, selection, configuration);
@@ -38,17 +39,24 @@ export function planLineComment(
 		from = newline + 1;
 	}
 	const meaningful = lines.filter((line) => !line.blank);
-	const uncomment =
-		meaningful.length > 0 &&
-		meaningful.every((line) =>
-			text.startsWith(marker, line.from + line.indent.length),
-		);
+	const uncomment = mode
+		? mode === "remove"
+		: meaningful.length > 0 &&
+			meaningful.every((line) =>
+				text.startsWith(marker, line.from + line.indent.length),
+			);
 	let common = meaningful[0]?.indent ?? lines[0]?.indent ?? "";
 	for (const line of meaningful)
 		while (!line.indent.startsWith(common)) common = common.slice(0, -1);
 	const edits: InputEdit[] = [];
 	for (const line of lines) {
 		if (line.blank && lines.length > 1) continue;
+		const commented = text.startsWith(
+			marker,
+			line.from + line.indent.length,
+		);
+		if ((mode === "add" && commented) || (mode === "remove" && !commented))
+			continue;
 		const offset =
 			line.from + (uncomment ? line.indent.length : common.length);
 		const to = uncomment

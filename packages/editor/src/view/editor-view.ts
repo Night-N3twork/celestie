@@ -1,3 +1,4 @@
+import type { EditorOptions, EditorViewOptions } from "../api/editor-options";
 import type {
 	Disposable,
 	HistoryViewState,
@@ -5,11 +6,27 @@ import type {
 } from "../api/types";
 import { BracketAnalysis } from "../features/bracket-analysis";
 import { planBracketInput } from "../features/bracket-editing";
+import { EditorClipboard, type TransferProvider } from "../features/clipboard";
+import { CommandMenu } from "../features/command-menu";
+import { CommandRegistry } from "../features/commands";
 import { planBlockComment, planLineComment } from "../features/comments";
+import {
+	expansionRanges,
+	planTextCommand,
+	planWordCommand,
+	type TextCommand,
+} from "../features/editing-commands";
 import type { EditingPlan } from "../features/editing-plan";
+import { registerEditorActions } from "../features/editor-actions";
 import { FindReplace, type SearchEdit } from "../features/find-replace";
 import { GoToLine } from "../features/go-to-line";
 import { planIndentation, type TextSelection } from "../features/indentation";
+import {
+	detectIndentation,
+	type IndentationOptions,
+	planIndentationConversion,
+	resolveIndentation,
+} from "../features/indentation-options";
 import {
 	KeyboardShortcuts,
 	registerCommentShortcuts,
@@ -34,6 +51,17 @@ import { TextRenderer } from "./text-renderer";
 
 export class EditorView implements Disposable {
 	readonly shortcuts: KeyboardShortcuts;
+	readonly commands = new CommandRegistry();
+	private readonly menu: CommandMenu;
+	private readonly clipboard: EditorClipboard;
+	private options: EditorOptions;
+	private readonly optionListeners = new Set<
+		(options: EditorOptions) => void
+	>();
+	private readonly notice: HTMLDivElement;
+	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
+	private readonly selectionHistory: TextSelection[] = [];
+	private expandedSelection: TextSelection | undefined;
 	private readonly element: HTMLTextAreaElement;
 	private readonly subscription: Disposable;
 	private readonly renderer: TextRenderer;
@@ -70,10 +98,31 @@ export class EditorView implements Disposable {
 	constructor(
 		container: HTMLElement,
 		private readonly model: TextModel,
-		options: {
-			readonly languageConfiguration?: LanguageConfiguration;
-		} = {},
+		options: EditorViewOptions = {},
 	) {
+		let indentation = resolveIndentation({
+			...(options.tabSize !== undefined
+				? { tabSize: options.tabSize }
+				: {}),
+			...(options.insertSpaces !== undefined
+				? { insertSpaces: options.insertSpaces }
+				: {}),
+		});
+		if (options.detectIndentation)
+			indentation = detectIndentation(
+				normalizeInputText(model.getValue()),
+				indentation,
+			);
+		this.options = {
+			...indentation,
+			readOnly: options.readOnly ?? false,
+			tabFocusMode: options.tabFocusMode ?? false,
+		};
+		if (
+			typeof this.options.readOnly !== "boolean" ||
+			typeof this.options.tabFocusMode !== "boolean"
+		)
+			throw new TypeError("readOnly and tabFocusMode must be booleans.");
 		this.language = resolveLanguageConfiguration(
 			options.languageConfiguration ?? plainTextConfiguration,
 		);
@@ -95,6 +144,11 @@ export class EditorView implements Disposable {
 		this.element.spellcheck = false;
 		this.element.autocomplete = "off";
 		this.element.wrap = "off";
+		this.element.readOnly = this.options.readOnly;
+		this.element.setAttribute(
+			"aria-readonly",
+			String(this.options.readOnly),
+		);
 		this.element.value = normalizeInputText(model.getValue());
 		this.element.setSelectionRange(0, 0);
 		this.renderer = new TextRenderer(this.frame, model, {
@@ -105,6 +159,11 @@ export class EditorView implements Disposable {
 		});
 		this.cursorLabel = document.createElement("div");
 		this.cursorLabel.className = "editor-cursor-label";
+		this.notice = document.createElement("div");
+		this.notice.className = "editor-notice";
+		this.notice.setAttribute("role", "status");
+		this.notice.hidden = true;
+		this.frame.append(this.notice);
 		this.frame.appendChild(this.cursorLabel);
 		for (const event of ["click", "keyup", "select", "selectionchange"]) {
 			this.element.addEventListener(event, this.updateCursor);
@@ -117,7 +176,13 @@ export class EditorView implements Disposable {
 			redo: () => this.redo(),
 			isComposing: () => this.composing,
 			breakHistoryGroup: this.breakHistoryGroup,
+			announce: (message) => this.announce(message),
+			isReadOnly: () => this.options.readOnly,
 		});
+		this.shortcuts.setTabFocusMode(
+			this.options.tabFocusMode || this.options.readOnly,
+		);
+		this.renderer.setTabSize(this.options.tabSize);
 		registerCommentShortcuts(this.shortcuts, {
 			line: () => this.toggleLineComment(),
 			block: () => this.toggleBlockComment(),
@@ -128,7 +193,11 @@ export class EditorView implements Disposable {
 		this.find = new FindReplace(
 			this.frame,
 			{
-				onOpen: () => this.goTo.close(false),
+				onOpen: () => {
+					this.goTo.close(false);
+					this.menu.close(false);
+				},
+				canReplace: () => !this.options.readOnly && !this.composing,
 				getText: () => this.element.value,
 				getSelection: () => this.captureState().selection,
 				selectMatch: (match) => {
@@ -148,7 +217,10 @@ export class EditorView implements Disposable {
 		this.goTo = new GoToLine(
 			this.frame,
 			{
-				onOpen: () => this.find.close(false),
+				onOpen: () => {
+					this.find.close(false);
+					this.menu.close(false);
+				},
 				getText: () => this.element.value,
 				getPosition: () =>
 					getInputPosition(
@@ -167,6 +239,34 @@ export class EditorView implements Disposable {
 			},
 			this.shortcuts,
 		);
+		this.clipboard = new EditorClipboard(
+			this.element,
+			{
+				consumeChord: (key) =>
+					this.shortcuts.consumeClipboardChord(key),
+				getText: () => this.element.value,
+				getSelection: () => this.captureState().selection,
+				isReadOnly: () => this.options.readOnly,
+				isComposing: () => this.composing,
+				apply: (plan) => this.applyEditingPlan(plan),
+				focus: () => this.focus(),
+				announce: (message) => this.announce(message),
+				offsetAtPoint: (x, y) => this.offsetAtPoint(x, y),
+				getTabSize: () => this.options.tabSize,
+			},
+			this.language,
+		);
+		this.menu = new CommandMenu(this.frame, this.commands, this.shortcuts, {
+			focus: () => this.focus(),
+			onOpen: () => {
+				this.find.close(false);
+				this.goTo.close(false);
+				this.breakHistoryGroup();
+			},
+			announce: (message) => this.announce(message),
+		});
+		registerEditorActions(this);
+		this.element.addEventListener("contextmenu", this.handleContextMenu);
 		this.element.addEventListener("beforeinput", this.handleBeforeInput);
 		this.element.addEventListener(
 			"compositionstart",
@@ -181,6 +281,8 @@ export class EditorView implements Disposable {
 			this.handleDocumentSelection,
 		);
 		this.subscription = model.onDidChangeContent((event) => {
+			this.selectionHistory.length = 0;
+			this.expandedSelection = undefined;
 			if (!this.pendingSelection) this.breakHistoryGroup();
 			this.render(event);
 		});
@@ -199,6 +301,287 @@ export class EditorView implements Disposable {
 		this.goTo.open();
 	}
 
+	getOptions(): EditorOptions {
+		return Object.freeze({ ...this.options });
+	}
+	getSelection(): TextSelection {
+		return this.captureState().selection;
+	}
+	get isComposing(): boolean {
+		return this.composing;
+	}
+	get canUndo(): boolean {
+		return this.model.canUndo();
+	}
+	get canRedo(): boolean {
+		return this.model.canRedo();
+	}
+
+	onDidChangeOptions(listener: (options: EditorOptions) => void): Disposable {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		this.optionListeners.add(listener);
+		return { dispose: () => this.optionListeners.delete(listener) };
+	}
+
+	updateOptions(options: Partial<EditorOptions>): void {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		if (this.composing) {
+			this.announce(
+				"Finish composing text before changing editor options.",
+			);
+			return;
+		}
+		const indentation = resolveIndentation({
+			tabSize: options.tabSize ?? this.options.tabSize,
+			insertSpaces: options.insertSpaces ?? this.options.insertSpaces,
+		});
+		const next = { ...this.options, ...options, ...indentation };
+		if (
+			typeof next.readOnly !== "boolean" ||
+			typeof next.tabFocusMode !== "boolean"
+		)
+			throw new TypeError("readOnly and tabFocusMode must be booleans.");
+		if (
+			next.tabSize === this.options.tabSize &&
+			next.insertSpaces === this.options.insertSpaces &&
+			next.readOnly === this.options.readOnly &&
+			next.tabFocusMode === this.options.tabFocusMode
+		)
+			return;
+		this.options = next;
+		this.breakHistoryGroup();
+		this.element.readOnly = next.readOnly;
+		this.element.setAttribute("aria-readonly", String(next.readOnly));
+		this.shortcuts.setTabFocusMode(next.tabFocusMode || next.readOnly);
+		this.renderer.setTabSize(next.tabSize);
+		this.find.refresh();
+		this.updateCursor();
+		for (const listener of this.optionListeners) {
+			try {
+				listener(this.getOptions());
+			} catch (error) {
+				console.error("Editor options listener failed", error);
+			}
+		}
+	}
+
+	detectIndentation(): void {
+		this.updateOptions(detectIndentation(this.element.value, this.options));
+		this.announce("Indentation detected.");
+	}
+	convertIndentation(insertSpaces: boolean): void {
+		if (!this.canEdit()) return;
+		const options: IndentationOptions = {
+			tabSize: this.options.tabSize,
+			insertSpaces,
+		};
+		this.applyEditingPlan(
+			planIndentationConversion(
+				this.element.value,
+				this.getSelection(),
+				options,
+			),
+		);
+		this.updateOptions(options);
+	}
+
+	openCommandPalette(): void {
+		this.menu.open();
+	}
+	openContextMenu(): void {
+		const bounds = this.element.getBoundingClientRect();
+		const selection = this.getSelection();
+		const position = getInputPosition(
+			this.element.value,
+			selection.direction === "backward"
+				? selection.start
+				: selection.end,
+		);
+		this.menu.open({
+			x: bounds.left + 16,
+			y: Math.max(
+				bounds.top,
+				Math.min(
+					bounds.bottom - 20,
+					bounds.top +
+						16 +
+						position.line * 24 -
+						this.element.scrollTop,
+				),
+			),
+		});
+	}
+	async executeCommand(id: string): Promise<boolean> {
+		try {
+			const executed = await this.commands.execute(id);
+			if (!executed)
+				this.announce(
+					this.options.readOnly
+						? "Editor is read-only or this command is unavailable."
+						: "Command is unavailable.",
+				);
+			return executed;
+		} catch (error) {
+			this.announce(
+				error instanceof Error ? error.message : "Command failed.",
+			);
+			return false;
+		}
+	}
+	registerPasteProvider(provider: TransferProvider): Disposable {
+		return this.clipboard.registerPasteProvider(provider);
+	}
+	registerDropProvider(provider: TransferProvider): Disposable {
+		return this.clipboard.registerDropProvider(provider);
+	}
+	copy(cut = false): Promise<void> {
+		return this.clipboard.copy(cut);
+	}
+	paste(): Promise<void> {
+		return this.clipboard.paste();
+	}
+	selectAll(): void {
+		this.applyEditingPlan({
+			edits: [],
+			selection: {
+				start: 0,
+				end: this.element.value.length,
+				direction: "forward",
+			},
+		});
+	}
+	runTextCommand(command: TextCommand): void {
+		this.applyEditingPlan(
+			planTextCommand(this.element.value, this.getSelection(), command),
+		);
+	}
+	moveWord(
+		direction: -1 | 1,
+		action: "move" | "select" | "delete",
+		subword = false,
+	): void {
+		this.applyEditingPlan(
+			planWordCommand(
+				this.element.value,
+				this.getSelection(),
+				direction,
+				action,
+				subword,
+			),
+		);
+	}
+	jumpToBracket(select = false): void {
+		const selection = this.getSelection();
+		const active =
+			selection.direction === "backward"
+				? selection.start
+				: selection.end;
+		const [candidate, partner] = this.getAnalysis().matchingAt(active);
+		if (candidate === undefined || partner === undefined) {
+			this.announce("No matching bracket at the cursor.");
+			return;
+		}
+		const target = partner + (partner > candidate ? 1 : 0);
+		const anchor = select
+			? selection.direction === "backward"
+				? selection.end
+				: selection.start
+			: target;
+		this.applyEditingPlan({
+			edits: [],
+			selection: {
+				start: Math.min(anchor, target),
+				end: Math.max(anchor, target),
+				direction: target < anchor ? "backward" : "forward",
+			},
+		});
+	}
+	expandSelection(shrink = false): void {
+		const selection = this.getSelection();
+		if (
+			!this.expandedSelection ||
+			!this.sameSelection(this.expandedSelection, selection)
+		)
+			this.selectionHistory.length = 0;
+		const next = shrink
+			? this.selectionHistory.pop()
+			: expansionRanges(
+					this.element.value,
+					selection,
+					this.getAnalysis(),
+				)[0];
+		if (!next) return;
+		if (!shrink) this.selectionHistory.push(selection);
+		this.applyEditingPlan({ edits: [], selection: next });
+		this.expandedSelection = this.getSelection();
+	}
+
+	private canEdit(): boolean {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		if (this.options.readOnly || this.composing) {
+			this.announce(
+				this.options.readOnly
+					? "Editor is read-only."
+					: "Finish composing text before using this command.",
+			);
+			return false;
+		}
+		return true;
+	}
+
+	private announce(message: string): void {
+		if (this.disposed) return;
+		if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer);
+		this.notice.textContent = message;
+		this.notice.hidden = !message;
+		this.noticeTimer = setTimeout(() => {
+			this.notice.hidden = true;
+		}, 4000);
+	}
+
+	private readonly handleContextMenu = (event: MouseEvent): void => {
+		if (event.shiftKey || this.composing) return;
+		event.preventDefault();
+		this.menu.open({ x: event.clientX, y: event.clientY });
+	};
+
+	private offsetAtPoint(x: number, y: number): number {
+		const bounds = this.element.getBoundingClientRect();
+		const buffer = new TextBuffer(this.element.value);
+		const line = Math.max(
+			1,
+			Math.min(
+				buffer.getLineCount(),
+				Math.floor(
+					(y - bounds.top + this.element.scrollTop - 16) / 24,
+				) + 1,
+			),
+		);
+		const content = buffer.getLineContent(line);
+		const context = this.element.ownerDocument
+			.createElement("canvas")
+			.getContext("2d");
+		if (context) context.font = "16px monospace";
+		const target = Math.max(
+			0,
+			x - bounds.left + this.element.scrollLeft - 16,
+		);
+		const tabWidth =
+			this.options.tabSize * (context?.measureText(" ").width ?? 8);
+		let width = 0;
+		let offset = 0;
+		for (const unit of content) {
+			const next =
+				unit === "\t"
+					? (Math.floor(width / tabWidth) + 1) * tabWidth
+					: width + (context?.measureText(unit).width ?? 8);
+			if (target < (width + next) / 2) break;
+			width = next;
+			offset += unit.length;
+		}
+		return buffer.getOffsetAt({ line, column: offset + 1 });
+	}
+
 	runLineCommand(command: LineCommand): void {
 		if (this.disposed) throw new Error("Editor view disposed.");
 		if (this.composing) return;
@@ -208,17 +591,19 @@ export class EditorView implements Disposable {
 				this.element.value,
 				this.captureState().selection,
 				command,
+				this.options,
 			),
 		);
 	}
 
-	toggleLineComment(): void {
+	toggleLineComment(mode?: "add" | "remove"): void {
 		if (this.composing) return;
 		this.applyEditingPlan(
 			planLineComment(
 				this.element.value,
 				this.captureState().selection,
 				this.language,
+				mode,
 			),
 		);
 	}
@@ -246,6 +631,7 @@ export class EditorView implements Disposable {
 	private applyEditingPlan(plan: EditingPlan | undefined): void {
 		if (this.disposed) throw new Error("Editor view disposed.");
 		if (!plan || this.composing) return;
+		if (plan.edits.length && !this.canEdit()) return;
 		this.beforeInputState = undefined;
 		this.breakHistoryGroup();
 		if (plan.edits.length)
@@ -266,7 +652,7 @@ export class EditorView implements Disposable {
 		expectedText: string,
 		desiredSelection?: TextSelection,
 	): void {
-		if (this.composing || !edits.length) return;
+		if (!edits.length || !this.canEdit()) return;
 		if (
 			this.element.value !== expectedText ||
 			normalizeInputText(this.model.getValue()) !== expectedText
@@ -323,7 +709,7 @@ export class EditorView implements Disposable {
 	}
 
 	undo(): void {
-		if (this.composing) return;
+		if (!this.canEdit()) return;
 		this.breakHistoryGroup();
 		this.beforeInputState = undefined;
 		this.model.undo();
@@ -332,7 +718,7 @@ export class EditorView implements Disposable {
 	}
 
 	redo(): void {
-		if (this.composing) return;
+		if (!this.canEdit()) return;
 		this.breakHistoryGroup();
 		this.beforeInputState = undefined;
 		this.model.redo();
@@ -367,50 +753,16 @@ export class EditorView implements Disposable {
 
 	private changeIndentation(direction: "indent" | "outdent"): void {
 		if (this.disposed) throw new Error("Editor view disposed.");
-		if (this.composing) return;
-		this.breakHistoryGroup();
-		this.beforeInputState = undefined;
-		const beforeState = this.captureState();
-		const before = this.element.value;
-		const selection: TextSelection = {
-			start: this.element.selectionStart,
-			end: this.element.selectionEnd,
-			direction: this.element.selectionDirection,
-		};
-		const plan = planIndentation(before, selection, direction);
+		if (!this.canEdit()) return;
+		this.applyEditingPlan(
+			planIndentation(
+				this.element.value,
+				this.getSelection(),
+				direction,
+				this.options,
+			),
+		);
 		this.element.focus({ preventScroll: true });
-		if (plan.edits.length === 0) return;
-		this.pendingSelection = plan.selection;
-		try {
-			let line = 1;
-			let lineStart = 0;
-			let newline = before.indexOf("\n");
-			this.model.edit(
-				plan.edits.map((edit) => {
-					while (newline !== -1 && newline < edit.from) {
-						line++;
-						lineStart = newline + 1;
-						newline = before.indexOf("\n", lineStart);
-					}
-					return {
-						range: {
-							startLine: line,
-							startColumn: edit.from - lineStart + 1,
-							endLine: line,
-							endColumn: edit.to - lineStart + 1,
-						},
-						text: edit.text,
-					};
-				}),
-				{
-					before: beforeState,
-					after: { ...beforeState, selection: plan.selection },
-				},
-			);
-		} finally {
-			this.pendingSelection = undefined;
-		}
-		if (selection.start === selection.end) this.revealCursor();
 	}
 
 	private readonly updateCursor = (): void => {
@@ -426,7 +778,7 @@ export class EditorView implements Disposable {
 				? this.element.selectionStart
 				: this.element.selectionEnd;
 		const position = getInputPosition(this.element.value, offset);
-		this.cursorLabel.textContent = `Ln ${position.line}, Col ${position.column}`;
+		this.cursorLabel.textContent = `Ln ${position.line}, Col ${position.column} · ${this.options.insertSpaces ? "Spaces" : "Tabs"}: ${this.options.tabSize}${this.options.readOnly ? " · Read-only" : ""}${this.options.tabFocusMode ? " · Tab moves focus" : ""}`;
 		this.renderer.setActiveLine(position.line);
 		const matches =
 			selection.start === selection.end
@@ -466,6 +818,11 @@ export class EditorView implements Disposable {
 	private readonly handleBeforeInput = (event: InputEvent): void => {
 		if (event.defaultPrevented) return;
 		this.beforeInputState = this.captureState();
+		if (this.options.readOnly) {
+			if (event.cancelable) event.preventDefault();
+			this.announce("Editor is read-only.");
+			return;
+		}
 		if (
 			!this.composing &&
 			!event.isComposing &&
@@ -495,6 +852,7 @@ export class EditorView implements Disposable {
 			event.data,
 			this.language,
 			this.getAnalysis(),
+			this.options,
 		);
 		if (plan) {
 			event.preventDefault();
@@ -525,7 +883,8 @@ export class EditorView implements Disposable {
 			.createElement("canvas")
 			.getContext("2d");
 		if (context) context.font = "16px monospace";
-		const tabWidth = 4 * (context?.measureText(" ").width ?? 8);
+		const tabWidth =
+			this.options.tabSize * (context?.measureText(" ").width ?? 8);
 		let width = 0;
 		const runs = prefix.split("\t");
 		for (let index = 0; index < runs.length; index++) {
@@ -547,6 +906,20 @@ export class EditorView implements Disposable {
 	}
 
 	private readonly handleInput = (event?: Event): void => {
+		if (this.options.readOnly) {
+			const selection =
+				this.beforeInputState?.selection ?? this.lastSelection;
+			this.beforeInputState = undefined;
+			this.element.value = normalizeInputText(this.model.getValue());
+			this.element.setSelectionRange(
+				selection.start,
+				selection.end,
+				selection.direction,
+			);
+			this.updateCursor();
+			this.announce("Editor is read-only.");
+			return;
+		}
 		const input = event as InputEvent | undefined;
 		const beforeState = this.beforeInputState ?? {
 			...this.captureState(),
@@ -732,6 +1105,13 @@ export class EditorView implements Disposable {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.analysis = undefined;
+		if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer);
+		this.optionListeners.clear();
+		this.selectionHistory.length = 0;
+		this.element.removeEventListener("contextmenu", this.handleContextMenu);
+		this.clipboard.dispose();
+		this.menu.dispose();
+		this.commands.dispose();
 		this.element.removeEventListener("input", this.handleInput);
 		this.find.dispose();
 		this.goTo.dispose();

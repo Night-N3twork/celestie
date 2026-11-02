@@ -125,9 +125,16 @@ export class TextRenderer implements Disposable {
 		text: string,
 		line: number,
 	): void {
-		const events = new Map<number, { add: string[]; remove: string[] }>();
+		const events = new Map<
+			number,
+			{ add: string[]; remove: string[]; empty: string[] }
+		>();
 		const eventAt = (offset: number) => {
-			const event = events.get(offset) ?? { add: [], remove: [] };
+			const event = events.get(offset) ?? {
+				add: [],
+				remove: [],
+				empty: [],
+			};
 			events.set(offset, event);
 			return event;
 		};
@@ -136,6 +143,12 @@ export class TextRenderer implements Disposable {
 			eventAt(to).remove.push(name);
 		};
 		for (const highlight of this.searchHighlights.get(line) ?? []) {
+			if (highlight.from === highlight.to) {
+				eventAt(highlight.from).empty.push(
+					`editor-find-empty-match${highlight.current ? " editor-find-match-current" : ""}`,
+				);
+				continue;
+			}
 			mark(highlight.from, highlight.to, "editor-find-match");
 			if (highlight.current)
 				mark(highlight.from, highlight.to, "editor-find-match-current");
@@ -159,6 +172,11 @@ export class TextRenderer implements Disposable {
 			([left], [right]) => left - right,
 		)) {
 			append(Math.min(text.length, offset));
+			for (const name of event.empty) {
+				const marker = row.ownerDocument.createElement("span");
+				marker.className = name;
+				row.append(marker);
+			}
 			for (const name of event.remove) active.delete(name);
 			for (const name of event.add) active.add(name);
 		}
@@ -200,7 +218,8 @@ export class TextRenderer implements Disposable {
 					line === match.range.endLine
 						? match.range.endColumn - 1
 						: this.model.getLineContent(line).length;
-				if (to <= from) continue;
+				if (to < from || (to === from && match.from !== match.to))
+					continue;
 				const list = this.searchHighlights.get(line) ?? [];
 				list.push({ from, to, current: index === current });
 				this.searchHighlights.set(line, list);
@@ -214,6 +233,11 @@ export class TextRenderer implements Disposable {
 		this.activeLine = line;
 		this.gutter.setActiveLine(line);
 		this.positionActiveLine();
+	}
+
+	setTabSize(size: number): void {
+		this.root.style.tabSize = String(size);
+		this.render();
 	}
 
 	private positionActiveLine(): void {

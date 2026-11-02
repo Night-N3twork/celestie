@@ -11,6 +11,10 @@ export interface KeyboardShortcut {
 	readonly shift?: boolean;
 	readonly when?: () => boolean;
 	readonly run: () => void;
+	readonly chord?: readonly Omit<
+		KeyboardShortcut,
+		"id" | "run" | "when" | "chord"
+	>[];
 }
 
 interface EditorShortcutCommands {
@@ -20,6 +24,8 @@ interface EditorShortcutCommands {
 	readonly redo: () => void;
 	readonly isComposing: () => boolean;
 	readonly breakHistoryGroup: () => void;
+	readonly announce?: (message: string) => void;
+	readonly isReadOnly?: () => boolean;
 }
 
 export function registerLineShortcuts(
@@ -84,6 +90,101 @@ export function registerLineShortcuts(
 	};
 }
 
+export function registerEverydayShortcuts(
+	shortcuts: KeyboardShortcuts,
+	execute: (id: string) => void,
+	mac: boolean,
+): Disposable {
+	const bindings: KeyboardShortcut[] = [];
+	const bind = (
+		id: string,
+		key: string,
+		modifiers: Partial<
+			Pick<
+				KeyboardShortcut,
+				"primary" | "ctrl" | "meta" | "alt" | "shift" | "chord"
+			>
+		> = {},
+	) =>
+		bindings.push({
+			id: `action.${id}.${bindings.length}`,
+			key,
+			...modifiers,
+			run: () => execute(id),
+		});
+	bind("editor.action.quickCommand", "F1");
+	bind("editor.action.quickCommand", "p", {
+		primary: true,
+		shift: true,
+	});
+	bind("editor.action.selectAll", "a", { primary: true });
+	bind("editor.action.smartSelect.expand", "ArrowRight", {
+		alt: true,
+		shift: true,
+	});
+	bind("editor.action.smartSelect.shrink", "ArrowLeft", {
+		alt: true,
+		shift: true,
+	});
+	bind("editor.action.jumpToBracket", "\\", { primary: true, shift: true });
+	bindings.push({
+		id: "action.jumpToBracketPipe",
+		key: "|",
+		primary: true,
+		shift: true,
+		run: () => execute("editor.action.jumpToBracket"),
+	});
+	bind("editor.action.contextMenu", "ContextMenu");
+	bind("editor.action.contextMenu", "F10", { shift: true });
+	bind("editor.action.toggleTabFocusMode", "m", { ctrl: true });
+	bind("editor.action.joinLines", "j", { primary: true });
+	if (mac) bind("editor.action.transpose", "t", { ctrl: true });
+	for (const direction of ["Left", "Right"] as const) {
+		const base = mac ? { alt: true } : { ctrl: true };
+		bind(`cursorWord${direction}`, `Arrow${direction}`, base);
+		bind(`cursorWord${direction}Select`, `Arrow${direction}`, {
+			...base,
+			shift: true,
+		});
+		bind(
+			`deleteWord${direction}`,
+			direction === "Left" ? "Backspace" : "Delete",
+			base,
+		);
+		bind(`cursorWordPart${direction}`, `Arrow${direction}`, {
+			ctrl: true,
+			alt: true,
+		});
+		bind(`cursorWordPart${direction}Select`, `Arrow${direction}`, {
+			ctrl: true,
+			alt: true,
+			shift: true,
+		});
+		bind(
+			`deleteWordPart${direction}`,
+			direction === "Left" ? "Backspace" : "Delete",
+			{ ctrl: true, alt: true },
+		);
+	}
+	for (const [id, key] of [
+		["editor.action.addCommentLine", "c"],
+		["editor.action.removeCommentLine", "u"],
+		["editor.action.trimTrailingWhitespace", "x"],
+	])
+		bind(id ?? "", "k", {
+			primary: true,
+			chord: [{ key: key ?? "", primary: true }],
+		});
+	const subscriptions = bindings.map((binding) =>
+		shortcuts.register(binding),
+	);
+	return {
+		dispose: () => {
+			for (const subscription of subscriptions) subscription.dispose();
+		},
+	};
+}
+
 export function registerCommentShortcuts(
 	shortcuts: KeyboardShortcuts,
 	commands: { line: () => void; block: () => void },
@@ -129,6 +230,43 @@ export class KeyboardShortcuts implements Disposable {
 	private readonly scopes = new Set<Disposable>();
 	private releaseTabFocus = false;
 	private disposed = false;
+	private tabFocusMode = false;
+	private pendingChord:
+		| { bindings: readonly KeyboardShortcut[]; index: number }
+		| undefined;
+	private chordTimer: ReturnType<typeof setTimeout> | undefined;
+
+	setTabFocusMode(enabled: boolean): void {
+		this.tabFocusMode = enabled;
+		this.cancelChord();
+	}
+
+	consumeClipboardChord(key: string): boolean {
+		const pending = this.pendingChord;
+		if (!pending) return false;
+		const candidates = pending.bindings.filter((binding) => {
+			const stroke = binding.chord?.[pending.index];
+			return (
+				stroke?.key.toLowerCase() === key &&
+				(stroke.primary || stroke.ctrl || stroke.meta) &&
+				!stroke.alt &&
+				!stroke.shift &&
+				(binding.when?.() ?? true)
+			);
+		});
+		const match = candidates.at(-1);
+		if (!match) return false;
+		this.cancelChord();
+		if (pending.index + 1 === match.chord?.length) {
+			this.commands.announce?.("");
+			match.run();
+		} else this.beginChord(candidates, pending.index + 1);
+		return true;
+	}
+	private cancelChord(): void {
+		this.pendingChord = undefined;
+		if (this.chordTimer !== undefined) clearTimeout(this.chordTimer);
+	}
 
 	constructor(
 		private readonly target: HTMLElement,
@@ -173,10 +311,23 @@ export class KeyboardShortcuts implements Disposable {
 		if (this.disposed) throw new Error("Keyboard shortcuts disposed.");
 		if (this.bindings.some((existing) => existing.id === binding.id))
 			throw new Error(`Duplicate shortcut: ${binding.id}`);
-		const registered = Object.freeze({ ...binding });
+		const registered = Object.freeze({
+			...binding,
+			...(binding.chord
+				? {
+						chord: Object.freeze(
+							binding.chord.map((stroke) =>
+								Object.freeze({ ...stroke }),
+							),
+						),
+					}
+				: {}),
+		});
 		this.bindings.push(registered);
 		return {
 			dispose: () => {
+				if (this.pendingChord?.bindings.includes(registered))
+					this.cancelChord();
 				const index = this.bindings.indexOf(registered);
 				if (index !== -1) this.bindings.splice(index, 1);
 			},
@@ -195,6 +346,12 @@ export class KeyboardShortcuts implements Disposable {
 		target.addEventListener("keydown", listener);
 		const scope = {
 			dispose: () => {
+				if (
+					this.pendingChord?.bindings.some((binding) =>
+						bindings.includes(binding),
+					)
+				)
+					this.cancelChord();
 				target.removeEventListener("keydown", listener);
 				this.scopes.delete(scope);
 			},
@@ -204,6 +361,7 @@ export class KeyboardShortcuts implements Disposable {
 	}
 
 	private readonly reset = (): void => {
+		this.cancelChord();
 		this.releaseTabFocus = false;
 		this.commands.breakHistoryGroup();
 	};
@@ -216,6 +374,12 @@ export class KeyboardShortcuts implements Disposable {
 		)
 			return;
 		if (event.key === "Escape") {
+			if (this.pendingChord) {
+				this.cancelChord();
+				event.preventDefault();
+				this.commands.announce?.("Key chord canceled.");
+				return;
+			}
 			if (this.execute(event, this.bindings)) return;
 			this.releaseTabFocus = true;
 			this.commands.breakHistoryGroup();
@@ -223,11 +387,45 @@ export class KeyboardShortcuts implements Disposable {
 		}
 		if (["Shift", "Control", "Alt", "Meta"].includes(event.key)) return;
 		if (
+			this.commands.isReadOnly?.() &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.altKey &&
+			(event.key.length === 1 ||
+				["Backspace", "Delete", "Enter"].includes(event.key))
+		) {
+			event.preventDefault();
+			this.commands.announce?.("Editor is read-only.");
+			return;
+		}
+		if (this.pendingChord) {
+			const pending = this.pendingChord;
+			const candidates = pending.bindings.filter((binding) => {
+				const stroke = binding.chord?.[pending.index];
+				return (
+					stroke &&
+					this.matches(stroke, event) &&
+					(binding.when?.() ?? true)
+				);
+			});
+			this.cancelChord();
+			const match = candidates.at(-1);
+			if (match) {
+				event.preventDefault();
+				if (pending.index + 1 === match.chord?.length) {
+					this.commands.announce?.("");
+					match.run();
+				} else this.beginChord(candidates, pending.index + 1);
+				return;
+			}
+			this.commands.announce?.("Key chord canceled.");
+		}
+		if (
 			event.key === "Tab" &&
 			!event.ctrlKey &&
 			!event.metaKey &&
 			!event.altKey &&
-			this.releaseTabFocus
+			(this.releaseTabFocus || this.tabFocusMode)
 		) {
 			this.releaseTabFocus = false;
 			return;
@@ -263,13 +461,43 @@ export class KeyboardShortcuts implements Disposable {
 			)
 				continue;
 			event.preventDefault();
-			binding.run();
+			if (binding.chord?.length)
+				this.beginChord(
+					bindings.filter(
+						(entry) =>
+							entry.chord?.length &&
+							this.matches(entry, event) &&
+							(entry.when?.() ?? true),
+					),
+					0,
+				);
+			else binding.run();
 			return true;
 		}
 		return false;
 	}
 
-	private matches(binding: KeyboardShortcut, event: KeyboardEvent): boolean {
+	private beginChord(
+		bindings: readonly KeyboardShortcut[],
+		index: number,
+	): void {
+		this.cancelChord();
+		this.pendingChord = { bindings, index };
+		this.commands.breakHistoryGroup();
+		this.commands.announce?.("Waiting for the next key… Escape cancels.");
+		this.chordTimer = setTimeout(() => {
+			this.pendingChord = undefined;
+			this.commands.announce?.("Key chord timed out.");
+		}, 2000);
+	}
+
+	private matches(
+		binding: Pick<
+			KeyboardShortcut,
+			"key" | "primary" | "ctrl" | "meta" | "alt" | "shift"
+		>,
+		event: KeyboardEvent,
+	): boolean {
 		if (binding.key.toLowerCase() !== event.key.toLowerCase()) return false;
 		if (
 			event.shiftKey !== (binding.shift ?? false) ||
@@ -286,6 +514,7 @@ export class KeyboardShortcuts implements Disposable {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.cancelChord();
 		this.target.removeEventListener("keydown", this.handleKeyDown);
 		this.target.removeEventListener("blur", this.reset);
 		this.target.removeEventListener("pointerdown", this.reset);

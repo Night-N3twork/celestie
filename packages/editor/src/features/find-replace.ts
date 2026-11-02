@@ -1,7 +1,13 @@
 import type { Disposable, TextSelection } from "../api/types";
 import { findTextChange } from "../view/input";
 import type { KeyboardShortcuts } from "./keyboard-shortcuts";
-import { findLiteralMatches, type SearchMatch } from "./search";
+import { RegexSearch } from "./regex-search";
+import {
+	expandRegexReplacement,
+	findLiteralMatches,
+	type SearchMatch,
+	type SearchOptions,
+} from "./search";
 
 export interface SearchEdit {
 	readonly from: number;
@@ -10,6 +16,7 @@ export interface SearchEdit {
 }
 
 interface FindReplaceHost {
+	canReplace(): boolean;
 	onOpen(): void;
 	getText(): string;
 	getSelection(): TextSelection;
@@ -39,6 +46,13 @@ export class FindReplace implements Disposable {
 	private readonly inSelection: HTMLInputElement;
 	private scope: { from: number; to: number } | undefined;
 	private previousText = "";
+	private readonly regexMode: HTMLInputElement;
+	private readonly searcher = new RegexSearch();
+	private searchKey = "";
+	private searchGeneration = 0;
+	private busy = false;
+	private error = "";
+	private pendingPresentation = { select: false, anchor: 0 };
 
 	constructor(
 		container: HTMLElement,
@@ -115,6 +129,7 @@ export class FindReplace implements Disposable {
 		};
 		this.matchCase = option("Match case", true);
 		this.wholeWord = option("Whole word");
+		this.regexMode = option("Regular expression");
 		this.inSelection = option("In selection");
 		this.panel.append(findRow, optionsRow, this.replacementRow);
 		container.prepend(this.panel);
@@ -218,6 +233,15 @@ export class FindReplace implements Disposable {
 	}
 
 	close(focus = true): void {
+		this.matches = [];
+		this.current = -1;
+		this.previousText = "";
+		this.scope = undefined;
+		this.error = "";
+		this.searchGeneration++;
+		this.searchKey = "";
+		this.busy = false;
+		this.searcher.cancel();
 		this.panel.hidden = true;
 		this.host.highlight([], -1);
 		if (focus) this.host.focusEditor();
@@ -241,15 +265,89 @@ export class FindReplace implements Disposable {
 			};
 		}
 		this.previousText = text;
-		const result = findLiteralMatches(text, this.query.value, {
+		const options: SearchOptions = {
 			matchCase: this.matchCase.checked,
 			wholeWord: this.wholeWord.checked,
 			...(this.inSelection.checked && this.scope
 				? { scope: this.scope }
 				: {}),
-		});
-		this.matches = result.matches;
-		this.truncated = result.truncated;
+		};
+		const key = JSON.stringify([
+			text,
+			this.query.value,
+			options,
+			this.regexMode.checked,
+		]);
+		if (this.regexMode.checked && this.query.value) {
+			if (key !== this.searchKey) {
+				const generation = ++this.searchGeneration;
+				this.searchKey = key;
+				this.busy = true;
+				this.error = "";
+				this.matches = [];
+				this.current = -1;
+				this.pendingPresentation = { select, anchor };
+				this.present(false);
+				void this.searcher
+					.search(text, this.query.value, options)
+					.then((result) => {
+						if (
+							this.disposed ||
+							!this.isOpen ||
+							this.searchKey !== key ||
+							this.searchGeneration !== generation ||
+							this.host.getText() !== text
+						)
+							return;
+						this.busy = false;
+						this.error = result.error ?? "";
+						this.matches = result.matches;
+						this.truncated = result.truncated;
+						const index = this.matches.findIndex(
+							(match) =>
+								match.from >= this.pendingPresentation.anchor,
+						);
+						this.current = this.matches.length
+							? index < 0
+								? 0
+								: index
+							: -1;
+						this.present(this.pendingPresentation.select);
+					})
+					.catch((error: unknown) => {
+						if (
+							this.disposed ||
+							!this.isOpen ||
+							this.searchKey !== key ||
+							this.searchGeneration !== generation
+						)
+							return;
+						this.busy = false;
+						this.error =
+							error instanceof Error
+								? error.message
+								: "Regex search failed.";
+						this.matches = [];
+						this.current = -1;
+						this.present(false);
+					});
+				return;
+			}
+			if (this.busy) {
+				if (select) this.pendingPresentation = { select, anchor };
+				this.present(false);
+				return;
+			}
+		} else {
+			this.searchGeneration++;
+			this.searchKey = key;
+			this.searcher.cancel();
+			this.busy = false;
+			this.error = "";
+			const result = findLiteralMatches(text, this.query.value, options);
+			this.matches = result.matches;
+			this.truncated = result.truncated;
+		}
 		const index = this.matches.findIndex((match) => match.from >= anchor);
 		this.current = this.matches.length ? (index === -1 ? 0 : index) : -1;
 		this.present(select);
@@ -259,16 +357,23 @@ export class FindReplace implements Disposable {
 
 	private present(select: boolean, wrapped = false): void {
 		const count = this.matches.length;
-		this.status.textContent = !this.query.value
-			? "Enter search text"
-			: count
-				? `${this.current + 1} of ${count}${this.truncated ? "+ (refine search for Replace All)" : ""}${wrapped ? " (wrapped)" : ""}`
-				: "No results";
+		this.status.textContent = this.busy
+			? "Searching…"
+			: this.error
+				? this.error
+				: !this.query.value
+					? "Enter search text"
+					: count
+						? `${this.current + 1} of ${count}${this.truncated ? "+ (refine search for Replace All)" : ""}${wrapped ? " (wrapped)" : ""}`
+						: "No results";
 		this.previous.disabled =
 			this.next.disabled =
 			this.replaceOne.disabled =
 				count === 0;
 		this.replaceAll.disabled = count === 0 || this.truncated;
+		this.replaceOne.disabled ||= !this.host.canReplace();
+		this.replaceAll.disabled ||= !this.host.canReplace();
+		this.replacement.disabled = !this.host.canReplace();
 		this.host.highlight(this.matches, this.current);
 		const match = this.matches[this.current];
 		if (select && match) this.host.selectMatch(match);
@@ -283,38 +388,86 @@ export class FindReplace implements Disposable {
 	}
 
 	private replaceCurrent(): void {
+		if (!this.host.canReplace()) return;
 		this.refresh();
 		const match = this.matches[this.current];
 		if (!match) return;
-		const text = this.replacement.value;
+		const source = this.host.getText();
+		const text = this.replacementFor(match, source);
+		if (text === undefined) return;
+		if (
+			source.length - (match.to - match.from) + text.length >
+			16000000
+		) {
+			this.error =
+				"Replacement would exceed the 16 million character limit.";
+			this.present(false);
+			return;
+		}
 		this.host.replace(
 			[{ from: match.from, to: match.to, text }],
 			this.host.getText(),
 		);
-		this.refresh(true, match.from + text.length);
+		const next = match.from + text.length;
+		this.refresh(
+			true,
+			next +
+				(match.from === match.to
+					? (this.host.getText().codePointAt(next) ?? 0) > 0xffff
+						? 2
+						: 1
+					: 0),
+		);
 		this.replacement.focus();
 	}
 
 	private replaceEveryMatch(): void {
+		if (!this.host.canReplace()) return;
 		this.refresh();
 		if (!this.matches.length || this.truncated) return;
-		const first = this.matches[0];
-		const text = this.replacement.value;
-		this.host.replace(
-			this.matches.map((match) => ({
-				from: match.from,
-				to: match.to,
-				text,
-			})),
-			this.host.getText(),
+		const source = this.host.getText();
+		const edits: SearchEdit[] = [];
+		let length = source.length;
+		for (const match of this.matches) {
+			const text = this.replacementFor(match, source);
+			if (text === undefined) return;
+			length += text.length - (match.to - match.from);
+			if (length > 16000000) {
+				this.error =
+					"Replacement would exceed the 16 million character limit.";
+				this.present(false);
+				return;
+			}
+			edits.push({ from: match.from, to: match.to, text });
+		}
+		this.host.replace(edits, source);
+		this.refresh(
+			false,
+			(edits[0]?.from ?? 0) + (edits[0]?.text.length ?? 0),
 		);
-		this.refresh(false, (first?.from ?? 0) + text.length);
 		this.replacement.focus();
+	}
+
+	private replacementFor(
+		match: SearchMatch,
+		source: string,
+	): string | undefined {
+		try {
+			return this.regexMode.checked
+				? expandRegexReplacement(this.replacement.value, match, source)
+				: this.replacement.value;
+		} catch (error) {
+			this.error =
+				error instanceof Error ? error.message : "Replacement failed.";
+			this.present(false);
+			return undefined;
+		}
 	}
 
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.searcher.dispose();
 		this.query.removeEventListener("input", this.queryChanged);
 		for (const subscription of this.subscriptions.reverse())
 			subscription.dispose();

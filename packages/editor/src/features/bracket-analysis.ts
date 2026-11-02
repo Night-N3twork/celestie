@@ -264,4 +264,21 @@ export class BracketAnalysis {
 		}
 		return [];
 	}
+
+	enclosingRanges(
+		start: number,
+		end: number,
+	): readonly { start: number; end: number }[] {
+		const result: { start: number; end: number }[] = [];
+		for (const [open, close] of this.partners)
+			if (open < close && open <= start && close + 1 >= end) {
+				result.push({ start: open, end: close + 1 });
+				if (open + 1 <= start && close >= end)
+					result.push({ start: open + 1, end: close });
+			}
+		for (const span of this.spans)
+			if (span.from <= start && span.to >= end)
+				result.push({ start: span.from, end: span.to });
+		return result;
+	}
 }

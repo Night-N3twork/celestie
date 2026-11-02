@@ -1,8 +1,99 @@
 .editor-view-frame {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	height: min(75vh, 800px);
 	min-height: 240px;
+}
+
+.editor-notice {
+	flex: none;
+	padding: 8px 12px;
+	background: #29384a;
+	color: #fff;
+	font:
+		13px system-ui,
+		sans-serif;
+}
+.editor-notice[hidden],
+.editor-command-menu[hidden],
+.editor-command-menu input[hidden] {
+	display: none;
+}
+.editor-command-menu {
+	position: absolute;
+	z-index: 20;
+	left: 12px;
+	top: 12px;
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	width: 340px;
+	max-width: calc(100% - 16px);
+	max-height: min(380px, calc(100% - 16px));
+	border: 1px solid #666;
+	border-radius: 5px;
+	padding: 6px;
+	background: #252526;
+	color: #ddd;
+	box-shadow: 0 6px 20px #0008;
+	font:
+		13px system-ui,
+		sans-serif;
+}
+.editor-command-menu.is-palette {
+	left: 50%;
+	transform: translateX(-50%);
+	width: 540px;
+}
+.editor-command-menu input {
+	flex: none;
+	box-sizing: border-box;
+	width: 100%;
+	margin-bottom: 6px;
+	border: 1px solid #75beff;
+	padding: 8px;
+	background: #1e1e1e;
+	color: #fff;
+	font: inherit;
+}
+.editor-command-menu > div:first-of-type {
+	min-height: 0;
+	overflow: auto;
+}
+.editor-command-menu button {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	border: 1px solid transparent;
+	padding: 7px 8px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.editor-command-menu button.is-active,
+.editor-command-menu button:hover:not(:disabled) {
+	border-color: #75beff;
+	background: #094771;
+}
+.editor-command-menu button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+.editor-command-menu kbd {
+	color: #bbb;
+	font: 11px monospace;
+	white-space: nowrap;
+}
+.editor-command-status {
+	flex: none;
+	padding: 6px 8px 0;
+	color: #aaa;
+	font-size: 11px;
 }
 
 .editor-renderer {
@@ -180,6 +271,14 @@
 .editor-find-match-current {
 	background: #785020;
 	outline-color: #edb665;
+}
+
+.editor-find-empty-match {
+	display: inline-block;
+	width: 0;
+	height: 1em;
+	outline: 1px solid #9a7430;
+	vertical-align: text-bottom;
 }
 
 .editor-matching-bracket {

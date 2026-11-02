@@ -46,6 +46,48 @@ const view = new EditorView(container, model, {
 });
 view.focus();
 
+const commandsButton = document.getElementById("commands");
+const tabSize = document.getElementById("tab-size") as HTMLSelectElement | null;
+const insertSpaces = document.getElementById(
+	"insert-spaces",
+) as HTMLInputElement | null;
+const readOnly = document.getElementById(
+	"read-only",
+) as HTMLInputElement | null;
+const tabFocus = document.getElementById(
+	"tab-focus",
+) as HTMLInputElement | null;
+if (!commandsButton || !tabSize || !insertSpaces || !readOnly || !tabFocus)
+	throw new Error("Editor settings were not found.");
+for (let size = 1; size <= 16; size++) {
+	const option = document.createElement("option");
+	option.value = String(size);
+	option.textContent = String(size);
+	tabSize.append(option);
+}
+const syncOptions = () => {
+	const options = view.getOptions();
+	tabSize.value = String(options.tabSize);
+	insertSpaces.checked = options.insertSpaces;
+	readOnly.checked = options.readOnly;
+	tabFocus.checked = options.tabFocusMode;
+};
+const changeOptions = () => {
+	view.updateOptions({
+		tabSize: Number(tabSize.value),
+		insertSpaces: insertSpaces.checked,
+		readOnly: readOnly.checked,
+		tabFocusMode: tabFocus.checked,
+	});
+	syncOptions();
+};
+const openCommands = () => view.openCommandPalette();
+commandsButton.addEventListener("click", openCommands);
+for (const control of [tabSize, insertSpaces, readOnly, tabFocus])
+	control.addEventListener("change", changeOptions);
+const optionsSubscription = view.onDidChangeOptions(syncOptions);
+syncOptions();
+
 const indentButton = document.getElementById("indent");
 const outdentButton = document.getElementById("outdent");
 const findButton = document.getElementById("find");
@@ -89,6 +131,10 @@ indentButton.addEventListener("pointerdown", preserveSelection);
 outdentButton.addEventListener("pointerdown", preserveSelection);
 
 import.meta.hot?.dispose(() => {
+	commandsButton.removeEventListener("click", openCommands);
+	for (const control of [tabSize, insertSpaces, readOnly, tabFocus])
+		control.removeEventListener("change", changeOptions);
+	optionsSubscription.dispose();
 	indentButton.removeEventListener("click", indent);
 	outdentButton.removeEventListener("click", outdent);
 	findButton.removeEventListener("click", find);

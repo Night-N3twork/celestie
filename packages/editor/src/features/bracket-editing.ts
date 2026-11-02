@@ -2,6 +2,13 @@ import type { TextSelection } from "../api/types";
 import type { LanguageConfiguration } from "../languages/configuration";
 import type { BracketAnalysis } from "./bracket-analysis";
 import type { EditingPlan } from "./editing-plan";
+import {
+	defaultIndentation,
+	type IndentationOptions,
+	indentationText,
+	indentationUnit,
+	indentationWidth,
+} from "./indentation-options";
 
 function replace(
 	from: number,
@@ -28,6 +35,7 @@ export function planBracketInput(
 	data: string | null,
 	configuration: LanguageConfiguration,
 	analysis: BracketAnalysis,
+	options: IndentationOptions = defaultIndentation,
 ): EditingPlan | undefined {
 	const { start, end } = selection;
 	const collapsed = start === end;
@@ -36,7 +44,10 @@ export function planBracketInput(
 	const context = analysis.contextAt(start);
 	const lineStart = start === 0 ? 0 : text.lastIndexOf("\n", start - 1) + 1;
 	const prefix = text.slice(lineStart, start);
-	const indent = prefix.match(/^[\t ]*/)?.[0] ?? "";
+	const indent = indentationText(
+		indentationWidth(prefix.match(/^[\t ]*/)?.[0] ?? "", options.tabSize),
+		options,
+	);
 	const block = configuration.blockComment;
 
 	if (inputType === "insertText" && data?.length === 1) {
@@ -95,7 +106,10 @@ export function planBracketInput(
 				const width = (value: string): number => {
 					let column = 0;
 					for (const unit of value)
-						column += unit === "\t" ? 4 - (column % 4) : 1;
+						column +=
+							unit === "\t"
+								? options.tabSize - (column % options.tabSize)
+								: 1;
 					return column;
 				};
 				if (width(prefix) > width(openingIndent))
@@ -172,9 +186,12 @@ export function planBracketInput(
 			if (previous === "\t") return replace(start - 1, start, "");
 			let column = 0;
 			for (const unit of prefix)
-				column += unit === "\t" ? 4 - (column % 4) : 1;
+				column +=
+					unit === "\t"
+						? options.tabSize - (column % options.tabSize)
+						: 1;
 			let from = start;
-			let remaining = ((column - 1) % 4) + 1;
+			let remaining = ((column - 1) % options.tabSize) + 1;
 			while (
 				from > lineStart &&
 				remaining > 0 &&
@@ -224,7 +241,7 @@ export function planBracketInput(
 			last.endsWith(open),
 		);
 		if (pair && analysis.isBracket(openOffset)) {
-			const first = `\n${indent}\t`;
+			const first = `\n${indent}${indentationUnit(options)}`;
 			if (suffix.startsWith(pair[1], leadingSpace.length))
 				return replace(
 					start,
