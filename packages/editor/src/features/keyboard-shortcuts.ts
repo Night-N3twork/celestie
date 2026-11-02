@@ -1,4 +1,5 @@
 import type { Disposable } from "../api/types";
+import type { LineCommand } from "./line-commands";
 
 export interface KeyboardShortcut {
 	readonly id: string;
@@ -19,6 +20,68 @@ interface EditorShortcutCommands {
 	readonly redo: () => void;
 	readonly isComposing: () => boolean;
 	readonly breakHistoryGroup: () => void;
+}
+
+export function registerLineShortcuts(
+	shortcuts: KeyboardShortcuts,
+	run: (command: LineCommand) => void,
+): Disposable {
+	const bindings: KeyboardShortcut[] = [
+		{
+			id: "editor.moveLinesUp",
+			key: "ArrowUp",
+			alt: true,
+			run: () => run("moveUp"),
+		},
+		{
+			id: "editor.moveLinesDown",
+			key: "ArrowDown",
+			alt: true,
+			run: () => run("moveDown"),
+		},
+		{
+			id: "editor.duplicateLinesUp",
+			key: "ArrowUp",
+			alt: true,
+			shift: true,
+			run: () => run("duplicateUp"),
+		},
+		{
+			id: "editor.duplicateLinesDown",
+			key: "ArrowDown",
+			alt: true,
+			shift: true,
+			run: () => run("duplicateDown"),
+		},
+		{
+			id: "editor.deleteLines",
+			key: "k",
+			primary: true,
+			shift: true,
+			run: () => run("delete"),
+		},
+		{
+			id: "editor.insertLineAbove",
+			key: "Enter",
+			primary: true,
+			shift: true,
+			run: () => run("insertAbove"),
+		},
+		{
+			id: "editor.insertLineBelow",
+			key: "Enter",
+			primary: true,
+			run: () => run("insertBelow"),
+		},
+	];
+	const subscriptions = bindings.map((binding) =>
+		shortcuts.register(binding),
+	);
+	return {
+		dispose: () => {
+			for (const subscription of subscriptions) subscription.dispose();
+		},
+	};
 }
 
 export function registerCommentShortcuts(

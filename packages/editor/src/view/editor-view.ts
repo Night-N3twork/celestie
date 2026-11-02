@@ -13,7 +13,9 @@ import { planIndentation, type TextSelection } from "../features/indentation";
 import {
 	KeyboardShortcuts,
 	registerCommentShortcuts,
+	registerLineShortcuts,
 } from "../features/keyboard-shortcuts";
+import { type LineCommand, planLineCommand } from "../features/line-commands";
 import {
 	type LanguageConfiguration,
 	plainTextConfiguration,
@@ -84,7 +86,7 @@ export class EditorView implements Disposable {
 		this.element.setAttribute("aria-label", "Editor");
 		this.element.setAttribute(
 			"aria-description",
-			"Tab indents; Shift+Tab outdents. Control or Command Z undoes. Add Shift to redo. Control or Command slash toggles line comments; Shift Alt A toggles block comments. Press Escape, then Tab to move focus.",
+			"Tab indents; Shift+Tab outdents. Control or Command Z undoes. Add Shift to redo. Alt Up or Down moves lines; add Shift to duplicate. Control or Command Shift K deletes lines. Control or Command Enter inserts a line below; add Shift for above. Control or Command slash toggles line comments; Shift Alt A toggles block comments. Press Escape, then Tab to move focus.",
 		);
 		this.element.title =
 			"Tab: indent · Shift+Tab: outdent · Escape, then Tab: move focus";
@@ -120,6 +122,9 @@ export class EditorView implements Disposable {
 			line: () => this.toggleLineComment(),
 			block: () => this.toggleBlockComment(),
 		});
+		registerLineShortcuts(this.shortcuts, (command) =>
+			this.runLineCommand(command),
+		);
 		this.find = new FindReplace(
 			this.frame,
 			{
@@ -192,6 +197,19 @@ export class EditorView implements Disposable {
 
 	openGoTo(): void {
 		this.goTo.open();
+	}
+
+	runLineCommand(command: LineCommand): void {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		if (this.composing) return;
+		this.breakHistoryGroup();
+		this.applyEditingPlan(
+			planLineCommand(
+				this.element.value,
+				this.captureState().selection,
+				command,
+			),
+		);
 	}
 
 	toggleLineComment(): void {
