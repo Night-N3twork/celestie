@@ -65,6 +65,7 @@ import {
 	getLineIndent,
 	normalizeInputText,
 } from "./input";
+import { InputSurface } from "./input-surface";
 import { SelectionController } from "./selection-controller";
 import { TextRenderer } from "./text-renderer";
 
@@ -88,7 +89,7 @@ export class EditorView implements Disposable {
 	private multiExpansion: TextSelection[][] = [];
 	private multiExpandedKey = "";
 	private expandedSelection: TextSelection | undefined;
-	private readonly element: HTMLTextAreaElement;
+	private readonly element: InputSurface;
 	private readonly modelSubscriptions: Disposable[] = [];
 	private model: TextModel;
 	private attachedModel: TextModel | null = null;
@@ -186,10 +187,12 @@ export class EditorView implements Disposable {
 			...indentation,
 			readOnly: options.readOnly ?? false,
 			tabFocusMode: options.tabFocusMode ?? false,
+			accessibilitySupport: options.accessibilitySupport ?? "auto",
 		};
 		if (
 			typeof this.options.readOnly !== "boolean" ||
-			typeof this.options.tabFocusMode !== "boolean"
+			typeof this.options.tabFocusMode !== "boolean" ||
+			!["auto", "on", "off"].includes(this.options.accessibilitySupport)
 		)
 			throw new TypeError("readOnly and tabFocusMode must be booleans.");
 		this.language = resolveLanguageConfiguration(
@@ -206,7 +209,7 @@ export class EditorView implements Disposable {
 		this.frame = document.createElement("div");
 		this.frame.className = "editor-view-frame";
 		container.appendChild(this.frame);
-		this.element = document.createElement("textarea");
+		this.element = new InputSurface(document.createElement("textarea"));
 		this.element.className = "editor-native-input";
 		this.element.setAttribute("aria-label", options.ariaLabel ?? "Editor");
 		this.element.setAttribute(
@@ -228,11 +231,19 @@ export class EditorView implements Disposable {
 		this.element.value = normalizeInputText(model.getValue());
 		this.element.setSelectionRange(0, 0);
 		this.renderer = new TextRenderer(this.frame, model, {
-			input: this.element,
+			input: this.element.native,
 			padding: 16,
 			height: "100%",
 			onSelectLine: this.selectLine,
 		});
+		this.element.attachViewport(this.renderer.viewport);
+		this.renderer.setAccessible(this.options.accessibilitySupport === "on");
+		this.element.attachViewport(this.renderer.viewport);
+		this.element.setAccessible(this.options.accessibilitySupport === "on");
+		this.frame.classList.toggle(
+			"editor-bounded-input",
+			this.options.accessibilitySupport !== "on",
+		);
 		this.cursorLabel = document.createElement("div");
 		this.cursorLabel.className = "editor-cursor-label";
 		this.notice = document.createElement("div");
@@ -245,7 +256,7 @@ export class EditorView implements Disposable {
 			this.element.addEventListener(event, this.updateCursor);
 		}
 		this.element.addEventListener("input", this.handleInput);
-		this.shortcuts = new KeyboardShortcuts(this.element, {
+		this.shortcuts = new KeyboardShortcuts(this.element.native, {
 			indent: () => this.indent(),
 			outdent: () => this.outdent(),
 			undo: () => this.undo(),
@@ -327,7 +338,7 @@ export class EditorView implements Disposable {
 			this.shortcuts,
 		);
 		this.clipboard = new EditorClipboard(
-			this.element,
+			this.element.native,
 			{
 				consumeChord: (key) =>
 					this.shortcuts.consumeClipboardChord(key),
@@ -349,6 +360,7 @@ export class EditorView implements Disposable {
 				getTabSize: () => this.options.tabSize,
 			},
 			this.language,
+			this.renderer.interactionElement,
 		);
 		this.menu = new CommandMenu(this.frame, this.commands, this.shortcuts, {
 			focus: () => this.focus(),
@@ -360,7 +372,10 @@ export class EditorView implements Disposable {
 			announce: (message) => this.announce(message),
 		});
 		registerEditorActions(this);
-		this.element.addEventListener("contextmenu", this.handleContextMenu);
+		this.renderer.interactionElement.addEventListener(
+			"contextmenu",
+			this.handleContextMenu,
+		);
 		this.element.addEventListener("beforeinput", this.handleBeforeInput);
 		this.element.addEventListener(
 			"compositionstart",
@@ -374,15 +389,30 @@ export class EditorView implements Disposable {
 			"selectionchange",
 			this.handleDocumentSelection,
 		);
-		this.cursors = new SelectionController(this.element, this.frame, {
-			getText: () => this.element.value,
-			getSelections: () => this.getSelections(),
-			setSelections: (values, reveal = false) =>
-				this.setSelections(values, reveal),
-			offsetAtPoint: (x, y) => this.offsetAtPoint(x, y),
-			getTabSize: () => this.options.tabSize,
-			isComposing: () => this.isComposing,
-		});
+		this.cursors = new SelectionController(
+			this.element.native,
+			this.frame,
+			{
+				getText: () => this.element.value,
+				getSelections: () => this.getSelections(),
+				setSelections: (values, reveal = false) =>
+					this.setSelections(values, reveal),
+				offsetAtPoint: (x, y) => this.offsetAtPoint(x, y),
+				columnWidth: () => this.renderer.columnWidth,
+				viewport: () => this.element.viewport,
+				pointAtOffset: (offset) =>
+					this.renderer.point(
+						this.model.getPositionAtInputOffset(offset),
+					).x,
+				offsetAtLineX: (line, x) =>
+					this.renderer.offsetAtLineX(line, x),
+				isBounded: () => this.options.accessibilitySupport !== "on",
+				previewDrop: (offset) => this.renderer.setDropOffset(offset),
+				moveSelection: (selection, target, copy) =>
+					this.moveSelection(selection, target, copy),
+				isComposing: () => this.isComposing,
+			},
+		);
 		this.bindModel(model);
 		this.render();
 	}
@@ -837,17 +867,31 @@ export class EditorView implements Disposable {
 		const next = { ...this.options, ...options, ...indentation };
 		if (
 			typeof next.readOnly !== "boolean" ||
-			typeof next.tabFocusMode !== "boolean"
+			typeof next.tabFocusMode !== "boolean" ||
+			!["auto", "on", "off"].includes(next.accessibilitySupport)
 		)
 			throw new TypeError("readOnly and tabFocusMode must be booleans.");
 		if (
 			next.tabSize === this.options.tabSize &&
 			next.insertSpaces === this.options.insertSpaces &&
 			next.readOnly === this.options.readOnly &&
-			next.tabFocusMode === this.options.tabFocusMode
+			next.tabFocusMode === this.options.tabFocusMode &&
+			next.accessibilitySupport === this.options.accessibilitySupport
 		)
 			return;
+		const previousScrollTop = this.element.scrollTop;
+		const previousScrollLeft = this.element.scrollLeft;
 		this.options = next;
+		this.renderer.setAccessible(next.accessibilitySupport === "on");
+		this.element.attachViewport(this.renderer.viewport);
+		this.element.setAccessible(next.accessibilitySupport === "on");
+		this.element.scrollTop = previousScrollTop;
+		this.element.scrollLeft = previousScrollLeft;
+		this.renderer.render();
+		this.frame.classList.toggle(
+			"editor-bounded-input",
+			next.accessibilitySupport !== "on",
+		);
 		this.breakHistoryGroup();
 		this.element.readOnly = next.readOnly || !this.attachedModel;
 		this.element.setAttribute(
@@ -1107,40 +1151,31 @@ export class EditorView implements Disposable {
 	};
 
 	private offsetAtPoint(x: number, y: number): number {
-		const bounds = this.element.getBoundingClientRect();
-		const buffer = this.model;
-		const line = Math.max(
-			1,
-			Math.min(
-				buffer.getLineCount(),
-				Math.floor(
-					(y - bounds.top + this.element.scrollTop - 16) / 24,
-				) + 1,
-			),
-		);
-		const content = buffer.getLineContent(line);
-		const context = this.element.ownerDocument
-			.createElement("canvas")
-			.getContext("2d");
-		if (context) context.font = "16px monospace";
-		const target = Math.max(
-			0,
-			x - bounds.left + this.element.scrollLeft - 16,
-		);
-		const tabWidth =
-			this.options.tabSize * (context?.measureText(" ").width ?? 8);
-		let width = 0;
-		let offset = 0;
-		for (const unit of content) {
-			const next =
-				unit === "\t"
-					? (Math.floor(width / tabWidth) + 1) * tabWidth
-					: width + (context?.measureText(unit).width ?? 8);
-			if (target < (width + next) / 2) break;
-			width = next;
-			offset += unit.length;
-		}
-		return buffer.getInputOffsetAt({ line, column: offset + 1 });
+		return this.renderer.hitTest(x, y);
+	}
+
+	private moveSelection(
+		selection: TextSelection,
+		target: number,
+		copy: boolean,
+	): void {
+		if (
+			!this.canEdit() ||
+			(target >= selection.start && target <= selection.end)
+		)
+			return;
+		const text = this.element.value.slice(selection.start, selection.end);
+		const edits = [{ from: target, to: target, text }];
+		if (!copy)
+			edits.push({ from: selection.start, to: selection.end, text: "" });
+		edits.sort((a, b) => a.from - b.from);
+		const offset =
+			target +
+			text.length -
+			(!copy && target > selection.end
+				? selection.end - selection.start
+				: 0);
+		this.applyEditingPlan({ edits, selection: caret(offset) });
 	}
 
 	runLineCommand(command: LineCommand): void {
@@ -1458,7 +1493,9 @@ export class EditorView implements Disposable {
 			this.element.selectionDirection === "backward"
 				? this.element.selectionStart
 				: this.element.selectionEnd;
-		const position = getInputPosition(this.element.value, offset);
+		const position = this.deferredComposition
+			? getInputPosition(this.element.value, offset)
+			: this.model.getPositionAtInputOffset(offset);
 		this.cursorLabel.textContent = this.attachedModel
 			? `Ln ${position.line}, Col ${position.column}${this.selectionsValue.length > 1 ? ` · ${this.selectionsValue.length} cursors` : ""} · ${this.options.insertSpaces ? "Spaces" : "Tabs"}: ${this.options.tabSize}${this.options.readOnly ? " · Read-only" : ""}${this.options.tabFocusMode ? " · Tab moves focus" : ""}`
 			: "No document attached";
@@ -1473,7 +1510,7 @@ export class EditorView implements Disposable {
 	};
 
 	private readonly handleDocumentSelection = (): void => {
-		if (this.element.ownerDocument.activeElement === this.element)
+		if (this.element.ownerDocument.activeElement === this.element.native)
 			this.updateCursor();
 	};
 
@@ -1622,7 +1659,10 @@ export class EditorView implements Disposable {
 			event.defaultPrevented
 		)
 			return;
-		if (this.selectionsValue.length > 1) {
+		if (
+			this.selectionsValue.length > 1 ||
+			this.options.accessibilitySupport !== "on"
+		) {
 			const supported =
 				event.inputType === "insertText" ||
 				event.inputType === "insertLineBreak" ||
@@ -1698,11 +1738,15 @@ export class EditorView implements Disposable {
 	};
 
 	private revealCursor(): void {
+		const oldTop = this.element.scrollTop,
+			oldLeft = this.element.scrollLeft;
 		const offset =
 			this.element.selectionDirection === "backward"
 				? this.element.selectionStart
 				: this.element.selectionEnd;
-		const position = getInputPosition(this.element.value, offset);
+		const position = this.deferredComposition
+			? getInputPosition(this.element.value, offset)
+			: this.model.getPositionAtInputOffset(offset);
 		const top = 16 + (position.line - 1) * 24;
 		if (top < this.element.scrollTop + 16)
 			this.element.scrollTop = Math.max(0, top - 16);
@@ -1712,25 +1756,7 @@ export class EditorView implements Disposable {
 		) {
 			this.element.scrollTop = top + 24 + 16 - this.element.clientHeight;
 		}
-		const prefix = this.element.value.slice(
-			offset - position.column + 1,
-			offset,
-		);
-		const context = this.element.ownerDocument
-			.createElement("canvas")
-			.getContext("2d");
-		if (context) context.font = "16px monospace";
-		const tabWidth =
-			this.options.tabSize * (context?.measureText(" ").width ?? 8);
-		let width = 0;
-		const runs = prefix.split("\t");
-		for (let index = 0; index < runs.length; index++) {
-			const run = runs[index] ?? "";
-			width += context?.measureText(run).width ?? run.length * 8;
-			if (index < runs.length - 1)
-				width = (Math.floor(width / tabWidth) + 1) * tabWidth;
-		}
-		const left = 16 + width;
+		const left = this.renderer.point(position).x;
 		if (left < this.element.scrollLeft + 16)
 			this.element.scrollLeft = Math.max(0, left - 16);
 		else if (
@@ -1739,7 +1765,11 @@ export class EditorView implements Disposable {
 		) {
 			this.element.scrollLeft = left + 16 - this.element.clientWidth;
 		}
-		this.renderer.render();
+		if (
+			oldTop !== this.element.scrollTop ||
+			oldLeft !== this.element.scrollLeft
+		)
+			this.renderer.render();
 	}
 
 	private readonly handleInput = (event?: Event): void => {
@@ -2031,7 +2061,10 @@ export class EditorView implements Disposable {
 		this.multiExpansion.length = 0;
 		this.multiExpandedKey = "";
 		this.multiTyping = undefined;
-		this.element.removeEventListener("contextmenu", this.handleContextMenu);
+		this.renderer.interactionElement.removeEventListener(
+			"contextmenu",
+			this.handleContextMenu,
+		);
 		this.cursors.dispose();
 		this.selectionsValue = [caret(0)];
 		this.cursorUndo.length = 0;
@@ -2068,6 +2101,7 @@ export class EditorView implements Disposable {
 		this.attachedModel = null;
 		this.model = this.emptyModel;
 		this.element.value = "";
+		this.element.dispose();
 		this.cursorLabel.remove();
 		this.frame.remove();
 	}

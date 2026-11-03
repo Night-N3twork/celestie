@@ -4,6 +4,7 @@ import type { TextModel } from "../model/text-model";
 import "../styles/editor.css";
 import { calculateViewport } from "./layout";
 import { LineNumberGutter } from "./line-number-gutter";
+import { TextGeometry } from "./text-geometry";
 
 interface TextRendererOptions {
 	readonly input?: HTMLTextAreaElement;
@@ -29,7 +30,26 @@ export class TextRenderer implements Disposable {
 	private readonly activeLineHighlight: HTMLDivElement;
 	private subscription: Disposable | undefined;
 	private readonly resizeObserver: ResizeObserver;
-	private readonly scrollSource: HTMLElement;
+	private accessible = false;
+	private readonly geometry: TextGeometry;
+	private readonly selectionLayer: HTMLDivElement;
+	private visible = { firstLine: 1, lastLine: 1 };
+	private widest = 0;
+	private rowsKey = "";
+	private highlightRevision = 0;
+	private dropOffset: number | undefined;
+	get columnWidth(): number {
+		return this.geometry.spaceWidth();
+	}
+	get interactionElement(): HTMLElement {
+		return this.scroller;
+	}
+	get viewport(): HTMLElement {
+		return this.accessible && this.input ? this.input : this.scroller;
+	}
+	private get scrollSource(): HTMLElement {
+		return this.viewport;
+	}
 	private readonly input: HTMLTextAreaElement | undefined;
 	private readonly padding: number;
 	private readonly lineHeight = 24;
@@ -73,30 +93,90 @@ export class TextRenderer implements Disposable {
 		this.activeLineHighlight.setAttribute("aria-hidden", "true");
 		this.surface.appendChild(this.activeLineHighlight);
 		this.surface.appendChild(this.rows);
+		this.selectionLayer = document.createElement("div");
+		this.selectionLayer.className = "editor-selection-layer";
+		this.selectionLayer.setAttribute("aria-hidden", "true");
+		this.surface.append(this.selectionLayer);
+		this.geometry = new TextGeometry(
+			this.scroller,
+			this.surface,
+			() => this.model,
+			this.padding,
+			this.lineHeight,
+		);
+		this.scroller.tabIndex = -1;
 		this.scroller.appendChild(this.surface);
 		if (this.input) {
 			this.surface.setAttribute("aria-hidden", "true");
-			this.root.classList.add("editor-renderer-with-input");
+			this.root.classList.add(
+				"editor-renderer-with-input",
+				"editor-bounded-renderer",
+			);
+			this.input.classList.add("editor-native-input-bounded");
 			this.scroller.appendChild(this.input);
 		}
 		this.root.appendChild(this.scroller);
 		container.appendChild(this.root);
-		this.scrollSource = this.input ?? this.scroller;
-		this.scrollSource.addEventListener("scroll", this.render);
+		this.scroller.addEventListener("scroll", this.render);
+		this.input?.addEventListener("scroll", this.inputScroll);
 		this.subscription = this.input
 			? undefined
 			: model.onDidChangeContent(this.render);
 		this.resizeObserver = new ResizeObserver(this.render);
-		this.resizeObserver.observe(this.scrollSource);
+		this.resizeObserver.observe(this.scroller);
 		this.render();
 	}
 
+	private readonly inputScroll = (): void => {
+		if (this.accessible) this.render();
+	};
+	setAccessible(value: boolean): void {
+		const top = this.scrollSource.scrollTop,
+			left = this.scrollSource.scrollLeft;
+		this.accessible = value;
+		this.root.classList.toggle("editor-bounded-renderer", !value);
+		this.input?.classList.toggle("editor-native-input-bounded", !value);
+		if (this.input) {
+			this.input.style.left = "";
+			this.input.style.top = "";
+		}
+		this.render();
+		this.scrollSource.scrollTop = top;
+		this.scrollSource.scrollLeft = left;
+		this.render();
+	}
+	hitTest(x: number, y: number): number {
+		return this.geometry.hitTest(
+			x,
+			y,
+			this.scrollSource.scrollTop,
+			this.scrollSource.scrollLeft,
+		);
+	}
+	point(position: Position): { x: number; y: number; height: number } {
+		const point = this.geometry.point(position);
+		const viewportRelative =
+			this.accessible && this.geometry.hasLine(position.line);
+		return {
+			...point,
+			x: point.x + (viewportRelative ? this.scrollSource.scrollLeft : 0),
+			y: point.y + (viewportRelative ? this.scrollSource.scrollTop : 0),
+		};
+	}
+	offsetAtLineX(line: number, x: number): number {
+		const bounds = this.scroller.getBoundingClientRect();
+		return this.hitTest(
+			bounds.left + x - this.scrollSource.scrollLeft,
+			bounds.top +
+				this.padding +
+				(line - 1) * this.lineHeight -
+				this.scrollSource.scrollTop +
+				this.lineHeight / 2,
+		);
+	}
 	render = (): void => {
 		if (this.disposed) return;
 		const lineCount = this.model.getLineCount();
-		if (!this.input) {
-			this.surface.style.height = `${lineCount * this.lineHeight + 2 * this.padding}px`;
-		}
 		const { scrollTop, scrollLeft, clientHeight, clientWidth } =
 			this.scrollSource;
 		const viewport = calculateViewport(
@@ -105,12 +185,11 @@ export class TextRenderer implements Disposable {
 			clientHeight,
 			this.lineHeight,
 		);
-		if (this.input) {
-			this.surface.style.width = `${clientWidth}px`;
-			this.surface.style.height = `${clientHeight}px`;
-		}
-		this.rows.style.top = `${this.padding + viewport.offsetTop - (this.input ? scrollTop : 0)}px`;
-		this.rows.style.left = `${this.padding - (this.input ? scrollLeft : 0)}px`;
+		this.visible = viewport;
+		this.surface.style.height = `${this.accessible ? clientHeight : lineCount * this.lineHeight + 2 * this.padding}px`;
+		this.surface.style.width = `${this.accessible ? clientWidth : Math.max(clientWidth, this.widest)}px`;
+		this.rows.style.top = `${this.padding + viewport.offsetTop - (this.accessible ? scrollTop : 0)}px`;
+		this.rows.style.left = `${this.padding - (this.accessible ? scrollLeft : 0)}px`;
 		this.gutter.render({
 			viewport,
 			lineCount,
@@ -118,18 +197,136 @@ export class TextRenderer implements Disposable {
 			viewportHeight: clientHeight,
 			paddingTop: this.padding,
 		});
-		const fragment = this.scroller.ownerDocument.createDocumentFragment();
-		for (let line = viewport.firstLine; line <= viewport.lastLine; line++) {
-			const row = this.scroller.ownerDocument.createElement("div");
-			row.dataset.line = String(line);
-			row.style.height = `${this.lineHeight}px`;
-			const text = this.model.getLineContent(line);
-			this.appendHighlightedText(row, text, line);
-			fragment.appendChild(row);
+		const rowsKey = `${this.model.id}:${this.model.getVersionId()}:${viewport.firstLine}:${viewport.lastLine}:${this.highlightRevision}`;
+		if (rowsKey !== this.rowsKey) {
+			this.rowsKey = rowsKey;
+			const fragment =
+				this.scroller.ownerDocument.createDocumentFragment();
+			this.geometry.clear();
+			for (
+				let line = viewport.firstLine;
+				line <= viewport.lastLine;
+				line++
+			) {
+				const row = this.scroller.ownerDocument.createElement("div");
+				row.dataset.line = String(line);
+				row.style.height = `${this.lineHeight}px`;
+				const text = this.model.getLineContent(line);
+				this.appendHighlightedText(row, text, line);
+				fragment.append(row);
+				this.geometry.register(line, row, text);
+			}
+			this.rows.replaceChildren(fragment);
 		}
-		this.rows.replaceChildren(fragment);
+
+		this.widest = Math.max(
+			this.widest,
+			this.rows.scrollWidth + 2 * this.padding,
+		);
+		if (!this.accessible)
+			this.surface.style.width = `${Math.max(clientWidth, this.widest)}px`;
 		this.positionActiveLine();
+		this.paintSelections();
 	};
+	setDropOffset(offset: number | undefined): void {
+		this.dropOffset = offset;
+		this.paintSelections();
+	}
+	private paintSelections(): void {
+		if (this.disposed) return;
+		const fragment = this.surface.ownerDocument.createDocumentFragment();
+		const rectangle = (
+			name: string,
+			x: number,
+			y: number,
+			width: number,
+			height: number,
+		) => {
+			const element = this.surface.ownerDocument.createElement("div");
+			element.className = name;
+			element.style.cssText = `left:${x}px;top:${y}px;width:${width}px;height:${height}px`;
+			fragment.append(element);
+		};
+		const selections = this.accessible
+			? this.selections.slice(1)
+			: this.selections;
+		for (const selection of selections) {
+			const start = this.model.getPositionAtInputOffset(selection.start),
+				end = this.model.getPositionAtInputOffset(selection.end);
+			if (selection.start !== selection.end)
+				for (
+					let line = Math.max(start.line, this.visible.firstLine);
+					line <= Math.min(end.line, this.visible.lastLine);
+					line++
+				) {
+					const content = this.model.getLineContent(line),
+						from = line === start.line ? start.column - 1 : 0,
+						to =
+							line === end.line ? end.column - 1 : content.length;
+					for (const rect of this.geometry.rectangles(line, from, to))
+						if (rect.width > 0)
+							rectangle(
+								"editor-custom-selection",
+								rect.x,
+								rect.y,
+								rect.width,
+								rect.height,
+							);
+					if (line < end.line) {
+						const point = this.geometry.point({
+							line,
+							column: content.length + 1,
+						});
+						rectangle(
+							"editor-custom-selection",
+							point.x,
+							point.y,
+							8,
+							this.lineHeight,
+						);
+					}
+				}
+			const active = selection.direction === "backward" ? start : end;
+			if (
+				active.line >= this.visible.firstLine &&
+				active.line <= this.visible.lastLine
+			) {
+				const point = this.geometry.point(active);
+				rectangle(
+					"editor-custom-caret",
+					point.x,
+					point.y,
+					2,
+					point.height,
+				);
+			}
+		}
+		if (this.dropOffset !== undefined) {
+			const point = this.geometry.point(
+				this.model.getPositionAtInputOffset(this.dropOffset),
+			);
+			rectangle(
+				"editor-custom-caret editor-drop-caret",
+				point.x,
+				point.y,
+				2,
+				point.height,
+			);
+		}
+		this.selectionLayer.replaceChildren(fragment);
+		if (this.input && !this.accessible && this.selections[0]) {
+			const selection = this.selections[0],
+				offset =
+					selection.direction === "backward"
+						? selection.start
+						: selection.end;
+			const point = this.geometry.point(
+				this.model.getPositionAtInputOffset(offset),
+			);
+			this.input.style.left = `${Math.max(this.scroller.scrollLeft, Math.min(point.x, this.scroller.scrollLeft + this.scroller.clientWidth - 4))}px`;
+			this.input.style.top = `${Math.max(this.scroller.scrollTop, Math.min(point.y, this.scroller.scrollTop + this.scroller.clientHeight - this.lineHeight))}px`;
+		}
+	}
 
 	private appendHighlightedText(
 		row: HTMLElement,
@@ -166,26 +363,7 @@ export class TextRenderer implements Disposable {
 		}
 		for (const column of this.bracketHighlights.get(line) ?? [])
 			mark(column, column + 1, "editor-matching-bracket");
-		const lineStart = this.model.getInputOffsetAt({ line, column: 1 });
-		for (const selection of this.selections.slice(1)) {
-			if (
-				selection.start !== selection.end &&
-				selection.start <= lineStart + text.length &&
-				selection.end > lineStart
-			) {
-				const from = Math.max(0, selection.start - lineStart),
-					to = Math.min(text.length, selection.end - lineStart);
-				if (from < to) mark(from, to, "editor-secondary-selection");
-				if (selection.end > lineStart + text.length)
-					eventAt(text.length).empty.push("editor-selection-newline");
-			}
-			const head =
-				selection.direction === "backward"
-					? selection.start
-					: selection.end;
-			if (head >= lineStart && head <= lineStart + text.length)
-				eventAt(head - lineStart).empty.push("editor-secondary-caret");
-		}
+
 		const active = new Set<string>();
 		let cursor = 0;
 		const append = (end: number) => {
@@ -219,7 +397,7 @@ export class TextRenderer implements Disposable {
 		if (key === this.selectionKey) return;
 		this.selectionKey = key;
 		this.selections = selections.map((value) => ({ ...value }));
-		this.render();
+		this.paintSelections();
 	}
 	setBracketMatches(positions: readonly Position[]): void {
 		const key = positions
@@ -228,6 +406,7 @@ export class TextRenderer implements Disposable {
 			.join(",");
 		if (this.disposed || key === this.bracketKey) return;
 		this.bracketKey = key;
+		this.highlightRevision++;
 		this.bracketHighlights.clear();
 		for (const { line, column } of positions) {
 			const list = this.bracketHighlights.get(line) ?? [];
@@ -240,6 +419,7 @@ export class TextRenderer implements Disposable {
 	setSearchMatches(matches: readonly SearchMatch[], current: number): void {
 		if (this.disposed) return;
 		this.searchHighlights.clear();
+		this.highlightRevision++;
 		for (let index = 0; index < matches.length; index++) {
 			const match = matches[index];
 			if (!match) continue;
@@ -275,6 +455,7 @@ export class TextRenderer implements Disposable {
 
 	setTabSize(size: number): void {
 		this.root.style.tabSize = String(size);
+		this.geometry.setTabSize(size);
 		this.render();
 	}
 
@@ -289,20 +470,26 @@ export class TextRenderer implements Disposable {
 		this.bracketHighlights.clear();
 		this.bracketKey = "";
 		this.activeLine = 0;
+		this.widest = 0;
+		this.rowsKey = "";
+		this.selections = [];
+		this.selectionKey = "";
 		this.render();
 	}
 
 	private positionActiveLine(): void {
 		this.activeLineHighlight.hidden =
 			this.activeLine < 1 || this.activeLine > this.model.getLineCount();
-		this.activeLineHighlight.style.top = `${this.padding + (this.activeLine - 1) * this.lineHeight - (this.input ? this.scrollSource.scrollTop : 0)}px`;
+		this.activeLineHighlight.style.top = `${this.padding + (this.activeLine - 1) * this.lineHeight - (this.accessible ? this.scrollSource.scrollTop : 0)}px`;
 	}
 
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.resizeObserver.disconnect();
-		this.scrollSource.removeEventListener("scroll", this.render);
+		this.scroller.removeEventListener("scroll", this.render);
+		this.input?.removeEventListener("scroll", this.inputScroll);
+		this.geometry.clear();
 		this.subscription?.dispose();
 		this.gutter.dispose();
 		this.subscription = undefined;

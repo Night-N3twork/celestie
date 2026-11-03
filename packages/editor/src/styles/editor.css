@@ -116,6 +116,7 @@
 	flex: 1;
 	min-width: 0;
 	overflow: auto;
+	scrollbar-color: #666 #1e1e1e;
 }
 
 .editor-text-surface {
@@ -124,7 +125,7 @@
 
 .editor-text-rows {
 	position: absolute;
-	min-width: 100%;
+	min-width: 0;
 	width: max-content;
 	white-space: pre;
 }
@@ -343,4 +344,52 @@
 }
 .editor-view-frame:not(:focus-within) .editor-secondary-caret {
 	visibility: hidden;
+}
+
+.editor-bounded-renderer .editor-text-viewport {
+	overflow: auto;
+	cursor: text;
+	outline: none;
+}
+.editor-bounded-renderer .editor-text-surface {
+	position: relative;
+	overflow: visible;
+}
+.editor-bounded-renderer .editor-text-rows {
+	user-select: none;
+}
+.editor-native-input.editor-native-input-bounded {
+	inset: auto;
+	width: 2px;
+	height: 24px;
+	padding: 0;
+	overflow: hidden;
+	opacity: 0;
+	caret-color: transparent;
+	z-index: 3;
+}
+.editor-selection-layer {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+.editor-custom-selection,
+.editor-custom-caret {
+	position: absolute;
+}
+.editor-custom-selection {
+	background: rgb(57 115 185 / 50%);
+}
+.editor-custom-caret {
+	background: #fff;
+}
+.editor-view-frame:not(:focus-within) .editor-custom-caret {
+	visibility: hidden;
+}
+.editor-bounded-input.editor-composition-pending .editor-text-surface {
+	visibility: visible;
+}
+
+.editor-drop-caret {
+	background: #75beff;
 }

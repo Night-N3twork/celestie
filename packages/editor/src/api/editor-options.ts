@@ -5,6 +5,7 @@ import type { TextSelection } from "./types";
 export interface EditorOptions extends IndentationOptions {
 	readonly readOnly: boolean;
 	readonly tabFocusMode: boolean;
+	readonly accessibilitySupport: "auto" | "on" | "off";
 }
 
 export interface EditorViewOptions extends Partial<EditorOptions> {

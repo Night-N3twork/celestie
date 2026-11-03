@@ -53,7 +53,17 @@ const readOnly = document.getElementById(
 const tabFocus = document.getElementById(
 	"tab-focus",
 ) as HTMLInputElement | null;
-if (!commandsButton || !tabSize || !insertSpaces || !readOnly || !tabFocus)
+const accessibleInput = document.getElementById(
+	"accessible-input",
+) as HTMLInputElement | null;
+if (
+	!commandsButton ||
+	!tabSize ||
+	!insertSpaces ||
+	!readOnly ||
+	!tabFocus ||
+	!accessibleInput
+)
 	throw new Error("Editor settings were not found.");
 tabSize.replaceChildren();
 for (let size = 1; size <= 16; size++) {
@@ -68,6 +78,7 @@ const syncOptions = () => {
 	insertSpaces.checked = options.insertSpaces;
 	readOnly.checked = options.readOnly;
 	tabFocus.checked = options.tabFocusMode;
+	accessibleInput.checked = options.accessibilitySupport === "on";
 };
 const changeOptions = () => {
 	documents.activeView.updateOptions({
@@ -75,12 +86,19 @@ const changeOptions = () => {
 		insertSpaces: insertSpaces.checked,
 		readOnly: readOnly.checked,
 		tabFocusMode: tabFocus.checked,
+		accessibilitySupport: accessibleInput.checked ? "on" : "auto",
 	});
 	syncOptions();
 };
 const openCommands = () => documents.activeView.openCommandPalette();
 commandsButton.addEventListener("click", openCommands);
-for (const control of [tabSize, insertSpaces, readOnly, tabFocus])
+for (const control of [
+	tabSize,
+	insertSpaces,
+	readOnly,
+	tabFocus,
+	accessibleInput,
+])
 	control.addEventListener("change", changeOptions);
 const optionsSubscription = documents.onDidChangeActiveView(syncOptions);
 syncOptions();
@@ -129,7 +147,13 @@ outdentButton.addEventListener("pointerdown", preserveSelection);
 
 import.meta.hot?.dispose(() => {
 	commandsButton.removeEventListener("click", openCommands);
-	for (const control of [tabSize, insertSpaces, readOnly, tabFocus])
+	for (const control of [
+		tabSize,
+		insertSpaces,
+		readOnly,
+		tabFocus,
+		accessibleInput,
+	])
 		control.removeEventListener("change", changeOptions);
 	optionsSubscription.dispose();
 	indentButton.removeEventListener("click", indent);

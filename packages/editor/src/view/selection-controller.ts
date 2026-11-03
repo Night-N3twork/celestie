@@ -1,4 +1,5 @@
 import type { Disposable, TextSelection } from "../api/types";
+import { wordRange } from "../features/editing-commands";
 import {
 	anchor,
 	caret,
@@ -6,9 +7,7 @@ import {
 	graphemeOffset,
 	head,
 	normalizeSelections,
-	offsetAtColumn,
 	selectionLimit,
-	visualColumn,
 } from "../features/selections";
 import { getInputLineRange, getInputPosition } from "./input";
 
@@ -17,8 +16,18 @@ interface SelectionHost {
 	getSelections(): readonly TextSelection[];
 	setSelections(values: readonly TextSelection[], reveal?: boolean): void;
 	offsetAtPoint(x: number, y: number): number;
-	getTabSize(): number;
+	columnWidth(): number;
 	isComposing(): boolean;
+	viewport(): HTMLElement;
+	isBounded(): boolean;
+	pointAtOffset(offset: number): number;
+	offsetAtLineX(line: number, x: number): number;
+	previewDrop(offset: number | undefined): void;
+	moveSelection(
+		selection: TextSelection,
+		target: number,
+		copy: boolean,
+	): void;
 }
 
 export class SelectionController implements Disposable {
@@ -33,10 +42,16 @@ export class SelectionController implements Disposable {
 				start: number;
 				startColumn: number;
 				column: boolean;
+				mode: "text" | "word" | "line" | "column" | "move";
+				anchorEnd: number;
+				originX?: number;
+				originY?: number;
+				moved?: boolean;
 				pointer: number;
 		  }
 		| undefined;
 	private animation = 0;
+	private lastClick = { time: 0, x: 0, y: 0, count: 0 };
 	constructor(
 		private readonly input: HTMLTextAreaElement,
 		private readonly frame: HTMLElement,
@@ -51,6 +66,16 @@ export class SelectionController implements Disposable {
 	reset(): void {
 		this.preferred = [];
 		this.rectangle = undefined;
+		const pointer = this.drag?.pointer;
+		if (
+			pointer !== undefined &&
+			this.host.viewport().hasPointerCapture(pointer)
+		)
+			this.host.viewport().releasePointerCapture(pointer);
+		this.drag = undefined;
+		cancelAnimationFrame(this.animation);
+		this.animation = 0;
+		this.host.previewDrop(undefined);
 	}
 	move(key: string, extend: boolean): void {
 		const text = this.host.getText();
@@ -66,13 +91,8 @@ export class SelectionController implements Disposable {
 				position = getInputPosition(text, active);
 			let target = active;
 			if (vertical) {
-				const line = getInputLineRange(text, position.line);
 				const column =
-					this.preferred[index] ??
-					visualColumn(
-						text.slice(line.from, active),
-						this.host.getTabSize(),
-					);
+					this.preferred[index] ?? this.host.pointAtOffset(active);
 				this.preferred[index] = column;
 				const count = text.split("\n").length;
 				const number = Math.max(
@@ -85,22 +105,14 @@ export class SelectionController implements Disposable {
 									? Math.max(
 											1,
 											Math.floor(
-												this.input.clientHeight / 24,
+												this.host.viewport()
+													.clientHeight / 24,
 											) - 1,
 										)
 									: 1),
 					),
 				);
-				const range = getInputLineRange(text, number);
-				const end =
-					text[range.to - 1] === "\n" ? range.to - 1 : range.to;
-				target =
-					range.from +
-					offsetAtColumn(
-						text.slice(range.from, end),
-						column,
-						this.host.getTabSize(),
-					);
+				target = this.host.offsetAtLineX(number, column);
 			} else if (key === "Home" || key === "End") {
 				const range = getInputLineRange(text, position.line);
 				target =
@@ -133,23 +145,9 @@ export class SelectionController implements Disposable {
 			values.length >= selectionLimit
 		)
 			return;
-		const old = getInputLineRange(text, position.line),
-			range = getInputLineRange(text, line);
 		const column =
-			this.preferred[0] ??
-			visualColumn(
-				text.slice(old.from, head(source)),
-				this.host.getTabSize(),
-			);
-		const end = range.to - (text[range.to - 1] === "\n" ? 1 : 0);
-		const next = caret(
-			range.from +
-				offsetAtColumn(
-					text.slice(range.from, end),
-					column,
-					this.host.getTabSize(),
-				),
-		);
+			this.preferred[0] ?? this.host.pointAtOffset(head(source));
+		const next = caret(this.host.offsetAtLineX(line, column));
 		this.host.setSelections([next, ...values], true);
 		this.preferred = [column, ...this.preferred];
 	}
@@ -157,12 +155,8 @@ export class SelectionController implements Disposable {
 		const text = this.host.getText(),
 			source = this.host.getSelections()[0] ?? caret(0);
 		if (!this.rectangle) {
-			const position = getInputPosition(text, head(source)),
-				range = getInputLineRange(text, position.line);
-			const column = visualColumn(
-				text.slice(range.from, head(source)),
-				this.host.getTabSize(),
-			);
+			const position = getInputPosition(text, head(source));
+			const column = this.host.pointAtOffset(head(source));
 			this.rectangle = {
 				line: position.line,
 				column,
@@ -183,7 +177,8 @@ export class SelectionController implements Disposable {
 		rect.endColumn = Math.max(
 			0,
 			rect.endColumn +
-				(direction === "Left" ? -1 : direction === "Right" ? 1 : 0),
+				(direction === "Left" ? -1 : direction === "Right" ? 1 : 0) *
+					this.host.columnWidth(),
 		);
 		const values: TextSelection[] = [];
 		const step = rect.endLine < rect.line ? 1 : -1;
@@ -192,23 +187,10 @@ export class SelectionController implements Disposable {
 			values.length < selectionLimit;
 			line += step
 		) {
-			const range = getInputLineRange(text, line),
-				end = range.to - (text[range.to - 1] === "\n" ? 1 : 0),
-				content = text.slice(range.from, end);
 			values.push(
 				directed(
-					range.from +
-						offsetAtColumn(
-							content,
-							rect.column,
-							this.host.getTabSize(),
-						),
-					range.from +
-						offsetAtColumn(
-							content,
-							rect.endColumn,
-							this.host.getTabSize(),
-						),
+					this.host.offsetAtLineX(line, rect.column),
+					this.host.offsetAtLineX(line, rect.endColumn),
 				),
 			);
 			if (line === rect.line) break;
@@ -230,7 +212,7 @@ export class SelectionController implements Disposable {
 			this.reset();
 			return;
 		}
-		if (values.length < 2) return;
+		if (values.length < 2 && !this.host.isBounded()) return;
 		if (
 			(event.ctrlKey || event.metaKey) &&
 			!event.altKey &&
@@ -273,7 +255,13 @@ export class SelectionController implements Disposable {
 		)
 			return;
 		const gutter = event.target.closest(".editor-gutter");
-		if (event.target !== this.input && !gutter) return;
+		const bounded = this.host.isBounded();
+		if (
+			event.target !== this.input &&
+			!gutter &&
+			!(bounded && this.host.viewport().contains(event.target))
+		)
+			return;
 		this.reset();
 		const offset = this.host.offsetAtPoint(event.clientX, event.clientY);
 		if (gutter || (event.altKey && event.shiftKey)) {
@@ -286,9 +274,12 @@ export class SelectionController implements Disposable {
 				start: offset,
 				startColumn: this.columnAtPoint(event.clientX),
 				column: !gutter,
+				mode: gutter ? "line" : "column",
+				anchorEnd: offset,
 				pointer: event.pointerId,
 			};
 			this.updateDrag();
+			this.host.viewport().setPointerCapture(event.pointerId);
 			this.tick();
 		} else if (event.altKey && !event.ctrlKey && !event.metaKey) {
 			event.preventDefault();
@@ -304,6 +295,58 @@ export class SelectionController implements Disposable {
 						? [caret(offset), ...values]
 						: values,
 			);
+		} else if (bounded) {
+			event.preventDefault();
+			this.input.focus({ preventScroll: true });
+			const click = this.lastClick,
+				time = Date.now();
+			const count =
+				time - click.time < 500 &&
+				Math.abs(click.x - event.clientX) < 5 &&
+				Math.abs(click.y - event.clientY) < 5
+					? (click.count % 3) + 1
+					: 1;
+			this.lastClick = {
+				time,
+				x: event.clientX,
+				y: event.clientY,
+				count,
+			};
+			const word = wordRange(this.host.getText(), offset);
+			const primary = this.host.getSelections()[0] ?? caret(0);
+			this.drag = {
+				x: event.clientX,
+				y: event.clientY,
+				start: event.shiftKey
+					? anchor(primary)
+					: count === 2
+						? word.from
+						: offset,
+				anchorEnd: count === 2 ? word.to : offset,
+				startColumn: this.columnAtPoint(event.clientX),
+				column: false,
+				mode:
+					count === 3
+						? "line"
+						: count === 2
+							? "word"
+							: !event.shiftKey &&
+									primary.start !== primary.end &&
+									offset >= primary.start &&
+									offset <= primary.end
+								? "move"
+								: "text",
+				pointer: event.pointerId,
+			};
+			if (this.drag.mode === "move") {
+				this.drag.start = primary.start;
+				this.drag.anchorEnd = primary.end;
+				this.drag.originX = event.clientX;
+				this.drag.originY = event.clientY;
+			}
+			this.updateDrag();
+			this.host.viewport().setPointerCapture(event.pointerId);
+			this.tick();
 		} else if (this.host.getSelections().length > 1)
 			this.host.setSelections([this.host.getSelections()[0] ?? caret(0)]);
 	};
@@ -312,28 +355,48 @@ export class SelectionController implements Disposable {
 		event.preventDefault();
 		this.drag.x = event.clientX;
 		this.drag.y = event.clientY;
+		if (
+			this.drag.mode === "move" &&
+			(Math.abs(event.clientX - (this.drag.originX ?? event.clientX)) >
+				4 ||
+				Math.abs(event.clientY - (this.drag.originY ?? event.clientY)) >
+					4)
+		)
+			this.drag.moved = true;
 		this.updateDrag();
 	};
 	private readonly pointerUp = (event: PointerEvent): void => {
 		if (event.pointerId !== this.drag?.pointer) return;
+		const drag = this.drag;
+		if (drag?.mode === "move" && event.type !== "pointercancel") {
+			const target = this.host.offsetAtPoint(
+				event.clientX,
+				event.clientY,
+			);
+			if (drag.moved)
+				this.host.moveSelection(
+					{
+						start: drag.start,
+						end: drag.anchorEnd,
+						direction: "forward",
+					},
+					target,
+					event.ctrlKey || event.metaKey,
+				);
+			else this.host.setSelections([caret(target)]);
+			this.host.previewDrop(undefined);
+		}
 		this.drag = undefined;
+		this.host.previewDrop(undefined);
 		cancelAnimationFrame(this.animation);
 		this.animation = 0;
 	};
 	private columnAtPoint(x: number): number {
-		const context = this.input.ownerDocument
-			.createElement("canvas")
-			.getContext("2d");
-		if (context) context.font = "16px monospace";
 		return Math.max(
 			0,
-			Math.round(
-				(x -
-					this.input.getBoundingClientRect().left -
-					16 +
-					this.input.scrollLeft) /
-					(context?.measureText(" ").width ?? 8),
-			),
+			x -
+				this.host.viewport().getBoundingClientRect().left +
+				this.host.viewport().scrollLeft,
 		);
 	}
 
@@ -342,9 +405,26 @@ export class SelectionController implements Disposable {
 		if (!drag) return;
 		const text = this.host.getText();
 		const end = this.host.offsetAtPoint(drag.x, drag.y);
+		if (drag.mode === "move") {
+			if (drag.moved) this.host.previewDrop(end);
+			return;
+		}
 		const first = getInputPosition(text, drag.start),
 			last = getInputPosition(text, end);
-		if (!drag.column) {
+		if (drag.mode === "text") {
+			this.host.setSelections([directed(drag.start, end)]);
+			return;
+		}
+		if (drag.mode === "word") {
+			const range = wordRange(text, end);
+			this.host.setSelections([
+				end < drag.start
+					? directed(drag.anchorEnd, range.from)
+					: directed(drag.start, Math.max(drag.anchorEnd, range.to)),
+			]);
+			return;
+		}
+		if (drag.mode === "line") {
 			const start = getInputLineRange(
 				text,
 				Math.min(first.line, last.line),
@@ -371,15 +451,10 @@ export class SelectionController implements Disposable {
 			values.length < selectionLimit;
 			line -= direction
 		) {
-			const range = getInputLineRange(text, line),
-				limit = range.to - (text[range.to - 1] === "\n" ? 1 : 0);
-			const content = text.slice(range.from, limit);
 			values.push(
 				directed(
-					range.from +
-						offsetAtColumn(content, a, this.host.getTabSize()),
-					range.from +
-						offsetAtColumn(content, b, this.host.getTabSize()),
+					this.host.offsetAtLineX(line, a),
+					this.host.offsetAtLineX(line, b),
 				),
 			);
 			if (line === first.line) break;
@@ -388,7 +463,7 @@ export class SelectionController implements Disposable {
 	}
 	private tick = (): void => {
 		if (!this.drag) return;
-		const bounds = this.input.getBoundingClientRect(),
+		const bounds = this.host.viewport().getBoundingClientRect(),
 			drag = this.drag;
 		const dy =
 			drag.y < bounds.top
@@ -403,9 +478,9 @@ export class SelectionController implements Disposable {
 					? drag.x - bounds.right
 					: 0;
 		if (dy || dx) {
-			this.input.scrollTop +=
+			this.host.viewport().scrollTop +=
 				Math.sign(dy) * Math.min(48, Math.abs(dy) / 3 + 4);
-			this.input.scrollLeft +=
+			this.host.viewport().scrollLeft +=
 				Math.sign(dx) * Math.min(48, Math.abs(dx) / 3 + 4);
 			this.updateDrag();
 		}

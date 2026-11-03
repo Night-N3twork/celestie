@@ -113,15 +113,16 @@ export class EditorClipboard implements Disposable {
 		private readonly input: HTMLTextAreaElement,
 		private readonly host: ClipboardHost,
 		private language: LanguageConfiguration,
+		private readonly target: HTMLElement = input,
 	) {
-		input.addEventListener("copy", this.copyEvent);
-		input.addEventListener("cut", this.cutEvent);
-		input.addEventListener("paste", this.pasteEvent);
-		input.addEventListener("dragstart", this.dragStart);
-		input.addEventListener("dragend", this.dragEnd);
-		input.addEventListener("dragover", this.dragOver);
-		input.addEventListener("drop", this.drop);
-		input.addEventListener("beforeinput", this.beforeInput);
+		target.addEventListener("copy", this.copyEvent);
+		target.addEventListener("cut", this.cutEvent);
+		target.addEventListener("paste", this.pasteEvent);
+		target.addEventListener("dragstart", this.dragStart);
+		target.addEventListener("dragend", this.dragEnd);
+		target.addEventListener("dragover", this.dragOver);
+		target.addEventListener("drop", this.drop);
+		target.addEventListener("beforeinput", this.beforeInput);
 	}
 
 	setLanguageConfiguration(language: LanguageConfiguration): void {
@@ -631,14 +632,14 @@ export class EditorClipboard implements Disposable {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
-		this.input.removeEventListener("copy", this.copyEvent);
-		this.input.removeEventListener("cut", this.cutEvent);
-		this.input.removeEventListener("paste", this.pasteEvent);
-		this.input.removeEventListener("dragstart", this.dragStart);
-		this.input.removeEventListener("dragend", this.dragEnd);
-		this.input.removeEventListener("dragover", this.dragOver);
-		this.input.removeEventListener("drop", this.drop);
-		this.input.removeEventListener("beforeinput", this.beforeInput);
+		this.target.removeEventListener("copy", this.copyEvent);
+		this.target.removeEventListener("cut", this.cutEvent);
+		this.target.removeEventListener("paste", this.pasteEvent);
+		this.target.removeEventListener("dragstart", this.dragStart);
+		this.target.removeEventListener("dragend", this.dragEnd);
+		this.target.removeEventListener("dragover", this.dragOver);
+		this.target.removeEventListener("drop", this.drop);
+		this.target.removeEventListener("beforeinput", this.beforeInput);
 		this.pasteProviders.length = 0;
 		this.dropProviders.length = 0;
 		this.drag = undefined;
