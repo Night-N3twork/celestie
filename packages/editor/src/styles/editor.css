@@ -312,3 +312,35 @@
 		visibility: hidden;
 	}
 }
+
+.editor-secondary-selection {
+	background: rgb(57 115 185 / 50%);
+}
+.editor-secondary-caret,
+.editor-selection-newline {
+	display: inline-block;
+	position: relative;
+	width: 0;
+	height: 0;
+	vertical-align: baseline;
+}
+.editor-secondary-caret::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	bottom: -4px;
+	height: 20px;
+	border-left: 2px solid #fff;
+}
+.editor-selection-newline::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	bottom: -4px;
+	width: 1ch;
+	height: 24px;
+	background: rgb(57 115 185 / 50%);
+}
+.editor-view-frame:not(:focus-within) .editor-secondary-caret {
+	visibility: hidden;
+}

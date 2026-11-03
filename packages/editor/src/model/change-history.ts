@@ -28,6 +28,15 @@ function state(
 		? Object.freeze({
 				...value,
 				selection: Object.freeze({ ...value.selection }),
+				...(value.selections
+					? {
+							selections: Object.freeze(
+								value.selections.map((selection) =>
+									Object.freeze({ ...selection }),
+								),
+							),
+						}
+					: {}),
 			})
 		: undefined;
 }
@@ -68,7 +77,10 @@ export class History {
 			previous.afterEOL === beforeEOL;
 		const bytes = [...batch.forward, ...batch.inverse].reduce(
 			(total, change) => total + change.text.length * 2 + 96,
-			256,
+			256 +
+				((options.before?.selections?.length ?? 1) +
+					(options.after?.selections?.length ?? 1)) *
+					96,
 		);
 		const totalBytes = bytes + (merge ? previous.bytes : 0);
 		if (totalBytes > this.byteLimit || !this.limit) {

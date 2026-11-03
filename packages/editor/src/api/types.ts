@@ -24,6 +24,7 @@ export interface TextSelection {
 export interface HistoryViewState {
 	readonly owner: string;
 	readonly selection: TextSelection;
+	readonly selections?: readonly TextSelection[];
 	readonly scrollTop: number;
 	readonly scrollLeft: number;
 }

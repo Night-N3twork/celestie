@@ -118,6 +118,19 @@ export function registerEverydayShortcuts(
 		shift: true,
 	});
 	bind("editor.action.selectAll", "a", { primary: true });
+
+	bind("editor.action.insertCursorAbove", "ArrowUp", {
+		ctrl: true,
+		alt: true,
+	});
+	bind("editor.action.insertCursorBelow", "ArrowDown", {
+		ctrl: true,
+		alt: true,
+	});
+	bind("editor.action.addSelectionToNextFindMatch", "d", { primary: true });
+	bind("editor.action.selectHighlights", "l", { primary: true, shift: true });
+	bind("cursorUndo", "u", { primary: true });
+	bind("cursorRedo", "u", { primary: true, shift: true });
 	bind("editor.action.smartSelect.expand", "ArrowRight", {
 		alt: true,
 		shift: true,
@@ -155,11 +168,6 @@ export function registerEverydayShortcuts(
 			ctrl: true,
 			alt: true,
 		});
-		bind(`cursorWordPart${direction}Select`, `Arrow${direction}`, {
-			ctrl: true,
-			alt: true,
-			shift: true,
-		});
 		bind(
 			`deleteWordPart${direction}`,
 			direction === "Left" ? "Backspace" : "Delete",
@@ -174,6 +182,12 @@ export function registerEverydayShortcuts(
 		bind(id ?? "", "k", {
 			primary: true,
 			chord: [{ key: key ?? "", primary: true }],
+		});
+	for (const direction of ["Up", "Down", "Left", "Right"])
+		bind(`cursorColumnSelect${direction}`, `Arrow${direction}`, {
+			ctrl: true,
+			shift: true,
+			alt: true,
 		});
 	const subscriptions = bindings.map((binding) =>
 		shortcuts.register(binding),

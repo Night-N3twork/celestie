@@ -4,6 +4,12 @@ import { normalizeInputText } from "../view/input";
 import { BracketAnalysis } from "./bracket-analysis";
 import type { EditingPlan } from "./editing-plan";
 import { planLineCommand } from "./line-commands";
+import {
+	combineLinePlans,
+	combinePlans,
+	caret as makeCaret,
+	replacementPlan,
+} from "./selections";
 
 export interface TransferContext {
 	readonly text: string;
@@ -18,6 +24,7 @@ interface ClipboardHost {
 	consumeChord(key: string): boolean;
 	getText(): string;
 	getSelection(): TextSelection;
+	getSelections(): readonly TextSelection[];
 	isReadOnly(): boolean;
 	isComposing(): boolean;
 	apply(plan: EditingPlan): void;
@@ -27,6 +34,28 @@ interface ClipboardHost {
 	getTabSize(): number;
 }
 
+const selectionsMime = "application/x-celestie-editor-selections";
+function readSelectionParts(
+	value: string,
+	html = false,
+): readonly string[] | undefined {
+	try {
+		const encoded = html
+			? value.match(/data-celestie-selections="([^"]*)"/)?.[1]
+			: value;
+		if (!encoded) return undefined;
+		const result: unknown = JSON.parse(
+			html ? decodeURIComponent(encoded) : encoded,
+		);
+		return Array.isArray(result) &&
+			result.length <= 1000 &&
+			result.every((value) => typeof value === "string")
+			? result.map((value) => normalizeInputText(value))
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
 const wholeLineMime = "application/x-celestie-editor-line";
 const escapeHtml = (text: string): string =>
 	text.replace(
@@ -147,19 +176,61 @@ export class EditorClipboard implements Disposable {
 				? text.length
 				: newline + 1
 			: selection.end;
+		const selections = this.host.getSelections();
+		const allWholeLine = selections.every(
+			(value) => value.start === value.end,
+		);
+		const pieces = selections
+			.slice()
+			.sort((a, b) => a.start - b.start)
+			.map((value) => {
+				if (!allWholeLine) return text.slice(value.start, value.end);
+				const start =
+					value.start === 0
+						? 0
+						: text.lastIndexOf("\n", value.start - 1) + 1;
+				const finish = text.indexOf("\n", start);
+				return {
+					start,
+					text:
+						text.slice(start, finish < 0 ? text.length : finish) +
+						"\n",
+				};
+			});
 		const plain =
-			text.slice(from, to) + (wholeLine && newline === -1 ? "\n" : "");
+			selections.length > 1
+				? allWholeLine
+					? [
+							...new Map(
+								pieces.map((piece) =>
+									typeof piece === "string"
+										? [0, piece]
+										: [piece.start, piece.text],
+								),
+							).values(),
+						].join("")
+					: pieces.join("\n")
+				: text.slice(from, to) +
+					(wholeLine && newline === -1 ? "\n" : "");
+		const parts =
+			selections.length > 1
+				? pieces.map((piece) =>
+						typeof piece === "string" ? piece : piece.text,
+					)
+				: undefined;
 		return {
 			plain,
+			parts,
 			html: richCopyHtml(
 				plain,
 				this.language,
 				this.host.getTabSize(),
 			).replace(
 				"<pre",
-				wholeLine ? '<pre data-celestie-whole-line="true"' : "<pre",
+				`<pre${allWholeLine ? ' data-celestie-whole-line="true"' : ""}${parts ? ` data-celestie-selections="${encodeURIComponent(JSON.stringify(parts))}"` : ""}`,
 			),
-			wholeLine,
+			wholeLine: allWholeLine,
+			selections,
 			document: text,
 			selection,
 		};
@@ -182,6 +253,35 @@ export class EditorClipboard implements Disposable {
 			!this.sameDocument(payload.document, payload.selection)
 		)
 			return false;
+		if (payload.selections.length > 1) {
+			if (
+				JSON.stringify(payload.selections) !==
+				JSON.stringify(this.host.getSelections())
+			)
+				return false;
+			const plan = payload.wholeLine
+				? combineLinePlans(
+						payload.document,
+						payload.selections,
+						(selection, includeEndLine) =>
+							planLineCommand(
+								payload.document,
+								selection,
+								"delete",
+								undefined,
+								includeEndLine,
+							),
+						"collapse",
+					)
+				: combinePlans(
+						payload.selections.map((selection) =>
+							replacementPlan(selection, ""),
+						),
+						payload.document.length,
+					);
+			this.host.apply(plan);
+			return true;
+		}
 		const plan = payload.wholeLine
 			? planLineCommand(payload.document, payload.selection, "delete")
 			: {
@@ -217,6 +317,11 @@ export class EditorClipboard implements Disposable {
 		const payload = this.copyPayload();
 		event.clipboardData.setData("text/plain", payload.plain);
 		event.clipboardData.setData("text/html", payload.html);
+		if (payload.parts)
+			event.clipboardData.setData(
+				selectionsMime,
+				JSON.stringify(payload.parts),
+			);
 		if (payload.wholeLine)
 			event.clipboardData.setData(wholeLineMime, "true");
 		if (cut) this.cut(payload);
@@ -257,12 +362,14 @@ export class EditorClipboard implements Disposable {
 		if (!this.writable()) return;
 		const original = this.host.getText();
 		const selection = this.host.getSelection();
+		const selectionKey = JSON.stringify(this.host.getSelections());
 		const clipboard =
 			this.input.ownerDocument.defaultView?.navigator.clipboard;
 		if (!clipboard)
 			throw new Error("Clipboard access is unavailable. Use Ctrl/Cmd+V.");
 		let text = "";
 		let wholeLine = false;
+		let parts: readonly string[] | undefined;
 		if (clipboard.read) {
 			const items = await clipboard.read();
 			const item = items.find((item) =>
@@ -270,19 +377,33 @@ export class EditorClipboard implements Disposable {
 			);
 			if (item) {
 				text = await (await item.getType("text/plain")).text();
-				if (item.types.includes("text/html"))
-					wholeLine = (
-						await (await item.getType("text/html")).text()
-					).includes('data-celestie-whole-line="true"');
+				if (item.types.includes("text/html")) {
+					const html = await (await item.getType("text/html")).text();
+					wholeLine = html.includes(
+						'data-celestie-whole-line="true"',
+					);
+					parts = readSelectionParts(html, true);
+				}
 			}
 		} else text = await clipboard.readText();
-		if (!this.sameDocument(original, selection) || !this.writable()) {
+		if (
+			!this.sameDocument(original, selection) ||
+			selectionKey !== JSON.stringify(this.host.getSelections()) ||
+			!this.writable()
+		) {
 			this.host.announce(
 				"Document or selection changed; paste canceled.",
 			);
 			return;
 		}
-		this.insert(text, ["text/plain"], [], wholeLine, this.pasteProviders);
+		this.insert(
+			text,
+			["text/plain"],
+			[],
+			wholeLine,
+			this.pasteProviders,
+			parts,
+		);
 	}
 
 	private readonly pasteEvent = (event: ClipboardEvent): void => {
@@ -298,6 +419,11 @@ export class EditorClipboard implements Disposable {
 					.getData("text/html")
 					.includes('data-celestie-whole-line="true"'),
 			this.pasteProviders,
+			readSelectionParts(event.clipboardData.getData(selectionsMime)) ??
+				readSelectionParts(
+					event.clipboardData.getData("text/html"),
+					true,
+				),
 		);
 	};
 
@@ -348,16 +474,51 @@ export class EditorClipboard implements Disposable {
 		files: readonly File[],
 		wholeLine: boolean,
 		providers: readonly TransferProvider[],
+		parts?: readonly string[],
 	): void {
 		const selection = this.host.getSelection();
 		const original = this.host.getText();
+		const selectionKey = JSON.stringify(this.host.getSelections());
 		const value = this.provided(text, types, files, selection, providers);
 		if (
 			value === undefined ||
+			selectionKey !== JSON.stringify(this.host.getSelections()) ||
 			!this.sameDocument(original, selection) ||
 			!this.writable()
 		)
 			return;
+		const selections = this.host.getSelections();
+		if (selections.length > 1) {
+			const lines = value.split("\n");
+			const ordered = selections
+				.slice()
+				.sort((a, b) => a.start - b.start);
+			const chunks =
+				parts?.length === selections.length &&
+				value === normalizeInputText(text)
+					? parts
+					: lines;
+			const distribute = chunks.length === selections.length;
+			const plans = selections.map((selection) => {
+				const insert = distribute
+					? (chunks[ordered.indexOf(selection)] ?? "")
+					: value;
+				if (wholeLine && selection.start === selection.end) {
+					const start =
+						selection.start === 0
+							? 0
+							: original.lastIndexOf("\n", selection.start - 1) +
+								1;
+					return {
+						edits: [{ from: start, to: start, text: insert }],
+						selection: makeCaret(selection.start + insert.length),
+					};
+				}
+				return replacementPlan(selection, insert);
+			});
+			this.host.apply(combinePlans(plans, original.length));
+			return;
+		}
 		const from =
 			wholeLine && selection.start === selection.end
 				? selection.start === 0
@@ -382,9 +543,12 @@ export class EditorClipboard implements Disposable {
 		const selection = this.host.getSelection();
 		if (!event.dataTransfer || selection.start === selection.end) return;
 		this.drag = { text: this.host.getText(), selection, handled: false };
-		const payload = this.copyPayload();
-		event.dataTransfer.setData("text/plain", payload.plain);
-		event.dataTransfer.setData("text/html", payload.html);
+		const plain = this.host.getText().slice(selection.start, selection.end);
+		event.dataTransfer.setData("text/plain", plain);
+		event.dataTransfer.setData(
+			"text/html",
+			richCopyHtml(plain, this.language, this.host.getTabSize()),
+		);
 		event.dataTransfer.effectAllowed = this.host.isReadOnly()
 			? "copy"
 			: "copyMove";

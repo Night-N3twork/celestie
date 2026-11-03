@@ -9,6 +9,7 @@ export interface InputEdit {
 export interface EditingPlan {
 	readonly edits: readonly InputEdit[];
 	readonly selection: TextSelection;
+	readonly selections?: readonly TextSelection[];
 }
 
 export function mapSelection(

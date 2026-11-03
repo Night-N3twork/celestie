@@ -16,6 +16,7 @@ export interface EditorViewOptions extends Partial<EditorOptions> {
 export interface EditorViewState {
 	readonly modelUri?: string;
 	readonly selection: TextSelection;
+	readonly selections?: readonly TextSelection[];
 	readonly scrollTop: number;
 	readonly scrollLeft: number;
 }

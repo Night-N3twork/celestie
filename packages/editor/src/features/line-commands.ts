@@ -22,6 +22,7 @@ export function planLineCommand(
 	selection: TextSelection,
 	command: LineCommand,
 	options: IndentationOptions = defaultIndentation,
+	includeEndLine = false,
 ): EditingPlan | undefined {
 	const buffer = new TextBuffer(text);
 	const start = buffer.getPositionAt(selection.start);
@@ -29,7 +30,9 @@ export function planLineCommand(
 	const first = start.line;
 	const last =
 		end.line -
-		(selection.end > selection.start && end.column === 1 ? 1 : 0);
+		(!includeEndLine && selection.end > selection.start && end.column === 1
+			? 1
+			: 0);
 	const lineStart = (line: number): number =>
 		buffer.getOffsetAt({ line, column: 1 });
 	const lineEnd = (line: number): number =>

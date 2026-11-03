@@ -1,4 +1,4 @@
-import type { Disposable, Position } from "../api/types";
+import type { Disposable, Position, TextSelection } from "../api/types";
 import type { SearchMatch } from "../features/search";
 import type { TextModel } from "../model/text-model";
 import "../styles/editor.css";
@@ -36,6 +36,8 @@ export class TextRenderer implements Disposable {
 	private disposed = false;
 	private activeLine = 0;
 	private bracketKey = "";
+	private selections: readonly TextSelection[] = [];
+	private selectionKey = "";
 	private readonly bracketHighlights = new Map<number, number[]>();
 	private readonly searchHighlights = new Map<
 		number,
@@ -164,6 +166,26 @@ export class TextRenderer implements Disposable {
 		}
 		for (const column of this.bracketHighlights.get(line) ?? [])
 			mark(column, column + 1, "editor-matching-bracket");
+		const lineStart = this.model.getInputOffsetAt({ line, column: 1 });
+		for (const selection of this.selections.slice(1)) {
+			if (
+				selection.start !== selection.end &&
+				selection.start <= lineStart + text.length &&
+				selection.end > lineStart
+			) {
+				const from = Math.max(0, selection.start - lineStart),
+					to = Math.min(text.length, selection.end - lineStart);
+				if (from < to) mark(from, to, "editor-secondary-selection");
+				if (selection.end > lineStart + text.length)
+					eventAt(text.length).empty.push("editor-selection-newline");
+			}
+			const head =
+				selection.direction === "backward"
+					? selection.start
+					: selection.end;
+			if (head >= lineStart && head <= lineStart + text.length)
+				eventAt(head - lineStart).empty.push("editor-secondary-caret");
+		}
 		const active = new Set<string>();
 		let cursor = 0;
 		const append = (end: number) => {
@@ -192,6 +214,13 @@ export class TextRenderer implements Disposable {
 		append(text.length);
 	}
 
+	setSelections(selections: readonly TextSelection[]): void {
+		const key = JSON.stringify(selections);
+		if (key === this.selectionKey) return;
+		this.selectionKey = key;
+		this.selections = selections.map((value) => ({ ...value }));
+		this.render();
+	}
 	setBracketMatches(positions: readonly Position[]): void {
 		const key = positions
 			.map(({ line, column }) => `${line}:${column}`)
@@ -278,6 +307,8 @@ export class TextRenderer implements Disposable {
 		this.gutter.dispose();
 		this.subscription = undefined;
 		this.modelValue = undefined;
+		this.selections = [];
+		this.selectionKey = "";
 		this.rows.replaceChildren();
 		this.searchHighlights.clear();
 		this.bracketHighlights.clear();

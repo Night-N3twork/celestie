@@ -25,6 +25,56 @@ export function registerEditorActions(view: EditorView): void {
 			shortcut,
 			menu,
 		});
+	for (const direction of ["Up", "Down", "Left", "Right"] as const)
+		add(
+			`cursorColumnSelect${direction}`,
+			`Column Select ${direction}`,
+			() => view.columnSelect(direction),
+			false,
+			`Ctrl+Shift+Alt+${direction}`,
+		);
+	add(
+		"editor.action.insertCursorAbove",
+		"Add Cursor Above",
+		() => view.addCursor(-1),
+		false,
+		"Ctrl+Alt+Up",
+	);
+	add(
+		"editor.action.insertCursorBelow",
+		"Add Cursor Below",
+		() => view.addCursor(1),
+		false,
+		"Ctrl+Alt+Down",
+	);
+	add(
+		"editor.action.addSelectionToNextFindMatch",
+		"Select Next Occurrence",
+		() => view.selectOccurrences(),
+		false,
+		`${primary}+D`,
+	);
+	add(
+		"editor.action.selectHighlights",
+		"Select All Occurrences",
+		() => view.selectOccurrences(true),
+		false,
+		`${primary}+Shift+L`,
+	);
+	add(
+		"cursorUndo",
+		"Undo Cursor Change",
+		() => view.cursorHistory(),
+		false,
+		`${primary}+U`,
+	);
+	add(
+		"cursorRedo",
+		"Redo Cursor Change",
+		() => view.cursorHistory(true),
+		false,
+		`${primary}+Shift+U`,
+	);
 	add(
 		"editor.action.quickCommand",
 		"Show All Commands",
@@ -255,7 +305,7 @@ export function registerEditorActions(view: EditorView): void {
 				`Select ${label} ${name}`,
 				() => view.moveWord(direction, "select", part),
 				false,
-				`${modifier}+Shift+${name === "Left" ? "←" : "→"}`,
+				part ? "" : `${modifier}+Shift+${name === "Left" ? "←" : "→"}`,
 			);
 			add(
 				`delete${prefix}${name}`,
