@@ -83,7 +83,7 @@ export class EditorClipboard implements Disposable {
 	constructor(
 		private readonly input: HTMLTextAreaElement,
 		private readonly host: ClipboardHost,
-		private readonly language: LanguageConfiguration,
+		private language: LanguageConfiguration,
 	) {
 		input.addEventListener("copy", this.copyEvent);
 		input.addEventListener("cut", this.cutEvent);
@@ -93,6 +93,10 @@ export class EditorClipboard implements Disposable {
 		input.addEventListener("dragover", this.dragOver);
 		input.addEventListener("drop", this.drop);
 		input.addEventListener("beforeinput", this.beforeInput);
+	}
+
+	setLanguageConfiguration(language: LanguageConfiguration): void {
+		this.language = language;
 	}
 
 	registerPasteProvider(provider: TransferProvider): Disposable {

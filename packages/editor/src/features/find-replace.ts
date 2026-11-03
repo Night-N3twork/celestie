@@ -16,6 +16,10 @@ export interface SearchEdit {
 }
 
 interface FindReplaceHost {
+	trackSelection?(selection: TextSelection): {
+		getRange(): { from: number; to: number } | undefined;
+		dispose(): void;
+	};
 	canReplace(): boolean;
 	onOpen(): void;
 	getText(): string;
@@ -45,6 +49,12 @@ export class FindReplace implements Disposable {
 	private readonly wholeWord: HTMLInputElement;
 	private readonly inSelection: HTMLInputElement;
 	private scope: { from: number; to: number } | undefined;
+	private trackedScope:
+		| {
+				getRange(): { from: number; to: number } | undefined;
+				dispose(): void;
+		  }
+		| undefined;
 	private previousText = "";
 	private readonly regexMode: HTMLInputElement;
 	private readonly searcher = new RegexSearch();
@@ -214,6 +224,11 @@ export class FindReplace implements Disposable {
 		this.host.onOpen();
 		const selection = this.host.getSelection();
 		if (!this.isOpen) {
+			this.trackedScope?.dispose();
+			this.trackedScope =
+				selection.start !== selection.end
+					? this.host.trackSelection?.(selection)
+					: undefined;
 			this.scope =
 				selection.start !== selection.end
 					? { from: selection.start, to: selection.end }
@@ -233,6 +248,8 @@ export class FindReplace implements Disposable {
 	}
 
 	close(focus = true): void {
+		this.trackedScope?.dispose();
+		this.trackedScope = undefined;
 		this.matches = [];
 		this.current = -1;
 		this.previousText = "";
@@ -251,7 +268,8 @@ export class FindReplace implements Disposable {
 		if (this.disposed || !this.isOpen) return;
 		const text = this.host.getText();
 		const change = findTextChange(this.previousText, text);
-		if (change && this.scope) {
+		if (this.trackedScope) this.scope = this.trackedScope.getRange();
+		else if (change && this.scope) {
 			const delta = change.text.length - (change.to - change.from);
 			const map = (offset: number, end: boolean): number =>
 				offset < change.from
@@ -395,10 +413,7 @@ export class FindReplace implements Disposable {
 		const source = this.host.getText();
 		const text = this.replacementFor(match, source);
 		if (text === undefined) return;
-		if (
-			source.length - (match.to - match.from) + text.length >
-			16000000
-		) {
+		if (source.length - (match.to - match.from) + text.length > 16000000) {
 			this.error =
 				"Replacement would exceed the 16 million character limit.";
 			this.present(false);
@@ -467,7 +482,15 @@ export class FindReplace implements Disposable {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.trackedScope?.dispose();
+		this.trackedScope = undefined;
 		this.searcher.dispose();
+		this.matches = [];
+		this.previousText = "";
+		this.searchKey = "";
+		this.scope = undefined;
+		this.query.value = "";
+		this.replacement.value = "";
 		this.query.removeEventListener("input", this.queryChanged);
 		for (const subscription of this.subscriptions.reverse())
 			subscription.dispose();

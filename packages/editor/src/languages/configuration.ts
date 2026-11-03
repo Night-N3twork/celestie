@@ -69,3 +69,27 @@ export const typescriptConfiguration: LanguageConfiguration = {
 	templateQuote: "`",
 	regexLiterals: true,
 };
+
+export function getLanguageConfiguration(
+	languageId: string,
+): LanguageConfiguration {
+	if (
+		[
+			"typescript",
+			"javascript",
+			"typescriptreact",
+			"javascriptreact",
+		].includes(languageId)
+	)
+		return typescriptConfiguration;
+	if (languageId === "json")
+		return { ...plainTextConfiguration, quotes: ['"'] };
+	if (languageId === "jsonc")
+		return {
+			brackets: plainTextConfiguration.brackets,
+			quotes: ['"'],
+			lineComment: "//",
+			blockComment: ["/*", "*/"],
+		};
+	return plainTextConfiguration;
+}

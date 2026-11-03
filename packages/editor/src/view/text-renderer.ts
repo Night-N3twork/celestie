@@ -13,13 +13,21 @@ interface TextRendererOptions {
 }
 
 export class TextRenderer implements Disposable {
+	private modelValue: TextModel | undefined;
+	private get model(): TextModel {
+		if (!this.modelValue) throw new Error("Renderer disposed.");
+		return this.modelValue;
+	}
+	private set model(value: TextModel) {
+		this.modelValue = value;
+	}
 	private readonly root: HTMLDivElement;
 	private readonly gutter: LineNumberGutter;
 	private readonly scroller: HTMLDivElement;
 	private readonly surface: HTMLDivElement;
 	private readonly rows: HTMLDivElement;
 	private readonly activeLineHighlight: HTMLDivElement;
-	private readonly subscription: Disposable | undefined;
+	private subscription: Disposable | undefined;
 	private readonly resizeObserver: ResizeObserver;
 	private readonly scrollSource: HTMLElement;
 	private readonly input: HTMLTextAreaElement | undefined;
@@ -36,9 +44,10 @@ export class TextRenderer implements Disposable {
 
 	constructor(
 		container: HTMLElement,
-		private readonly model: TextModel,
+		model: TextModel,
 		options: TextRendererOptions = {},
 	) {
+		this.model = model;
 		const document = container.ownerDocument;
 		this.input = options.input;
 		this.padding = options.padding ?? 0;
@@ -240,6 +249,20 @@ export class TextRenderer implements Disposable {
 		this.render();
 	}
 
+	setModel(model: TextModel): void {
+		if (this.disposed) throw new Error("Renderer disposed.");
+		this.subscription?.dispose();
+		this.model = model;
+		this.subscription = this.input
+			? undefined
+			: model.onDidChangeContent(this.render);
+		this.searchHighlights.clear();
+		this.bracketHighlights.clear();
+		this.bracketKey = "";
+		this.activeLine = 0;
+		this.render();
+	}
+
 	private positionActiveLine(): void {
 		this.activeLineHighlight.hidden =
 			this.activeLine < 1 || this.activeLine > this.model.getLineCount();
@@ -253,6 +276,11 @@ export class TextRenderer implements Disposable {
 		this.scrollSource.removeEventListener("scroll", this.render);
 		this.subscription?.dispose();
 		this.gutter.dispose();
+		this.subscription = undefined;
+		this.modelValue = undefined;
+		this.rows.replaceChildren();
+		this.searchHighlights.clear();
+		this.bracketHighlights.clear();
 		this.root.remove();
 	}
 }

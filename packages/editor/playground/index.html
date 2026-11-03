@@ -16,6 +16,30 @@
 			#editor {
 				border: 1px solid #3c3c3c;
 			}
+			#second-editor {
+				border: 1px solid #3c3c3c;
+				min-width: 0;
+			}
+			#editor {
+				min-width: 0;
+			}
+			.editor-panes {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr);
+			}
+			.editor-panes.has-second {
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 8px;
+			}
+			.editor-settings label[hidden],
+			#second-editor[hidden] {
+				display: none;
+			}
+			@media (max-width: 800px) {
+				.editor-panes.has-second {
+					grid-template-columns: minmax(0, 1fr);
+				}
+			}
 
 			.file-tab {
 				margin: 0;
@@ -80,7 +104,7 @@
 	<body>
 		<main>
 			<header class="file-header">
-				<h1 class="file-tab">example.ts</h1>
+				<h1 class="file-tab" id="file-title">example.ts</h1>
 				<fieldset class="editor-actions" aria-label="Editor actions">
 					<button
 						type="button"
@@ -119,6 +143,40 @@
 			</header>
 			<fieldset class="editor-settings" aria-label="Editor settings">
 				<label
+					>Document
+					<select id="document" aria-label="Document"></select></label
+				>
+				<label
+					><input type="checkbox" id="second-view" />Second
+					view</label
+				>
+				<label hidden
+					>Second document
+					<select
+						id="second-document"
+						aria-label="Second document"
+					></select></label
+				>
+				<label
+					>Line endings
+					<select id="line-endings" aria-label="Line endings">
+						<option value="LF">LF</option>
+						<option value="CRLF">CRLF</option>
+						<option value="CR">CR</option>
+					</select></label
+				>
+				<label
+					>Language
+					<select id="language" aria-label="Language">
+						<option value="plaintext">Plain text</option>
+						<option value="typescript">TypeScript</option>
+						<option value="javascript">JavaScript</option>
+						<option value="json">JSON</option>
+						<option value="jsonc">JSON with comments</option>
+					</select></label
+				>
+				<span id="document-status" role="status"></span>
+				<label
 					>Tab size
 					<select id="tab-size" aria-label="Tab size"></select></label
 				>
@@ -132,7 +190,10 @@
 					focus</label
 				>
 			</fieldset>
-			<div id="editor"></div>
+			<div class="editor-panes" id="editor-panes">
+				<div id="editor"></div>
+				<div id="second-editor" hidden></div>
+			</div>
 		</main>
 		<script type="module" src="/main.ts"></script>
 	</body>

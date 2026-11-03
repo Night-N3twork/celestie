@@ -1,8 +1,6 @@
 /// <reference types="vite/client" />
 
-import { typescriptConfiguration } from "../src/languages/configuration";
-import { TextModel } from "../src/model/text-model";
-import { EditorView } from "../src/view/editor-view";
+import { createPlaygroundDocuments } from "./documents";
 
 const container = document.getElementById("editor");
 
@@ -40,10 +38,8 @@ completeTask(1);
 console.log(getRemainingTasks());
 `;
 
-const model = new TextModel(text);
-const view = new EditorView(container, model, {
-	languageConfiguration: typescriptConfiguration,
-});
+const documents = createPlaygroundDocuments(container, text);
+const view = documents.primary;
 view.focus();
 
 const commandsButton = document.getElementById("commands");
@@ -59,6 +55,7 @@ const tabFocus = document.getElementById(
 ) as HTMLInputElement | null;
 if (!commandsButton || !tabSize || !insertSpaces || !readOnly || !tabFocus)
 	throw new Error("Editor settings were not found.");
+tabSize.replaceChildren();
 for (let size = 1; size <= 16; size++) {
 	const option = document.createElement("option");
 	option.value = String(size);
@@ -66,14 +63,14 @@ for (let size = 1; size <= 16; size++) {
 	tabSize.append(option);
 }
 const syncOptions = () => {
-	const options = view.getOptions();
+	const options = documents.activeView.getOptions();
 	tabSize.value = String(options.tabSize);
 	insertSpaces.checked = options.insertSpaces;
 	readOnly.checked = options.readOnly;
 	tabFocus.checked = options.tabFocusMode;
 };
 const changeOptions = () => {
-	view.updateOptions({
+	documents.activeView.updateOptions({
 		tabSize: Number(tabSize.value),
 		insertSpaces: insertSpaces.checked,
 		readOnly: readOnly.checked,
@@ -81,11 +78,11 @@ const changeOptions = () => {
 	});
 	syncOptions();
 };
-const openCommands = () => view.openCommandPalette();
+const openCommands = () => documents.activeView.openCommandPalette();
 commandsButton.addEventListener("click", openCommands);
 for (const control of [tabSize, insertSpaces, readOnly, tabFocus])
 	control.addEventListener("change", changeOptions);
-const optionsSubscription = view.onDidChangeOptions(syncOptions);
+const optionsSubscription = documents.onDidChangeActiveView(syncOptions);
 syncOptions();
 
 const indentButton = document.getElementById("indent");
@@ -104,17 +101,17 @@ if (
 )
 	throw new Error("Indentation controls were not found.");
 
-const indent = () => view.indent();
-const outdent = () => view.outdent();
-const find = () => view.openFind();
-const goTo = () => view.openGoTo();
+const indent = () => documents.activeView.indent();
+const outdent = () => documents.activeView.outdent();
+const find = () => documents.activeView.openFind();
+const goTo = () => documents.activeView.openGoTo();
 const lineComment = () => {
-	view.toggleLineComment();
-	view.focus();
+	documents.activeView.toggleLineComment();
+	documents.activeView.focus();
 };
 const blockComment = () => {
-	view.toggleBlockComment();
-	view.focus();
+	documents.activeView.toggleBlockComment();
+	documents.activeView.focus();
 };
 const preserveSelection = (event: PointerEvent) => {
 	if (event.button === 0) event.preventDefault();
@@ -145,6 +142,5 @@ import.meta.hot?.dispose(() => {
 	blockCommentButton.removeEventListener("pointerdown", preserveSelection);
 	indentButton.removeEventListener("pointerdown", preserveSelection);
 	outdentButton.removeEventListener("pointerdown", preserveSelection);
-	view.dispose();
-	model.dispose();
+	documents.dispose();
 });

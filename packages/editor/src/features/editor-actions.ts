@@ -6,7 +6,8 @@ import type { LineCommand } from "./line-commands";
 export function registerEditorActions(view: EditorView): void {
 	const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 	const primary = mac ? "Cmd" : "Ctrl";
-	const edit = () => !view.getOptions().readOnly && !view.isComposing;
+	const edit = () =>
+		!!view.getModel() && !view.getOptions().readOnly && !view.isComposing;
 	const available = () => !view.isComposing;
 	const add = (
 		id: string,

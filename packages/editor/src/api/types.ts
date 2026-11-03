@@ -40,6 +40,13 @@ export interface ContentChange {
 	readonly text: string;
 }
 
+export interface InputMappingSegment {
+	readonly from: number;
+	readonly before: number;
+	readonly after: number;
+	readonly slope: 0 | 1;
+}
+
 export interface ModelChangeEvent {
 	readonly verId: number;
 	readonly changes: readonly ContentChange[];
@@ -47,6 +54,13 @@ export interface ModelChangeEvent {
 	readonly redoing: boolean;
 	readonly flush: boolean;
 	readonly historyState?: HistoryViewState;
+	readonly inputChanges?: readonly ContentChange[];
+	readonly inputMappings?: readonly InputMappingSegment[];
+	readonly inputMappingBatches?: readonly (readonly InputMappingSegment[])[];
+	readonly alternativeVersionId?: number;
+	readonly eol?: string;
+	readonly eolChanged?: boolean;
+	readonly historyTruncated?: boolean;
 }
 
 export interface Disposable {

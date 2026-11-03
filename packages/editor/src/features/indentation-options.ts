@@ -15,7 +15,14 @@ export function resolveIndentation(
 	options: Partial<IndentationOptions>,
 	fallback = defaultIndentation,
 ): IndentationOptions {
-	const value = { ...fallback, ...options };
+	const value = {
+		tabSize:
+			options.tabSize === undefined ? fallback.tabSize : options.tabSize,
+		insertSpaces:
+			options.insertSpaces === undefined
+				? fallback.insertSpaces
+				: options.insertSpaces,
+	};
 	if (
 		!Number.isInteger(value.tabSize) ||
 		value.tabSize < 1 ||
