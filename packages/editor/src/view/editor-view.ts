@@ -13,85 +13,75 @@ import type {
 	Token,
 } from "../api/languages";
 import type {
-	ContentChange,
 	Disposable,
 	HistoryViewState,
 	ModelChangeEvent,
 } from "../api/types";
 import { BracketAnalysis } from "../features/bracket-analysis";
-import { planBracketInput } from "../features/bracket-editing";
-import { EditorClipboard, type TransferProvider } from "../features/clipboard";
-import { CommandMenu } from "../features/command-menu";
+import type { TransferProvider } from "../features/clipboard";
 import { CommandRegistry } from "../features/commands";
-import { planBlockComment, planLineComment } from "../features/comments";
-import {
-	DecorationCollection,
-	diagnosticDecorations,
-} from "../features/decorations";
-import {
-	expansionRanges,
-	planTextCommand,
-	planWordCommand,
-	type TextCommand,
-	wordRange,
-} from "../features/editing-commands";
-import { type EditingPlan, mapSelection } from "../features/editing-plan";
+import type { DecorationCollection } from "../features/decorations";
+import { type TextCommand, wordRange } from "../features/editing-commands";
+import type { EditingPlan } from "../features/editing-plan";
 import { registerEditorActions } from "../features/editor-actions";
-import { FindReplace, type SearchEdit } from "../features/find-replace";
-import { type FoldingRange, FoldingState } from "../features/folding";
-import { GoToLine } from "../features/go-to-line";
+import type { SearchEdit } from "../features/find-replace";
+import type { FoldingRange } from "../features/folding";
 import { planIndentation, type TextSelection } from "../features/indentation";
 import {
 	detectIndentation,
 	type IndentationOptions,
-	indentationUnit,
 	planIndentationConversion,
 	resolveIndentation,
 } from "../features/indentation-options";
-import {
-	KeyboardShortcuts,
-	registerCommentShortcuts,
-	registerLineShortcuts,
-} from "../features/keyboard-shortcuts";
+import { LanguageEdits } from "../features/language-edits";
 import { LanguageFeatures } from "../features/language-features";
-import { type LineCommand, planLineCommand } from "../features/line-commands";
+import type { LineCommand } from "../features/line-commands";
 import {
 	caret,
-	combineLinePlans,
 	combinePlans,
-	graphemeOffset,
 	type MultiEditingPlan,
 	normalizeSelections,
 	replacementPlan,
 	selectionLimit,
 } from "../features/selections";
-import { parseSnippet } from "../features/snippets";
+import { SnippetSession } from "../features/snippet-session";
+import { ViewEditing } from "../features/view-editing";
 import { languageEngine } from "../languages/client";
 import {
 	getLanguageConfiguration,
 	type LanguageConfiguration,
 	resolveLanguageConfiguration,
 } from "../languages/configuration";
-import { mapModelInputOffset, mapOffset } from "../model/change-mapping";
-import { rebaseEdit } from "../model/rebase-edit";
+import { mapModelInputOffset } from "../model/change-mapping";
 import { TextModel } from "../model/text-model";
-import type { TrackedRange } from "../model/tracked-ranges";
 import {
 	findTextChange,
 	getInputLineRange,
 	getInputPosition,
-	getLineIndent,
 	normalizeInputText,
 } from "./input";
 import { InputSurface } from "./input-surface";
-import { SelectionController } from "./selection-controller";
+import { NativeInputController } from "./native-input-controller";
+import { SavedViewStates } from "./saved-view-states";
+import { createSelectionController } from "./selection-bindings";
+import type { SelectionController } from "./selection-controller";
 import { TextRenderer } from "./text-renderer";
+import { ViewPresentation } from "./view-presentation";
+import { ViewServices } from "./view-services";
+import { ViewTransactions } from "./view-transactions";
 
 export class EditorView implements Disposable {
-	readonly shortcuts: KeyboardShortcuts;
+	get shortcuts() {
+		return this.services.shortcuts;
+	}
 	readonly commands = new CommandRegistry();
-	private readonly menu: CommandMenu;
-	private readonly clipboard: EditorClipboard;
+	private readonly services: ViewServices;
+	private get menu() {
+		return this.services.menu;
+	}
+	private get clipboard() {
+		return this.services.clipboard;
+	}
 	private options: EditorOptions;
 	private readonly modelListeners = new Set<
 		(model: TextModel | null) => void
@@ -102,107 +92,104 @@ export class EditorView implements Disposable {
 	private readonly notice: HTMLDivElement;
 	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	private selectionsValue: TextSelection[] = [caret(0)];
-	private pendingSelections: readonly TextSelection[] | undefined;
 	private readonly cursors: SelectionController;
 	private readonly cursorUndo: TextSelection[][] = [];
 	private readonly cursorRedo: TextSelection[][] = [];
-	private readonly selectionHistory: TextSelection[] = [];
-	private multiExpansion: TextSelection[][] = [];
-	private multiExpandedKey = "";
-	private expandedSelection: TextSelection | undefined;
+	private readonly editing = new ViewEditing({
+		text: () => this.element.value,
+		options: () => this.options,
+		language: () => this.language,
+		disposed: () => this.disposed,
+		composing: () => this.nativeInput.composing,
+		isComposing: () => this.isComposing,
+		getSelection: () => this.getSelection(),
+		getSelections: () => this.getSelections(),
+		setSelections: (v, r) => this.setSelections(v, r),
+		getAnalysis: () => this.getAnalysis(),
+		sameSelection: (a, b) => this.sameSelection(a, b),
+		breakHistoryGroup: () => this.breakHistoryGroup(),
+		applyEditingPlan: (p) => this.applyEditingPlan(p),
+		applyMultiPlan: (p, k) => this.applyMultiPlan(p, k),
+		announce: (m) => this.announce(m),
+	});
 	private readonly element: InputSurface;
+	private readonly nativeInput: NativeInputController;
 	private readonly modelSubscriptions: Disposable[] = [];
+	private readonly savedViews = new SavedViewStates();
 	private model: TextModel;
 	private attachedModel: TextModel | null = null;
 	private readonly emptyModel = new TextModel("", { register: false });
-	private readonly savedModels = new Map<
-		TextModel,
-		{
-			selection: TrackedRange;
-			selections: {
-				range: TrackedRange;
-				direction: TextSelection["direction"];
-				affinity?: TextSelection["affinity"];
-			}[];
-			direction: TextSelection["direction"];
-			anchor: TrackedRange;
-			scrollOffset: number;
-			scrollLeft: number;
-			subscription: Disposable;
-		}
-	>();
 	private readonly renderer: TextRenderer;
+	private readonly presentation: ViewPresentation;
 	private readonly cursorLabel: HTMLDivElement;
 	private readonly frame: HTMLDivElement;
-	private readonly find: FindReplace;
-	private readonly goTo: GoToLine;
+	private get find() {
+		return this.services.find;
+	}
+	private get goTo() {
+		return this.services.goTo;
+	}
 	private disposed = false;
-	private composing = false;
-	private deferredComposition:
-		| {
-				model: TextModel;
-				base: string;
-				before: HistoryViewState;
-				batches: (readonly ContentChange[])[];
-				flush: boolean;
-		  }
-		| undefined;
-	private pendingSelection: TextSelection | undefined;
 	private readonly owner = crypto.randomUUID();
-	private readonly languageFeatures: LanguageFeatures;
-	private readonly locationHandler: EditorViewOptions["onOpenLocation"];
-	private snippetStops: {
-		index: number;
-		ranges: TrackedRange[];
-		choices?: readonly string[];
-	}[] = [];
-	private snippetIndex = -1;
-	private colorWidgets: Disposable[] = [];
-	private readonly contentWidgets = new Set<Disposable>();
-	private readonly diagnosticOwners = new WeakMap<
-		TextModel,
-		Map<
-			string,
-			{ collection: DecorationCollection; values: readonly Diagnostic[] }
-		>
-	>();
-	private readonly modelAssets = new Map<
-		TextModel,
+	private readonly transactions = new ViewTransactions(
 		{
-			folding: FoldingState;
-			collections: Set<DecorationCollection>;
-			markers: DecorationCollection;
-			subscription: Disposable;
-		}
-	>();
-	private groupSequence = 0;
-	private beforeInputState: HistoryViewState | undefined;
+			input: () => this.element,
+			model: () => this.model,
+			disposed: () => this.disposed,
+			composing: () => this.nativeInput.composing,
+			isComposing: () => this.isComposing,
+			canEdit: () => this.canEdit(),
+			captureState: () => this.captureState(),
+			breakHistoryGroup: () => this.breakHistoryGroup(),
+			clearBeforeInput: () => {
+				this.nativeInput.beforeInputState = undefined;
+			},
+			clearSnippet: () => this.clearSnippet(),
+			getSelections: () => this.getSelections(),
+			setSelections: (v, r) => this.setSelections(v, r),
+			writeSelections: (v) => this.writeSelections(v),
+			updateCursor: () => this.updateCursor(),
+			revealCursor: () => this.revealCursor(),
+		},
+		this.owner,
+	);
+	private get pendingSelection() {
+		return this.transactions.pendingSelection;
+	}
+	private set pendingSelection(v: TextSelection | undefined) {
+		this.transactions.pendingSelection = v;
+	}
+	private get pendingSelections() {
+		return this.transactions.pendingSelections;
+	}
+	private readonly languageFeatures: LanguageFeatures;
+	private readonly snippets = new SnippetSession({
+		model: () => this.model,
+		text: () => this.element.value,
+		options: () => this.options,
+		attached: () => !!this.attachedModel,
+		isComposing: () => this.isComposing,
+		canEdit: () => this.canEdit(),
+		getSelection: () => this.getSelection(),
+		getSelections: () => this.getSelections(),
+		setSelections: (v, r) => this.setSelections(v, r),
+		applyMultiPlan: (p) => this.applyMultiPlan(p),
+		mergeCompletionEdits: (p, e) => this.mergeCompletionEdits(p, e),
+		offerChoices: (v) => this.languageFeatures.offerSnippetChoices(v),
+	});
+	private readonly languageEdits = new LanguageEdits({
+		model: () => this.model,
+		text: () => this.element.value,
+		canEdit: () => this.canEdit(),
+		getSelections: () => this.getSelections(),
+		applyMultiPlan: (p) => this.applyMultiPlan(p),
+	});
+	private readonly locationHandler: EditorViewOptions["onOpenLocation"];
 	private lastSelection: TextSelection = {
 		start: 0,
 		end: 0,
 		direction: "none",
 	};
-	private multiTyping:
-		| {
-				id: string;
-				kind: string;
-				time: number;
-				version: number;
-				selections: string;
-		  }
-		| undefined;
-	private typingGroup:
-		| {
-				id: string;
-				kind: string;
-				time: number;
-				version: number;
-				selection: TextSelection;
-		  }
-		| undefined;
-	private compositionGroup: string | undefined;
-	private compositionEndText = "";
-	private compositionEndTime = 0;
 	private analysis: BracketAnalysis | undefined;
 	private language: LanguageConfiguration;
 	private readonly languageOverride: LanguageConfiguration | undefined;
@@ -262,6 +249,48 @@ export class EditorView implements Disposable {
 		this.frame.className = "editor-view-frame";
 		container.appendChild(this.frame);
 		this.element = new InputSurface(document.createElement("textarea"));
+		const view = this;
+		this.nativeInput = new NativeInputController({
+			input: () => this.element,
+			frame: () => this.frame,
+			model: () => this.model,
+			options: () => this.options,
+			language: () => this.language,
+			attached: () => this.attachedModel,
+			disposed: () => this.disposed,
+			lastSelection: () => this.lastSelection,
+			get selectionsValue() {
+				return view.selectionsValue;
+			},
+			set selectionsValue(v) {
+				view.selectionsValue = v;
+			},
+			get pendingSelection() {
+				return view.pendingSelection;
+			},
+			set pendingSelection(v) {
+				view.pendingSelection = v;
+			},
+			resetMultiTyping: () => {
+				this.transactions.resetTyping();
+			},
+			nextGroup: () => this.transactions.nextGroup(),
+			resetCursors: () => this.cursors.reset(),
+			announce: (m) => this.announce(m),
+			applyEditingPlan: (p) => this.applyEditingPlan(p),
+			applyPerSelection: (p, k) => this.applyPerSelection(p, k),
+			captureState: () => this.captureState(),
+			getAnalysis: () => this.getAnalysis(),
+			getSelection: () => this.getSelection(),
+			redo: () => this.redo(),
+			render: () => this.render(),
+			revealCursor: () => this.revealCursor(),
+			sameSelection: (a, b) => this.sameSelection(a, b),
+			undo: () => this.undo(),
+			updateCursor: () => this.updateCursor(),
+			updateOptions: (o) => this.updateOptions(o),
+			writeSelections: (v) => this.writeSelections(v),
+		});
 		this.element.className = "editor-native-input";
 		this.element.setAttribute("aria-label", options.ariaLabel ?? "Editor");
 		this.element.setAttribute(
@@ -288,6 +317,22 @@ export class EditorView implements Disposable {
 			height: "100%",
 			onSelectLine: this.selectLine,
 		});
+		this.presentation = new ViewPresentation(
+			{
+				document,
+				model: () => this.model,
+				hasModel: () => !!this.attachedModel,
+				disposed: () => this.disposed,
+				getSelection: () => this.getSelection(),
+				setSelections: (v, r) => this.setSelections(v, r),
+				updateCursor: () => this.updateCursor(),
+				executeCommand: (id) => this.executeCommand(id),
+				runLanguageCommand: (id) => this.runLanguageCommand(id),
+				diagnosticsChanged: (values) =>
+					this.languageFeatures?.updateStatus(values),
+			},
+			this.renderer,
+		);
 		this.renderer.configure(this.options);
 		this.element.attachViewport(this.renderer.viewport);
 		this.renderer.setAccessible(this.options.accessibilitySupport === "on");
@@ -309,121 +354,38 @@ export class EditorView implements Disposable {
 			this.element.addEventListener(event, this.updateCursor);
 		}
 		this.element.addEventListener("input", this.handleInput);
-		this.shortcuts = new KeyboardShortcuts(this.element.native, {
-			indent: () => this.indent(),
-			outdent: () => this.outdent(),
-			undo: () => this.undo(),
-			redo: () => this.redo(),
-			isComposing: () => this.isComposing,
-			breakHistoryGroup: this.breakHistoryGroup,
-			announce: (message) => this.announce(message),
-			isReadOnly: () => this.options.readOnly || !this.attachedModel,
-		});
-		this.shortcuts.setTabFocusMode(
-			this.options.tabFocusMode || this.options.readOnly,
-		);
-		this.renderer.setTabSize(this.options.tabSize);
-		registerCommentShortcuts(this.shortcuts, {
-			line: () => this.toggleLineComment(),
-			block: () => this.toggleBlockComment(),
-		});
-		registerLineShortcuts(this.shortcuts, (command) =>
-			this.runLineCommand(command),
-		);
-		this.find = new FindReplace(
-			this.frame,
+		this.services = new ViewServices(
 			{
-				onOpen: () => {
-					this.goTo.close(false);
-					this.menu.close(false);
-				},
-				canReplace: () =>
-					!!this.attachedModel &&
-					!this.options.readOnly &&
-					!this.composing &&
-					!this.deferredComposition,
-				trackSelection: (selection) => this.trackSelection(selection),
-				getText: () => this.element.value,
-				getSelection: () => this.captureState().selection,
-				selectMatch: (match) => {
-					this.breakHistoryGroup();
-					this.writeSelections([
-						{
-							start: match.from,
-							end: match.to,
-							direction: "forward",
-						},
-					]);
-					this.revealCursor();
-					this.updateCursor();
-				},
-				replace: (edits, expectedText) =>
-					this.replaceSearch(edits, expectedText),
-				highlight: (matches, current) =>
-					this.renderer.setSearchMatches(matches, current),
-				focusEditor: () => this.focus(),
-			},
-			this.shortcuts,
-		);
-		this.goTo = new GoToLine(
-			this.frame,
-			{
-				onOpen: () => {
-					this.find.close(false);
-					this.menu.close(false);
-				},
-				getText: () => this.element.value,
-				getPosition: () =>
-					getInputPosition(
-						this.element.value,
-						this.element.selectionDirection === "backward"
-							? this.element.selectionStart
-							: this.element.selectionEnd,
-					),
-				selectOffset: (offset) => {
-					this.breakHistoryGroup();
-					this.writeSelections([caret(offset)]);
-					this.revealCursor();
-					this.updateCursor();
-				},
-				focusEditor: () => this.focus(),
-			},
-			this.shortcuts,
-		);
-		this.clipboard = new EditorClipboard(
-			this.element.native,
-			{
-				consumeChord: (key) =>
-					this.shortcuts.consumeClipboardChord(key),
-				getText: () => this.element.value,
-				getSelection: () => this.captureState().selection,
-				isReadOnly: () => this.options.readOnly || !this.attachedModel,
+				options: () => this.options,
+				attached: () => !!this.attachedModel,
 				isComposing: () => this.isComposing,
-				getSelections: () => this.getSelections(),
-				apply: (plan) =>
-					plan.selections
-						? this.applyMultiPlan({
-								...plan,
-								selections: plan.selections,
-							})
-						: this.applyEditingPlan(plan),
+				indent: () => this.indent(),
+				outdent: () => this.outdent(),
+				undo: () => this.undo(),
+				redo: () => this.redo(),
+				breakHistoryGroup: this.breakHistoryGroup,
+				announce: (m) => this.announce(m),
+				trackSelection: (s) => this.trackSelection(s),
+				captureState: () => this.captureState(),
+				writeSelections: (v) => this.writeSelections(v),
+				revealCursor: () => this.revealCursor(),
+				updateCursor: () => this.updateCursor(),
+				replaceSearch: (e, t) => this.replaceSearch(e, t),
 				focus: () => this.focus(),
-				announce: (message) => this.announce(message),
+				getSelections: () => this.getSelections(),
+				applyMultiPlan: (p) => this.applyMultiPlan(p),
+				applyEditingPlan: (p) => this.applyEditingPlan(p),
 				offsetAtPoint: (x, y) => this.offsetAtPoint(x, y),
-				getTabSize: () => this.options.tabSize,
+				toggleLineComment: () => this.toggleLineComment(),
+				toggleBlockComment: () => this.toggleBlockComment(),
+				runLineCommand: (c) => this.runLineCommand(c),
 			},
+			this.element,
+			this.frame,
+			this.renderer,
+			this.commands,
 			this.language,
-			this.renderer.interactionElement,
 		);
-		this.menu = new CommandMenu(this.frame, this.commands, this.shortcuts, {
-			focus: () => this.focus(),
-			onOpen: () => {
-				this.find.close(false);
-				this.goTo.close(false);
-				this.breakHistoryGroup();
-			},
-			announce: (message) => this.announce(message),
-		});
 		registerEditorActions(this);
 		this.renderer.interactionElement.addEventListener(
 			"contextmenu",
@@ -442,62 +404,18 @@ export class EditorView implements Disposable {
 			"selectionchange",
 			this.handleDocumentSelection,
 		);
-		this.cursors = new SelectionController(
-			this.element.native,
+		this.cursors = createSelectionController(
+			this.element,
 			this.frame,
+			this.renderer,
 			{
-				getText: () => this.element.value,
+				model: () => this.model,
+				options: () => this.options,
 				getSelections: () => this.getSelections(),
-				setSelections: (values, reveal = false) =>
-					this.setSelections(values, reveal),
+				setSelections: (v, r) => this.setSelections(v, r),
 				offsetAtPoint: (x, y) => this.offsetAtPoint(x, y),
-				columnWidth: () => this.renderer.columnWidth,
-				viewport: () => this.element.viewport,
-				pointAtOffset: (offset, affinity) =>
-					this.renderer.point(
-						this.model.getPositionAtInputOffset(offset),
-						affinity,
-					).x,
-				offsetAtLineX: (line, x) =>
-					this.renderer.offsetAtLineX(line, x),
-				verticalMove: (offset, rows, x, affinity) =>
-					this.renderer.verticalMove(offset, rows, x, affinity),
-				visualAffinity: (row, offset) =>
-					this.renderer.visualAffinity(row, offset),
-				verticalOffset: (offset, rows, x, affinity) =>
-					this.renderer.verticalOffset(offset, rows, x, affinity),
-				rowBoundary: (offset, end, affinity) =>
-					this.renderer.rowBoundary(offset, end, affinity),
-				pageRows: () =>
-					Math.max(
-						1,
-						Math.floor(
-							this.element.clientHeight / this.options.lineHeight,
-						) - 1,
-					),
-				toggleFold: (line) => this.toggleFold(line),
-				visualIndex: (offset) => {
-					const position =
-						this.model.getPositionAtInputOffset(offset);
-					return this.renderer.layout.position(
-						position.line,
-						position.column,
-					).index;
-				},
-				visualRowCount: () => this.renderer.layout.rowCount,
-				offsetAtVisualRowX: (row, x) =>
-					this.renderer.verticalOffset(
-						this.model.getInputOffsetAt({
-							line: this.renderer.layout.row(row).line,
-							column: this.renderer.layout.row(row).from + 1,
-						}),
-						0,
-						x,
-					),
-				isBounded: () => this.options.accessibilitySupport !== "on",
-				previewDrop: (offset) => this.renderer.setDropOffset(offset),
-				moveSelection: (selection, target, copy) =>
-					this.moveSelection(selection, target, copy),
+				toggleFold: (l) => this.toggleFold(l),
+				moveSelection: (s, t, c) => this.moveSelection(s, t, c),
 				isComposing: () => this.isComposing,
 			},
 		);
@@ -560,202 +478,29 @@ export class EditorView implements Disposable {
 		position: import("../api/types").Position,
 		placement: "above" | "below" | "inline" = "below",
 	): Disposable {
-		const model = this.model,
-			tracked = model.trackRange({
-				startLine: position.line,
-				startColumn: position.column,
-				endLine: position.line,
-				endColumn: position.column,
-			});
-		let widget: Disposable;
-		try {
-			widget = this.renderer.addWidget(
-				id,
-				node,
-				() => {
-					const range = tracked.getRange();
-					return range
-						? { line: range.startLine, column: range.startColumn }
-						: position;
-				},
-				placement,
-			);
-		} catch (error) {
-			tracked.dispose();
-			throw error;
-		}
-		let active = true;
-		const subscription = model.onWillDispose(() => release());
-		const release = () => {
-			if (!active) return;
-			active = false;
-			widget.dispose();
-			tracked.dispose();
-			subscription.dispose();
-			this.contentWidgets.delete(handle);
-		};
-		const handle = { dispose: release };
-		this.contentWidgets.add(handle);
-		return handle;
+		return this.presentation.addContentWidget(
+			id,
+			node,
+			position,
+			placement,
+		);
 	}
 
 	private setLanguageAnalysis(value: Analysis): void {
-		if (this.disposed || !this.attachedModel) return;
-		const anchor = this.renderer.captureAnchor();
-		this.renderer.setAssistance(
-			value.hints ?? [],
-			(value.lenses ?? []).map((lens) => ({
-				line: this.model.getPositionAtInputOffset(lens.offset).line,
-				label: lens.label,
-				run: () => {
-					this.setSelections([caret(lens.offset)], true);
-					void this.executeCommand(lens.command);
-				},
-			})),
-		);
-		this.setSyntaxTokens(value.tokens);
-		this.setDiagnostics(value.diagnostics);
-		this.setFoldingRanges(value.folds);
-		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
-		this.renderer.restoreAnchor(anchor);
-		for (const color of value.colors ?? []) {
-			const button = this.frame.ownerDocument.createElement("button");
-			button.type = "button";
-			button.className = "editor-color-swatch";
-			button.style.background = color.color;
-			button.title = `Change color ${color.color}`;
-			button.setAttribute("aria-label", `Change color ${color.color}`);
-			button.onclick = () => {
-				this.setSelections(
-					[
-						{
-							start: color.from,
-							end: color.to,
-							direction: "forward",
-						},
-					],
-					true,
-				);
-				this.runLanguageCommand("color");
-			};
-			this.colorWidgets.push(
-				this.addContentWidget(
-					`color-${color.from}`,
-					button,
-					this.model.getPositionAtInputOffset(color.from),
-					"inline",
-				),
-			);
-		}
+		this.presentation.setLanguageAnalysis(value);
 	}
 
 	runLanguageCommand(command: string): void {
 		void this.languageFeatures.run(command);
 	}
 	private applyLanguageEdits(edits: readonly LanguageEdit[]): void {
-		if (!edits.length || !this.canEdit()) return;
-		const groups = new Map<TextModel, LanguageEdit[]>();
-		for (const edit of edits) {
-			const model = [this.model, ...languageEngine.getModels()].find(
-				(model) => model.uri.toString() === edit.uri,
-			);
-			if (!model) throw new Error(`Document is not open: ${edit.uri}`);
-			if (
-				edit.version !== undefined &&
-				edit.version !== model.getVersionId()
-			)
-				throw new Error("The document changed. Run the command again.");
-			const length = model.getValue({ eol: "\n" }).length;
-			if (
-				!Number.isInteger(edit.from) ||
-				!Number.isInteger(edit.to) ||
-				edit.from < 0 ||
-				edit.to < edit.from ||
-				edit.to > length
-			)
-				throw new RangeError("Invalid language edit.");
-			const group = groups.get(model) ?? [];
-			group.push(edit);
-			groups.set(model, group);
-		}
-		for (const group of groups.values()) {
-			group.sort((a, b) => a.from - b.from || a.to - b.to);
-			for (let index = 1; index < group.length; index++)
-				if ((group[index]?.from ?? 0) < (group[index - 1]?.to ?? 0))
-					throw new Error("Language edits overlap.");
-		}
-		for (const [model, group] of groups) {
-			if (model === this.model) {
-				const selections = this.getSelections().map((selection) =>
-					mapSelection(selection, group),
-				);
-				this.applyMultiPlan({
-					edits: group,
-					selection: selections[0] ?? caret(0),
-					selections,
-				});
-			} else
-				model.edit(
-					group.map((edit) => {
-						const start = model.getPositionAtInputOffset(edit.from),
-							end = model.getPositionAtInputOffset(edit.to);
-						return {
-							range: {
-								startLine: start.line,
-								startColumn: start.column,
-								endLine: end.line,
-								endColumn: end.column,
-							},
-							text: edit.text.replace(/\n/g, model.getEOL()),
-						};
-					}),
-				);
-		}
+		this.languageEdits.apply(edits);
 	}
 	private mergeCompletionEdits(
 		plan: MultiEditingPlan,
 		extras: readonly LanguageEdit[],
 	): MultiEditingPlan {
-		const local = extras.filter(
-			(edit) => edit.uri === this.model.uri.toString(),
-		);
-		for (const edit of local)
-			if (
-				(edit.version !== undefined &&
-					edit.version !== this.model.getVersionId()) ||
-				edit.from < 0 ||
-				edit.to < edit.from ||
-				edit.to > this.element.value.length
-			)
-				throw new Error("Completion edits are stale or invalid.");
-		const own = plan.edits.map((edit) => ({
-			offset: edit.from,
-			length: edit.to - edit.from,
-			text: edit.text,
-		}));
-		const mapped = local.map((edit) => ({
-			from: mapOffset(edit.from, own, "before"),
-			to: mapOffset(edit.to, own, "before"),
-			text: edit.text,
-		}));
-		const selections = plan.selections.map((selection) =>
-			mapSelection(selection, mapped),
-		);
-		const edits = plan.edits.map((edit) => ({ ...edit }));
-		for (const edit of local) {
-			const replacement = edits.find((value) => value.from === edit.from);
-			if (edit.from === edit.to && replacement)
-				replacement.text = edit.text + replacement.text;
-			else edits.push({ from: edit.from, to: edit.to, text: edit.text });
-		}
-		edits.sort((a, b) => a.from - b.from || a.to - b.to);
-		for (let i = 1; i < edits.length; i++)
-			if ((edits[i]?.from ?? 0) < (edits[i - 1]?.to ?? 0))
-				throw new Error("Completion edits overlap.");
-		this.applyLanguageEdits(
-			extras.filter((edit) => edit.uri !== this.model.uri.toString()),
-		);
-		return { edits, selection: selections[0] ?? caret(0), selections };
+		return this.languageEdits.mergeCompletion(plan, extras);
 	}
 	private acceptCompletion(item: Completion): void {
 		if (!this.canEdit()) return;
@@ -792,156 +537,13 @@ export class EditorView implements Disposable {
 		targets?: readonly TextSelection[],
 		extras: readonly LanguageEdit[] = [],
 	): void {
-		if (!this.canEdit()) return;
-		this.clearSnippet();
-		const selected = this.getSelection(),
-			indent = getLineIndent(this.element.value, selected.start),
-			source = body
-				.replace(/\t/g, indentationUnit(this.options))
-				.replace(/\n/g, `\n${indent}`);
-		const position = this.model.getPositionAtInputOffset(selected.start),
-			filename = this.model.uri.path.split("/").at(-1) ?? "",
-			word = wordRange(this.element.value, selected.start),
-			date = new Date();
-		const parsed = parseSnippet(source, {
-			TM_SELECTED_TEXT: this.element.value.slice(
-				selected.start,
-				selected.end,
-			),
-			TM_FILENAME: filename,
-			TM_FILENAME_BASE: filename.replace(/\.[^.]+$/, ""),
-			TM_DIRECTORY: this.model.uri.path.slice(
-				0,
-				this.model.uri.path.lastIndexOf("/"),
-			),
-			TM_FILEPATH: this.model.uri.path,
-			TM_CURRENT_LINE: this.model.getLineContent(position.line),
-			TM_CURRENT_WORD: this.element.value.slice(word.from, word.to),
-			TM_LINE_INDEX: String(position.line - 1),
-			TM_LINE_NUMBER: String(position.line),
-			CURRENT_YEAR: String(date.getFullYear()),
-			CURRENT_MONTH: String(date.getMonth() + 1).padStart(2, "0"),
-			CURRENT_DATE: String(date.getDate()).padStart(2, "0"),
-			CURRENT_HOUR: String(date.getHours()).padStart(2, "0"),
-			CURRENT_MINUTE: String(date.getMinutes()).padStart(2, "0"),
-			CURRENT_SECOND: String(date.getSeconds()).padStart(2, "0"),
-			UUID: crypto.randomUUID(),
-			...variables,
-		});
-		const basePlan = combinePlans(
-			(targets ?? this.getSelections()).map((selection) =>
-				replacementPlan(selection, parsed.text),
-			),
-			this.element.value.length,
-		);
-		const plan = this.mergeCompletionEdits(basePlan, extras);
-		this.applyMultiPlan(plan);
-		const groups = new Map<number, TrackedRange[]>();
-		for (const selection of plan.selections) {
-			const base = selection.end - parsed.text.length;
-			for (const stop of parsed.stops) {
-				const start = this.model.getPositionAtInputOffset(
-						base + stop.from,
-					),
-					end = this.model.getPositionAtInputOffset(base + stop.to),
-					ranges = groups.get(stop.index) ?? [];
-				ranges.push(
-					this.model.trackRange(
-						{
-							startLine: start.line,
-							startColumn: start.column,
-							endLine: end.line,
-							endColumn: end.column,
-						},
-						{ stickiness: "always" },
-					),
-				);
-				groups.set(stop.index, ranges);
-			}
-		}
-		if (!groups.has(0))
-			groups.set(
-				0,
-				plan.selections.map((selection) => {
-					const point = this.model.getPositionAtInputOffset(
-						selection.end,
-					);
-					return this.model.trackRange({
-						startLine: point.line,
-						startColumn: point.column,
-						endLine: point.line,
-						endColumn: point.column,
-					});
-				}),
-			);
-		this.snippetStops = [...groups]
-			.sort(
-				([a], [b]) =>
-					(a === 0 ? Infinity : a) - (b === 0 ? Infinity : b),
-			)
-			.map(([index, ranges]) => ({
-				index,
-				ranges,
-				...(parsed.stops.find((stop) => stop.index === index)?.choices
-					? {
-							choices:
-								parsed.stops.find(
-									(stop) => stop.index === index,
-								)?.choices ?? [],
-						}
-					: {}),
-			}));
-		this.snippetIndex = -1;
-		this.nextSnippet(false);
+		this.snippets.insert(body, variables, targets, extras);
 	}
 	private nextSnippet(backward: boolean): boolean {
-		if (!this.snippetStops.length) return false;
-		if (this.options.readOnly || !this.attachedModel || this.isComposing) {
-			this.clearSnippet();
-			return false;
-		}
-		this.snippetIndex = Math.max(
-			0,
-			this.snippetIndex + (backward ? -1 : 1),
-		);
-		const stop = this.snippetStops[this.snippetIndex];
-		if (!stop) {
-			this.clearSnippet();
-			return false;
-		}
-		const values = stop.ranges.flatMap((tracked) => {
-			const range = tracked.getRange();
-			return range
-				? [
-						{
-							start: this.model.getInputOffsetAt({
-								line: range.startLine,
-								column: range.startColumn,
-							}),
-							end: this.model.getInputOffsetAt({
-								line: range.endLine,
-								column: range.endColumn,
-							}),
-							direction: "forward" as const,
-						},
-					]
-				: [];
-		});
-		if (!values.length) {
-			this.clearSnippet();
-			return false;
-		}
-		this.setSelections(values, true);
-		if (stop.index === 0) this.clearSnippet();
-		else if (stop.choices?.length)
-			this.languageFeatures.offerSnippetChoices(stop.choices);
-		return true;
+		return this.snippets.next(backward);
 	}
 	private clearSnippet(): void {
-		for (const stop of this.snippetStops)
-			for (const range of stop.ranges) range.dispose();
-		this.snippetStops = [];
-		this.snippetIndex = -1;
+		this.snippets.clear();
 	}
 	private openLocation(location: Location): void {
 		if (this.locationHandler) {
@@ -962,213 +564,66 @@ export class EditorView implements Disposable {
 		);
 		this.focus();
 	}
-
-	private assets(model = this.model) {
-		let assets = this.modelAssets.get(model);
-		if (assets) return assets;
-		const collections = new Set<DecorationCollection>();
-		const markers = new DecorationCollection(model, () =>
-			this.refreshDecorations(model),
-		);
-		collections.add(markers);
-		assets = {
-			folding: new FoldingState(model),
-			collections,
-			markers,
-			subscription: model.onWillDispose(() => this.releaseAssets(model)),
-		};
-		this.modelAssets.set(model, assets);
-		return assets;
-	}
-	private releaseAssets(model: TextModel): void {
-		const assets = this.modelAssets.get(model);
-		if (!assets) return;
-		this.modelAssets.delete(model);
-		this.diagnosticOwners.delete(model);
-		assets.subscription.dispose();
-		assets.folding.dispose();
-		for (const collection of assets.collections) collection.dispose();
-	}
 	private refreshDecorations(model: TextModel): void {
-		if (!this.disposed && this.model === model)
-			this.renderer.setDecorations(
-				[...(this.modelAssets.get(model)?.collections ?? [])].flatMap(
-					(collection) => collection.get(),
-				),
-			);
+		this.presentation.refreshDecorations(model);
 	}
 	createDecorations(): DecorationCollection {
-		const model = this.model;
-		const collection = new DecorationCollection(
-			model,
-			() => this.refreshDecorations(model),
-			() => this.modelAssets.get(model)?.collections.delete(collection),
-		);
-		this.assets(model).collections.add(collection);
-		return collection;
+		return this.presentation.createDecorations();
 	}
 
 	setDiagnostics(
 		diagnostics: readonly Diagnostic[],
 		owner = "language",
 	): void {
-		if (!owner) throw new TypeError("Diagnostic owner required.");
-		let owners = this.diagnosticOwners.get(this.model);
-		if (!owners) {
-			owners = new Map();
-			this.diagnosticOwners.set(this.model, owners);
-		}
-		let entry = owners.get(owner);
-		if (!entry) {
-			entry = {
-				collection:
-					owner === "language"
-						? this.assets().markers
-						: this.createDecorations(),
-				values: [],
-			};
-			owners.set(owner, entry);
-		}
-		entry.values = diagnostics.map((diagnostic) => ({ ...diagnostic }));
-		entry.collection.set(diagnosticDecorations(this.model, diagnostics));
-		if (!diagnostics.length && owner !== "language") {
-			entry.collection.dispose();
-			owners.delete(owner);
-		}
-		this.languageFeatures?.updateStatus(this.getDiagnostics());
+		this.presentation.setDiagnostics(diagnostics, owner);
 	}
 	getDiagnostics(owner?: string): readonly Diagnostic[] {
-		const owners = this.diagnosticOwners.get(this.model);
-		if (!owners) return [];
-		return [...owners]
-			.filter(([key]) => owner === undefined || key === owner)
-			.flatMap(([, entry]) =>
-				entry.collection.get().flatMap((decoration, index) => {
-					const original = entry.values[index];
-					if (!original) return [];
-					return [
-						{
-							...original,
-							from: this.model.getInputOffsetAt({
-								line: decoration.range.startLine,
-								column: decoration.range.startColumn,
-							}),
-							to: this.model.getInputOffsetAt({
-								line: decoration.range.endLine,
-								column: decoration.range.endColumn,
-							}),
-						},
-					];
-				}),
-			);
+		return this.presentation.getDiagnostics(owner);
 	}
 
 	setSyntaxTokens(tokens: readonly Token[]): void {
-		this.renderer.setTokens(tokens);
+		this.presentation.setSyntaxTokens(tokens);
 	}
 	setFoldingRanges(ranges: readonly FoldingRange[]): void {
-		const anchor = this.renderer.captureAnchor();
-		this.assets().folding.set(ranges);
-		this.renderer.setFolds(this.assets().folding.get());
-		this.renderer.restoreAnchor(anchor);
+		this.presentation.setFoldingRanges(ranges);
 	}
 	toggleFold(line?: number): void {
-		const folding = this.assets().folding,
-			position = this.model.getPositionAtInputOffset(
-				this.getSelection().start,
-			);
-		const region =
-			line === undefined
-				? folding
-						.get()
-						.filter(
-							(region) =>
-								region.start <= position.line &&
-								region.end >= position.line,
-						)
-						.sort((a, b) => b.start - a.start)[0]
-				: folding.get().find((region) => region.start === line);
-		if (!region) return;
-		folding.toggle(region.start);
-		this.renderer.setFolds(folding.get());
-		if (
-			!region.collapsed &&
-			position.line > region.start &&
-			position.line <= region.end
-		)
-			this.setSelections(
-				[
-					caret(
-						this.model.getInputOffsetAt({
-							line: region.start,
-							column: this.model.getLineMaxColumn(region.start),
-						}),
-					),
-				],
-				true,
-			);
-		this.updateCursor();
+		this.presentation.toggleFold(line);
 	}
 	foldAll(collapsed: boolean): void {
-		this.assets().folding.all(collapsed);
-		this.renderer.setFolds(this.assets().folding.get());
-		if (collapsed) {
-			const head = this.model.getPositionAtInputOffset(
-					this.getSelection().start,
-				),
-				parent = this.assets()
-					.folding.get()
-					.find(
-						(region) =>
-							region.collapsed &&
-							head.line > region.start &&
-							head.line <= region.end,
-					);
-			if (parent)
-				this.setSelections(
-					[
-						caret(
-							this.model.getInputOffsetAt({
-								line: parent.start,
-								column: 1,
-							}),
-						),
-					],
-					true,
-				);
-		}
-		this.updateCursor();
+		this.presentation.foldAll(collapsed);
 	}
 	getModel(): TextModel | null {
 		return this.attachedModel;
 	}
 	setModel(model: TextModel | null): void {
 		if (this.disposed) throw new Error("Editor view disposed.");
-		if (this.composing || this.deferredComposition)
+		if (this.nativeInput.composing || this.nativeInput.deferredComposition)
 			throw new Error("Finish composition before switching documents.");
 		this.switchModel(model, true);
 	}
 	private bindModel(model: TextModel): void {
 		this.modelSubscriptions.push(
 			model.onDidChangeContent((event) => {
-				this.selectionHistory.length = 0;
-				this.expandedSelection = undefined;
+				this.editing.resetSingle();
+
 				if (!this.pendingSelection) this.breakHistoryGroup();
 				if (
-					(this.composing || this.deferredComposition) &&
+					(this.nativeInput.composing ||
+						this.nativeInput.deferredComposition) &&
 					!this.pendingSelection
 				) {
-					this.deferredComposition ??= {
+					this.nativeInput.deferredComposition ??= {
 						model,
 						base: this.element.value,
 						before: this.captureState(),
 						batches: [],
 						flush: false,
 					};
-					this.deferredComposition.batches.push(
+					this.nativeInput.deferredComposition.batches.push(
 						event.inputChanges ?? [],
 					);
-					this.deferredComposition.flush ||= event.flush;
+					this.nativeInput.deferredComposition.flush ||= event.flush;
 					this.frame.classList.add("editor-composition-pending");
 					if (event.flush) {
 						this.find.close(false);
@@ -1191,7 +646,7 @@ export class EditorView implements Disposable {
 			),
 			model.onDidChangeLanguage(() => this.updateLanguage()),
 			model.onWillDispose(() => {
-				this.composing = false;
+				this.nativeInput.composing = false;
 				this.switchModel(null, false);
 			}),
 			model.attachView(this.owner),
@@ -1209,7 +664,7 @@ export class EditorView implements Disposable {
 	private switchModel(model: TextModel | null, save: boolean): void {
 		if (model === this.attachedModel) return;
 		this.cursors.reset();
-		this.multiExpansion.length = 0;
+		this.editing.resetMulti();
 		if (model?.isDisposed())
 			throw new Error("Cannot attach a disposed model.");
 		if (save && this.attachedModel) this.rememberModel(this.attachedModel);
@@ -1219,14 +674,14 @@ export class EditorView implements Disposable {
 		this.goTo.close(false);
 		this.menu.close(false);
 		this.breakHistoryGroup();
-		this.beforeInputState = undefined;
+		this.nativeInput.beforeInputState = undefined;
 		this.pendingSelection = undefined;
-		this.compositionGroup = undefined;
-		this.compositionEndText = "";
-		this.deferredComposition = undefined;
+		this.nativeInput.compositionGroup = undefined;
+		this.nativeInput.compositionEndText = "";
+		this.nativeInput.deferredComposition = undefined;
 		this.frame.classList.remove("editor-composition-pending");
-		this.selectionHistory.length = 0;
-		this.expandedSelection = undefined;
+		this.editing.resetSingle();
+
 		this.attachedModel = model;
 		this.model = model ?? this.emptyModel;
 		this.analysis = undefined;
@@ -1238,10 +693,10 @@ export class EditorView implements Disposable {
 		this.element.scrollTop = 0;
 		this.element.scrollLeft = 0;
 		this.clearSnippet();
-		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
+		this.presentation.clearColors();
 		this.languageFeatures.setModel(model);
 		this.renderer.setModel(this.model);
-		this.renderer.setFolds(this.assets().folding.get());
+		this.renderer.setFolds(this.presentation.assets().folding.get());
 		this.refreshDecorations(this.model);
 		if (model) {
 			this.bindModel(model);
@@ -1250,53 +705,9 @@ export class EditorView implements Disposable {
 				tabSize: options.tabSize,
 				insertSpaces: options.insertSpaces,
 			});
-			const state = this.savedModels.get(model);
-			if (state) {
-				const range = state.selection.getRange();
-				const anchor = state.anchor.getRange();
-				if (range)
-					this.element.setSelectionRange(
-						model.getInputOffsetAt({
-							line: range.startLine,
-							column: range.startColumn,
-						}),
-						model.getInputOffsetAt({
-							line: range.endLine,
-							column: range.endColumn,
-						}),
-						state.direction,
-					);
-				if (anchor)
-					this.element.scrollTop = Math.max(
-						0,
-						this.renderer.lineTop(anchor.startLine) +
-							state.scrollOffset,
-					);
-				if (range) this.element.scrollLeft = state.scrollLeft;
-				const values = state.selections.flatMap((value) => {
-					const tracked = value.range.getRange();
-					return tracked
-						? [
-								{
-									start: model.getInputOffsetAt({
-										line: tracked.startLine,
-										column: tracked.startColumn,
-									}),
-									end: model.getInputOffsetAt({
-										line: tracked.endLine,
-										column: tracked.endColumn,
-									}),
-									direction: value.direction,
-									...(value.affinity
-										? { affinity: value.affinity }
-										: {}),
-								},
-							]
-						: [];
-				});
-				if (values.length) this.writeSelections(values);
-				this.releaseSavedModel(model);
-			}
+			this.savedViews.restore(model, this.renderer, this.element, (v) =>
+				this.writeSelections(v),
+			);
 		}
 		this.element.readOnly = this.options.readOnly || !model;
 		this.element.setAttribute(
@@ -1317,67 +728,7 @@ export class EditorView implements Disposable {
 		}
 	}
 	private rememberModel(model: TextModel): void {
-		this.releaseSavedModel(model);
-		const selection = this.captureState().selection;
-		const start = model.getPositionAtInputOffset(selection.start);
-		const end = model.getPositionAtInputOffset(selection.end);
-		const line = Math.max(
-			1,
-			Math.min(
-				model.getLineCount(),
-				this.renderer.lineAtScrollOffset(this.element.scrollTop),
-			),
-		);
-		const range = model.trackRange(
-			{
-				startLine: start.line,
-				startColumn: start.column,
-				endLine: end.line,
-				endColumn: end.column,
-			},
-			{ stickiness: "never" },
-		);
-		const anchor = model.trackRange(
-			{ startLine: line, startColumn: 1, endLine: line, endColumn: 1 },
-			{ stickiness: "after" },
-		);
-		const subscription = model.onWillDispose(() =>
-			this.releaseSavedModel(model),
-		);
-		this.savedModels.set(model, {
-			selection: range,
-			selections: this.getSelections().map((value) => {
-				const start = model.getPositionAtInputOffset(value.start),
-					end = model.getPositionAtInputOffset(value.end);
-				return {
-					range: model.trackRange(
-						{
-							startLine: start.line,
-							startColumn: start.column,
-							endLine: end.line,
-							endColumn: end.column,
-						},
-						{ stickiness: "never" },
-					),
-					direction: value.direction,
-					...(value.affinity ? { affinity: value.affinity } : {}),
-				};
-			}),
-			direction: selection.direction,
-			anchor,
-			scrollOffset: this.element.scrollTop - this.renderer.lineTop(line),
-			scrollLeft: this.element.scrollLeft,
-			subscription,
-		});
-	}
-	private releaseSavedModel(model: TextModel): void {
-		const state = this.savedModels.get(model);
-		if (!state) return;
-		state.selection.dispose();
-		for (const value of state.selections) value.range.dispose();
-		state.anchor.dispose();
-		state.subscription.dispose();
-		this.savedModels.delete(model);
+		this.savedViews.remember(model, this.captureState(), this.renderer);
 	}
 	private trackSelection(selection: TextSelection): {
 		getRange(): { from: number; to: number } | undefined;
@@ -1431,7 +782,7 @@ export class EditorView implements Disposable {
 	restoreViewState(state: EditorViewState): boolean {
 		if (
 			!this.attachedModel ||
-			this.composing ||
+			this.nativeInput.composing ||
 			(state.modelUri &&
 				state.modelUri !== this.attachedModel.uri.toString())
 		)
@@ -1567,7 +918,9 @@ export class EditorView implements Disposable {
 		);
 	}
 	get isComposing(): boolean {
-		return this.composing || !!this.deferredComposition;
+		return (
+			this.nativeInput.composing || !!this.nativeInput.deferredComposition
+		);
 	}
 	get canUndo(): boolean {
 		return this.model.canUndo();
@@ -1594,7 +947,10 @@ export class EditorView implements Disposable {
 
 	updateOptions(options: Partial<EditorOptions>): void {
 		if (this.disposed) throw new Error("Editor view disposed.");
-		if (this.composing || this.deferredComposition) {
+		if (
+			this.nativeInput.composing ||
+			this.nativeInput.deferredComposition
+		) {
 			this.announce(
 				"Finish composing text before changing editor options.",
 			);
@@ -1742,111 +1098,20 @@ export class EditorView implements Disposable {
 		});
 	}
 	runTextCommand(command: TextCommand): void {
-		if (
-			[
-				"joinLines",
-				"sortAscending",
-				"sortDescending",
-				"uniqueLines",
-				"reverseLines",
-			].includes(command)
-		) {
-			this.applyPerLine((selection) =>
-				planTextCommand(this.element.value, selection, command),
-			);
-			return;
-		}
-		this.applyPerSelection((selection) =>
-			planTextCommand(this.element.value, selection, command),
-		);
+		this.editing.runTextCommand(command);
 	}
 	moveWord(
 		direction: -1 | 1,
 		action: "move" | "select" | "delete",
 		subword = false,
 	): void {
-		this.applyPerSelection((selection) =>
-			planWordCommand(
-				this.element.value,
-				selection,
-				direction,
-				action,
-				subword,
-			),
-		);
+		this.editing.moveWord(direction, action, subword);
 	}
 	jumpToBracket(select = false): void {
-		this.applyPerSelection((selection) => {
-			const active =
-				selection.direction === "backward"
-					? selection.start
-					: selection.end;
-			const [candidate, partner] = this.getAnalysis().matchingAt(active);
-			if (candidate === undefined || partner === undefined) {
-				this.announce("No matching bracket at the cursor.");
-				return;
-			}
-			const target = partner + (partner > candidate ? 1 : 0);
-			const anchor = select
-				? selection.direction === "backward"
-					? selection.end
-					: selection.start
-				: target;
-			return {
-				edits: [],
-				selection: {
-					start: Math.min(anchor, target),
-					end: Math.max(anchor, target),
-					direction: target < anchor ? "backward" : "forward",
-				},
-			};
-		});
+		this.editing.jumpToBracket(select);
 	}
 	expandSelection(shrink = false): void {
-		if (this.multiExpandedKey !== JSON.stringify(this.getSelections()))
-			this.multiExpansion.length = 0;
-		if (
-			this.selectionsValue.length > 1 ||
-			(shrink && this.multiExpansion.length > 0)
-		) {
-			if (shrink) {
-				const previous = this.multiExpansion.pop();
-				if (previous) this.setSelections(previous, true);
-			} else {
-				this.multiExpansion.push(
-					this.selectionsValue.map((value) => ({ ...value })),
-				);
-				if (this.multiExpansion.length > 100)
-					this.multiExpansion.shift();
-				this.applyPerSelection((selection) => {
-					const next = expansionRanges(
-						this.element.value,
-						selection,
-						this.getAnalysis(),
-					)[0];
-					return next ? { edits: [], selection: next } : undefined;
-				});
-			}
-			this.multiExpandedKey = JSON.stringify(this.getSelections());
-			return;
-		}
-		const selection = this.getSelection();
-		if (
-			!this.expandedSelection ||
-			!this.sameSelection(this.expandedSelection, selection)
-		)
-			this.selectionHistory.length = 0;
-		const next = shrink
-			? this.selectionHistory.pop()
-			: expansionRanges(
-					this.element.value,
-					selection,
-					this.getAnalysis(),
-				)[0];
-		if (!next) return;
-		if (!shrink) this.selectionHistory.push(selection);
-		this.applyEditingPlan({ edits: [], selection: next });
-		this.expandedSelection = this.getSelection();
+		this.editing.expandSelection(shrink);
 	}
 
 	private canEdit(): boolean {
@@ -1857,8 +1122,8 @@ export class EditorView implements Disposable {
 		}
 		if (
 			this.options.readOnly ||
-			this.composing ||
-			this.deferredComposition
+			this.nativeInput.composing ||
+			this.nativeInput.deferredComposition
 		) {
 			this.announce(
 				this.options.readOnly
@@ -1881,7 +1146,7 @@ export class EditorView implements Disposable {
 	}
 
 	private readonly handleContextMenu = (event: MouseEvent): void => {
-		if (event.shiftKey || this.composing) return;
+		if (event.shiftKey || this.nativeInput.composing) return;
 		event.preventDefault();
 		this.menu.open({ x: event.clientX, y: event.clientY });
 	};
@@ -1915,47 +1180,15 @@ export class EditorView implements Disposable {
 	}
 
 	runLineCommand(command: LineCommand): void {
-		if (this.disposed) throw new Error("Editor view disposed.");
-		if (this.composing) return;
-		this.breakHistoryGroup();
-		if (command === "insertAbove" || command === "insertBelow") {
-			this.applyPerSelection((selection) =>
-				planLineCommand(
-					this.element.value,
-					selection,
-					command,
-					this.options,
-				),
-			);
-			return;
-		}
-		this.applyPerLine(
-			(selection, includeEndLine) =>
-				planLineCommand(
-					this.element.value,
-					selection,
-					command,
-					this.options,
-					includeEndLine,
-				),
-			command.startsWith("move") || command.startsWith("duplicate")
-				? "shift"
-				: "collapse",
-		);
+		this.editing.runLineCommand(command);
 	}
 
 	toggleLineComment(mode?: "add" | "remove"): void {
-		if (this.composing) return;
-		this.applyPerLine((selection) =>
-			planLineComment(this.element.value, selection, this.language, mode),
-		);
+		this.editing.toggleLineComment(mode);
 	}
 
 	toggleBlockComment(): void {
-		if (this.composing) return;
-		this.applyPerSelection((selection) =>
-			planBlockComment(this.element.value, selection, this.language),
-		);
+		this.editing.toggleBlockComment();
 	}
 
 	private getAnalysis(): BracketAnalysis {
@@ -1966,103 +1199,17 @@ export class EditorView implements Disposable {
 			);
 		return this.analysis;
 	}
-
-	private applyPerLine(
-		planner: (
-			selection: TextSelection,
-			includeEndLine: boolean,
-		) => EditingPlan | undefined,
-		transform: "map" | "shift" | "collapse" = "map",
-	): void {
-		if (this.isComposing) return;
-		try {
-			this.applyMultiPlan(
-				combineLinePlans(
-					this.element.value,
-					this.getSelections(),
-					planner,
-					transform,
-				),
-			);
-		} catch (error) {
-			this.announce(
-				error instanceof Error
-					? error.message
-					: "Cannot combine these line edits.",
-			);
-		}
-	}
 	private applyPerSelection(
 		planner: (selection: TextSelection) => EditingPlan | undefined,
 		inputKind?: string,
 	): void {
-		const plans = this.getSelections().map(
-			(selection) => planner(selection) ?? { edits: [], selection },
-		);
-		try {
-			this.applyMultiPlan(
-				combinePlans(plans, this.element.value.length),
-				inputKind,
-			);
-		} catch (error) {
-			this.announce(
-				error instanceof Error
-					? error.message
-					: "Cannot combine these edits.",
-			);
-		}
+		this.editing.applyPerSelection(planner, inputKind);
 	}
 	private applyMultiPlan(plan: MultiEditingPlan, inputKind?: string): void {
-		if (this.isComposing || (plan.edits.length && !this.canEdit())) return;
-		if (!plan.edits.length) {
-			this.setSelections(plan.selections, true);
-			return;
-		}
-		const previous = this.multiTyping;
-		const group = inputKind
-			? previous?.kind === inputKind &&
-				previous.version === this.model.getVerId() &&
-				Date.now() - previous.time <= 750 &&
-				previous.selections === JSON.stringify(this.getSelections())
-				? previous.id
-				: `${this.owner}:${++this.groupSequence}`
-			: undefined;
-		this.pendingSelections = plan.selections;
-		try {
-			this.replaceSearch(
-				plan.edits,
-				this.element.value,
-				plan.selection,
-				group,
-			);
-		} finally {
-			this.pendingSelections = undefined;
-		}
-		this.writeSelections(plan.selections);
-		if (group && inputKind)
-			this.multiTyping = {
-				id: group,
-				kind: inputKind,
-				time: Date.now(),
-				version: this.model.getVerId(),
-				selections: JSON.stringify(this.getSelections()),
-			};
-		this.updateCursor();
-		this.revealCursor();
+		this.transactions.applyMultiPlan(plan, inputKind);
 	}
 	private applyEditingPlan(plan: EditingPlan | undefined): void {
-		if (this.disposed) throw new Error("Editor view disposed.");
-		if (!plan || this.composing) return;
-		if (plan.edits.length && !this.canEdit()) return;
-		this.beforeInputState = undefined;
-		this.breakHistoryGroup();
-		if (plan.edits.length)
-			this.applyMultiPlan({ ...plan, selections: [plan.selection] });
-		else {
-			this.writeSelections([plan.selection]);
-			this.updateCursor();
-			this.revealCursor();
-		}
+		this.transactions.applyEditingPlan(plan);
 	}
 
 	private replaceSearch(
@@ -2071,61 +1218,12 @@ export class EditorView implements Disposable {
 		desiredSelection?: TextSelection,
 		group?: string,
 	): void {
-		if (!edits.length || !this.canEdit()) return;
-		if (
-			this.element.value !== expectedText ||
-			normalizeInputText(this.model.getValue()) !== expectedText
-		) {
-			throw new Error("Document changed. Run the search again.");
-		}
-		this.breakHistoryGroup();
-		const before = this.captureState();
-		const first = edits[0];
-		const offset = (first?.from ?? 0) + (first?.text.length ?? 0);
-		const selection: TextSelection = desiredSelection ?? {
-			start: offset,
-			end: offset,
-			direction: "none",
-		};
-		const eol = this.model.getEOL();
-		this.pendingSelection = selection;
-		try {
-			this.model.edit(
-				edits.map((edit) => {
-					const start = this.model.getPositionAtInputOffset(
-						edit.from,
-					);
-					const end = this.model.getPositionAtInputOffset(edit.to);
-					return {
-						range: {
-							startLine: start.line,
-							startColumn: start.column,
-							endLine: end.line,
-							endColumn: end.column,
-						},
-						text: edit.text.replace(/\n/g, eol),
-					};
-				}),
-				{
-					before,
-					after: {
-						...before,
-						selection,
-						selections: this.pendingSelections ?? [selection],
-					},
-					...(group ? { group } : {}),
-				},
-			);
-		} finally {
-			this.pendingSelection = undefined;
-		}
-		this.element.setSelectionRange(
-			selection.start,
-			selection.end,
-			selection.direction,
+		this.transactions.replaceSearch(
+			edits,
+			expectedText,
+			desiredSelection,
+			group,
 		);
-		this.updateCursor();
-		this.revealCursor();
 	}
 
 	indent(): void {
@@ -2137,28 +1235,14 @@ export class EditorView implements Disposable {
 	}
 
 	undo(): void {
-		if (!this.canEdit()) return;
-		this.breakHistoryGroup();
-		this.beforeInputState = undefined;
-		this.clearSnippet();
-		this.model.undo();
-		this.element.focus({ preventScroll: true });
-		this.revealCursor();
+		this.transactions.undo();
 	}
 
 	redo(): void {
-		if (!this.canEdit()) return;
-		this.breakHistoryGroup();
-		this.beforeInputState = undefined;
-		this.clearSnippet();
-		this.model.redo();
-		this.element.focus({ preventScroll: true });
-		this.revealCursor();
+		this.transactions.redo();
 	}
-
 	private readonly breakHistoryGroup = (): void => {
-		this.typingGroup = undefined;
-		this.multiTyping = undefined;
+		this.nativeInput.resetHistoryGroup();
 	};
 
 	private captureState(): HistoryViewState {
@@ -2228,8 +1312,11 @@ export class EditorView implements Disposable {
 		this.selectionsValue[0] = selection;
 		this.renderer.setSelections(this.selectionsValue);
 		if (
-			this.typingGroup &&
-			!this.sameSelection(this.typingGroup.selection, selection)
+			this.nativeInput.typingGroup &&
+			!this.sameSelection(
+				this.nativeInput.typingGroup.selection,
+				selection,
+			)
 		)
 			this.breakHistoryGroup();
 		this.lastSelection = selection;
@@ -2237,7 +1324,7 @@ export class EditorView implements Disposable {
 			this.element.selectionDirection === "backward"
 				? this.element.selectionStart
 				: this.element.selectionEnd;
-		const position = this.deferredComposition
+		const position = this.nativeInput.deferredComposition
 			? getInputPosition(this.element.value, offset)
 			: this.model.getPositionAtInputOffset(offset);
 		this.cursorLabel.textContent = this.attachedModel
@@ -2257,113 +1344,12 @@ export class EditorView implements Disposable {
 		if (this.element.ownerDocument.activeElement === this.element.native)
 			this.updateCursor();
 	};
-
 	private readonly handleCompositionStart = (): void => {
-		this.cursors.reset();
-		if (this.selectionsValue.length > 1) {
-			this.writeSelections([this.getSelection()]);
-			this.announce("Composition uses the primary cursor.");
-		}
-		this.breakHistoryGroup();
-		this.compositionGroup = `${this.owner}:${++this.groupSequence}`;
-		this.beforeInputState = this.captureState();
-		this.composing = true;
+		this.nativeInput.handleCompositionStart();
 	};
 	private readonly handleCompositionEnd = (event: CompositionEvent): void => {
-		this.composing = false;
-		this.compositionEndText = event.data;
-		this.compositionEndTime = Date.now();
-		this.breakHistoryGroup();
-		const deferred = this.deferredComposition;
-		if (deferred)
-			queueMicrotask(() => this.finishDeferredComposition(deferred));
-		else
-			queueMicrotask(() => {
-				if (this.disposed || this.composing || this.deferredComposition)
-					return;
-				const options = this.model.getOptions();
-				this.updateOptions({
-					tabSize: options.tabSize,
-					insertSpaces: options.insertSpaces,
-				});
-			});
-		this.updateCursor();
+		this.nativeInput.handleCompositionEnd(event);
 	};
-
-	private finishDeferredComposition(
-		deferred: NonNullable<EditorView["deferredComposition"]>,
-	): void {
-		if (
-			this.disposed ||
-			this.deferredComposition !== deferred ||
-			this.attachedModel !== deferred.model
-		)
-			return;
-		const local = this.element.value;
-		const selection = this.captureState().selection;
-		const change = findTextChange(deferred.base, local);
-		this.deferredComposition = undefined;
-		this.compositionGroup = undefined;
-		this.beforeInputState = undefined;
-		this.frame.classList.remove("editor-composition-pending");
-		const throughForeign = (offset: number): number =>
-			deferred.batches.reduce(
-				(value, changes) => mapOffset(value, changes, "after"),
-				offset,
-			);
-		this.element.value = normalizeInputText(this.model.getValue());
-		const before = deferred.before.selection;
-		this.element.setSelectionRange(
-			throughForeign(before.start),
-			throughForeign(before.end),
-			before.direction,
-		);
-		if (change) {
-			const rebased = rebaseEdit(change, deferred.batches);
-			const caret = (offset: number): number => {
-				if (
-					offset >= change.from &&
-					offset <= change.from + change.text.length
-				)
-					return rebased.from + offset - change.from;
-				const original =
-					offset < change.from
-						? offset
-						: offset -
-							change.text.length +
-							(change.to - change.from);
-				return mapOffset(
-					throughForeign(original),
-					[
-						{
-							offset: rebased.from,
-							length: rebased.to - rebased.from,
-							text: rebased.text,
-						},
-					],
-					"after",
-				);
-			};
-			const start = caret(selection.start);
-			const end = Math.max(start, caret(selection.end));
-			this.applyEditingPlan({
-				edits: [
-					{ from: rebased.from, to: rebased.to, text: rebased.text },
-				],
-				selection: { start, end, direction: selection.direction },
-			});
-			if (rebased.conflict || deferred.flush)
-				this.announce(
-					"The document changed during composition. Your new text was inserted while preserving the other changes.",
-				);
-		}
-		const options = this.model.getOptions();
-		this.updateOptions({
-			tabSize: options.tabSize,
-			insertSpaces: options.insertSpaces,
-		});
-		this.render();
-	}
 
 	private readonly selectLine = (line: number): void => {
 		const { from, to } = getInputLineRange(this.element.value, line);
@@ -2372,114 +1358,8 @@ export class EditorView implements Disposable {
 		this.updateCursor();
 		this.revealCursor();
 	};
-
 	private readonly handleBeforeInput = (event: InputEvent): void => {
-		if (event.defaultPrevented) return;
-		this.beforeInputState = this.captureState();
-		if (this.options.readOnly || !this.attachedModel) {
-			if (event.cancelable) event.preventDefault();
-			this.announce("Editor is read-only.");
-			return;
-		}
-		if (this.deferredComposition) return;
-		if (
-			!this.composing &&
-			!event.isComposing &&
-			event.cancelable &&
-			(event.inputType === "historyUndo" ||
-				event.inputType === "historyRedo")
-		) {
-			event.preventDefault();
-			if (event.inputType === "historyUndo") this.undo();
-			else this.redo();
-			return;
-		}
-		if (
-			this.composing ||
-			event.isComposing ||
-			(this.compositionGroup &&
-				event.data === this.compositionEndText &&
-				Date.now() - this.compositionEndTime < 100) ||
-			!event.cancelable ||
-			event.defaultPrevented
-		)
-			return;
-		if (
-			this.selectionsValue.length > 1 ||
-			this.options.accessibilitySupport !== "on"
-		) {
-			const supported =
-				event.inputType === "insertText" ||
-				event.inputType === "insertLineBreak" ||
-				event.inputType === "insertParagraph" ||
-				event.inputType === "deleteContentBackward" ||
-				event.inputType === "deleteContentForward";
-			if (supported) {
-				event.preventDefault();
-				this.applyPerSelection(
-					(selection) => {
-						const bracket = planBracketInput(
-							this.element.value,
-							selection,
-							event.inputType,
-							event.data,
-							this.language,
-							this.getAnalysis(),
-							this.options,
-						);
-						if (bracket) return bracket;
-						if (event.inputType.startsWith("delete")) {
-							const backward =
-								event.inputType === "deleteContentBackward";
-							const start =
-								selection.start === selection.end && backward
-									? graphemeOffset(
-											this.element.value,
-											selection.start,
-											-1,
-										)
-									: selection.start;
-							const end =
-								selection.start === selection.end && !backward
-									? graphemeOffset(
-											this.element.value,
-											selection.end,
-											1,
-										)
-									: selection.end;
-							return replacementPlan(
-								{ start, end, direction: selection.direction },
-								"",
-							);
-						}
-						return replacementPlan(
-							selection,
-							event.inputType === "insertText"
-								? (event.data ?? "")
-								: "\n",
-						);
-					},
-					event.inputType === "insertText" ||
-						event.inputType.startsWith("deleteContent")
-						? event.inputType
-						: undefined,
-				);
-				return;
-			}
-		}
-		const plan = planBracketInput(
-			this.element.value,
-			this.captureState().selection,
-			event.inputType,
-			event.data,
-			this.language,
-			this.getAnalysis(),
-			this.options,
-		);
-		if (plan) {
-			event.preventDefault();
-			this.applyEditingPlan(plan);
-		}
+		this.nativeInput.handleBeforeInput(event);
 	};
 
 	private revealCursor(): void {
@@ -2489,11 +1369,11 @@ export class EditorView implements Disposable {
 			this.element.selectionDirection === "backward"
 				? this.element.selectionStart
 				: this.element.selectionEnd;
-		const position = this.deferredComposition
+		const position = this.nativeInput.deferredComposition
 			? getInputPosition(this.element.value, offset)
 			: this.model.getPositionAtInputOffset(offset);
-		if (this.assets().folding.reveal(position.line))
-			this.renderer.setFolds(this.assets().folding.get());
+		if (this.presentation.assets().folding.reveal(position.line))
+			this.renderer.setFolds(this.presentation.assets().folding.get());
 		const top = this.renderer.point(
 			position,
 			this.getSelection().affinity,
@@ -2525,172 +1405,14 @@ export class EditorView implements Disposable {
 		)
 			this.renderer.render();
 	}
-
 	private readonly handleInput = (event?: Event): void => {
-		if (this.deferredComposition) {
-			this.updateCursor();
-			return;
-		}
-		if (this.options.readOnly || !this.attachedModel) {
-			const selection =
-				this.beforeInputState?.selection ?? this.lastSelection;
-			this.beforeInputState = undefined;
-			this.element.value = normalizeInputText(this.model.getValue());
-			this.element.setSelectionRange(
-				selection.start,
-				selection.end,
-				selection.direction,
-			);
-			this.updateCursor();
-			this.announce("Editor is read-only.");
-			return;
-		}
-		const input = event as InputEvent | undefined;
-		const beforeState = this.beforeInputState ?? {
-			...this.captureState(),
-			selection: this.lastSelection,
-		};
-		this.beforeInputState = undefined;
-		if (
-			input?.inputType === "historyUndo" ||
-			input?.inputType === "historyRedo"
-		) {
-			this.element.value = normalizeInputText(this.model.getValue());
-			this.element.setSelectionRange(
-				beforeState.selection.start,
-				beforeState.selection.end,
-				beforeState.selection.direction,
-			);
-			if (input.inputType === "historyUndo") this.undo();
-			else this.redo();
-			return;
-		}
-		const lineBreak =
-			!this.composing &&
-			!input?.isComposing &&
-			(input?.inputType === "insertLineBreak" ||
-				input?.inputType === "insertParagraph");
-		if (lineBreak) {
-			const caret = this.element.selectionStart;
-			if (
-				caret === this.element.selectionEnd &&
-				this.element.value[caret - 1] === "\n"
-			) {
-				const indent = getLineIndent(this.element.value, caret - 1);
-				if (indent)
-					this.element.setRangeText(indent, caret, caret, "end");
-			}
-		}
-		const original = this.model.getValue();
-		const before = normalizeInputText(original);
-		const change = findTextChange(before, this.element.value);
-		if (!change) {
-			this.breakHistoryGroup();
-			this.updateCursor();
-			if (lineBreak) this.revealCursor();
-			return;
-		}
-		const start = getInputPosition(before, change.from);
-		const end = getInputPosition(before, change.to);
-		const eol = this.model.getEOL();
-		if (this.selectionsValue.length > 1) {
-			this.selectionsValue = [this.captureState().selection];
-			this.announce("This native input uses the primary cursor.");
-		}
-		const afterState = this.captureState();
-		const time = Date.now();
-		const composition =
-			this.composing ||
-			input?.isComposing ||
-			input?.inputType?.includes("Composition") ||
-			(this.compositionGroup &&
-				input?.data === this.compositionEndText &&
-				time - this.compositionEndTime < 100);
-		let kind: string | undefined;
-		let group: string | undefined;
-		if (composition) {
-			group =
-				this.compositionGroup ??
-				`${this.owner}:${++this.groupSequence}`;
-			this.compositionGroup = group;
-		} else {
-			this.compositionGroup = undefined;
-			if (
-				beforeState.selection.start === beforeState.selection.end &&
-				afterState.selection.start === afterState.selection.end
-			) {
-				if (
-					input?.inputType === "insertText" &&
-					!change.text.includes("\n")
-				)
-					kind = "typing";
-				else if (input?.inputType === "deleteContentBackward")
-					kind = "backspace";
-				else if (input?.inputType === "deleteContentForward")
-					kind = "delete";
-			}
-			if (kind) {
-				const previous = this.typingGroup;
-				group =
-					previous?.kind === kind &&
-					previous.version === this.model.getVerId() &&
-					time - previous.time <= 750 &&
-					this.sameSelection(
-						previous.selection,
-						beforeState.selection,
-					)
-						? previous.id
-						: `${this.owner}:${++this.groupSequence}`;
-			}
-		}
-		this.breakHistoryGroup();
-		this.pendingSelection = {
-			start: this.element.selectionStart,
-			end: this.element.selectionEnd,
-			direction: this.element.selectionDirection,
-		};
-		try {
-			this.model.edit(
-				[
-					{
-						range: {
-							startLine: start.line,
-							startColumn: start.column,
-							endLine: end.line,
-							endColumn: end.column,
-						},
-						text: change.text.replace(/\n/g, eol),
-					},
-				],
-				{
-					before: beforeState,
-					after: afterState,
-					...(group ? { group } : {}),
-				},
-			);
-		} catch (error) {
-			this.pendingSelection = undefined;
-			this.render();
-			throw error;
-		} finally {
-			this.pendingSelection = undefined;
-		}
-		if (kind && group)
-			this.typingGroup = {
-				id: group,
-				kind,
-				time,
-				version: this.model.getVerId(),
-				selection: afterState.selection,
-			};
-		this.updateCursor();
-		if (lineBreak) this.revealCursor();
+		this.nativeInput.handleInput(event);
 	};
 
 	private render(event?: ModelChangeEvent): void {
 		if (event) {
 			this.cursors.reset();
-			this.multiExpansion.length = 0;
+			this.editing.resetMulti();
 		}
 		if (event?.flush) {
 			this.clearSnippet();
@@ -2789,7 +1511,7 @@ export class EditorView implements Disposable {
 			this.element.scrollTop = state.scrollTop;
 			this.element.scrollLeft = state.scrollLeft;
 		}
-		this.renderer.setFolds(this.assets().folding.get());
+		this.renderer.setFolds(this.presentation.assets().folding.get());
 		this.refreshDecorations(this.model);
 		this.renderer.render();
 		if (
@@ -2814,15 +1536,15 @@ export class EditorView implements Disposable {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
-		this.deferredComposition = undefined;
+		this.nativeInput.deferredComposition = undefined;
 		this.analysis = undefined;
 		if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer);
 		this.optionListeners.clear();
 		this.modelListeners.clear();
-		this.selectionHistory.length = 0;
-		this.multiExpansion.length = 0;
-		this.multiExpandedKey = "";
-		this.multiTyping = undefined;
+		this.editing.resetSingle();
+		this.editing.resetMulti();
+
+		this.transactions.resetTyping();
 		this.renderer.interactionElement.removeEventListener(
 			"contextmenu",
 			this.handleContextMenu,
@@ -2832,16 +1554,14 @@ export class EditorView implements Disposable {
 		this.cursorUndo.length = 0;
 		this.cursorRedo.length = 0;
 		this.clearSnippet();
-		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
-		for (const widget of [...this.contentWidgets]) widget.dispose();
+		this.presentation.clearColors();
+
 		this.languageFeatures.dispose();
-		this.clipboard.dispose();
-		this.menu.dispose();
+		this.services.dispose();
+
 		this.commands.dispose();
 		this.element.removeEventListener("input", this.handleInput);
-		this.find.dispose();
-		this.goTo.dispose();
-		this.shortcuts.dispose();
+
 		this.element.removeEventListener("beforeinput", this.handleBeforeInput);
 		this.element.removeEventListener(
 			"compositionstart",
@@ -2860,10 +1580,8 @@ export class EditorView implements Disposable {
 		}
 		for (const subscription of this.modelSubscriptions.splice(0))
 			subscription.dispose();
-		for (const model of [...this.savedModels.keys()])
-			this.releaseSavedModel(model);
-		for (const model of [...this.modelAssets.keys()])
-			this.releaseAssets(model);
+		this.savedViews.dispose();
+		this.presentation.dispose();
 		this.renderer.dispose();
 		this.emptyModel.dispose();
 		this.attachedModel = null;

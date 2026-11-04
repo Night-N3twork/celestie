@@ -7,6 +7,9 @@ import { applyTheme } from "../features/themes";
 import type { TextModel } from "../model/text-model";
 import "../styles/editor.css";
 import { LineNumberGutter } from "./line-number-gutter";
+import { paintOverview, paintStickyHeaders } from "./overview-painter";
+import { appendRow } from "./row-painter";
+import { paintSelectionLayers } from "./selection-painter";
 import { TextGeometry } from "./text-geometry";
 import { type FoldRegion, VisualLayout, type VisualRow } from "./visual-layout";
 
@@ -511,373 +514,77 @@ export class TextRenderer implements Disposable {
 		this.positionWidgets();
 	};
 	private appendText(element: HTMLElement, row: VisualRow): void {
-		const text = this.model.getLineContent(row.line),
-			start = this.model.getInputOffsetAt({ line: row.line, column: 1 });
-		const boundaries = new Set<number>([row.from, row.to]);
-		const marks: {
-			from: number;
-			to: number;
-			className?: string;
-			background?: string;
-			underline?: string;
-			title?: string;
-		}[] = [];
-		const mark = (
-			from: number,
-			to: number,
-			options: Omit<(typeof marks)[number], "from" | "to">,
-		) => {
-			from = Math.max(row.from, from);
-			to = Math.min(row.to, to);
-			if (to < from) return;
-			marks.push({ from, to, ...options });
-			boundaries.add(from);
-			boundaries.add(to);
-		};
-		let low = 0,
-			high = this.tokens.length;
-		while (low < high) {
-			const mid = (low + high) >>> 1;
-			if ((this.tokens[mid]?.to ?? 0) < start + row.from) low = mid + 1;
-			else high = mid;
-		}
-		for (let index = low; index < this.tokens.length; index++) {
-			const token = this.tokens[index];
-			if (!token || token.from > start + row.to) break;
-			if (/^[a-z0-9-]+$/.test(token.kind))
-				mark(token.from - start, token.to - start, {
-					className: `editor-token-${token.kind}`,
-				});
-		}
-		for (let index = 0; index < this.search.length; index++) {
-			const match = this.search[index];
-			if (
-				match &&
-				row.line >= match.range.startLine &&
-				row.line <= match.range.endLine
-			)
-				mark(
-					row.line === match.range.startLine
-						? match.range.startColumn - 1
-						: 0,
-					row.line === match.range.endLine
-						? match.range.endColumn - 1
-						: text.length,
-					{
-						className: `editor-find-match${index === this.currentMatch ? " editor-find-match-current" : ""}`,
-					},
-				);
-		}
-		for (const position of this.brackets)
-			if (position.line === row.line)
-				mark(position.column - 1, position.column, {
-					className: "editor-matching-bracket",
-				});
-		for (const decoration of this.decorations) {
-			const range = decoration.range;
-			if (row.line >= range.startLine && row.line <= range.endLine)
-				mark(
-					row.line === range.startLine ? range.startColumn - 1 : 0,
-					row.line === range.endLine
-						? range.endColumn - 1
-						: text.length,
-					{
-						...(decoration.className
-							? { className: decoration.className }
-							: {}),
-						...(decoration.background
-							? { background: decoration.background }
-							: {}),
-						...(decoration.underline
-							? { underline: decoration.underline }
-							: {}),
-						...(decoration.hover
-							? { title: decoration.hover }
-							: {}),
-					},
-				);
-		}
-		if (this.options.renderWhitespace === "all")
-			for (let column = row.from; column < row.to; column++)
-				if (/[\t ]/.test(text[column] ?? "")) {
-					boundaries.add(column);
-					boundaries.add(column + 1);
-				}
-		const hints =
-			this.options.inlayHints &&
-			!this.accessible &&
-			this.assistanceVersion === this.model.getVersionId()
-				? this.hints.filter(
-						(hint) =>
-							hint.offset >= start + row.from &&
-							hint.offset <= start + row.to,
-					)
-				: [];
-		for (const hint of hints) boundaries.add(hint.offset - start);
-		const appendHints = (column: number) => {
-			for (const hint of hints.filter(
-				(hint) => hint.offset - start === column,
-			)) {
-				const node = element.ownerDocument.createElement("span");
-				node.className = "editor-inlay-hint";
-				node.textContent = hint.text;
-				node.title = hint.tooltip ?? hint.text;
-				element.append(node);
-			}
-		};
-		const sorted = [...boundaries].sort((a, b) => a - b);
-		for (let i = 0; i < sorted.length - 1; i++) {
-			const from = sorted[i] ?? 0,
-				to = sorted[i + 1] ?? 0,
-				active = marks.filter(
-					(mark) => mark.from < to && mark.to > from,
-				);
-			appendHints(from);
-			const span = element.ownerDocument.createElement("span");
-			span.textContent = text.slice(from, to);
-			span.className = active
-				.map((mark) => mark.className ?? "")
-				.join(" ");
-			for (const item of active) {
-				if (item.background) span.style.background = item.background;
-				if (item.underline) {
-					span.style.textDecorationLine = "underline";
-					span.style.textDecorationStyle = "wavy";
-					span.style.textDecorationColor = item.underline;
-				}
-				if (item.title) span.title = item.title;
-			}
-			if (
-				this.options.renderWhitespace === "all" &&
-				/^[\t ]$/.test(span.textContent)
-			) {
-				span.classList.add("editor-visible-whitespace");
-				span.dataset.whitespace = span.textContent === "\t" ? "→" : "·";
-			}
-			element.append(span);
-		}
-		if (row.to === text.length) appendHints(row.to);
-		if (!text.length)
-			element.append(element.ownerDocument.createTextNode(""));
-		if (
-			this.folds.some(
-				(fold) => fold.start === row.line && fold.collapsed,
-			) &&
-			row.to === text.length
-		) {
-			const placeholder = element.ownerDocument.createElement("span");
-			placeholder.className = "editor-fold-placeholder";
-			placeholder.dataset.fold = String(row.line);
-			placeholder.setAttribute("aria-label", "Folded lines");
-			element.append(placeholder);
-		}
+		appendRow(
+			{
+				model: this.model,
+				tokens: this.tokens,
+				search: this.search,
+				currentMatch: this.currentMatch,
+				brackets: this.brackets,
+				decorations: this.decorations,
+				options: this.options,
+				accessible: this.accessible,
+				assistanceVersion: this.assistanceVersion,
+				hints: this.hints,
+				folds: this.folds,
+			},
+			element,
+			row,
+		);
 	}
 	private paintSelections(): void {
 		if (this.paintedVersion !== this.model.getVersionId()) {
 			this.render();
 			return;
 		}
-		const fragment = this.root.ownerDocument.createDocumentFragment();
-		const rectangle = (
-			name: string,
-			x: number,
-			y: number,
-			width: number,
-			height: number,
-		) => {
-			const node = this.root.ownerDocument.createElement("div");
-			node.className = name;
-			node.style.cssText = `left:${x}px;top:${y}px;width:${width}px;height:${height}px`;
-			fragment.append(node);
-		};
-		const lines = new Set(this.visible.map((row) => row.line));
-		for (const selection of this.accessible
-			? this.selections.slice(1)
-			: this.selections) {
-			const start = this.model.getPositionAtInputOffset(selection.start),
-				end = this.model.getPositionAtInputOffset(selection.end);
-			if (selection.start !== selection.end)
-				for (const line of lines) {
-					if (line < start.line || line > end.line) continue;
-					const content = this.model.getLineContent(line),
-						from = line === start.line ? start.column - 1 : 0,
-						to =
-							line === end.line ? end.column - 1 : content.length;
-					for (const rect of this.geometry.rectangles(line, from, to))
-						if (rect.width > 0)
-							rectangle(
-								"editor-custom-selection",
-								rect.x,
-								rect.y,
-								rect.width,
-								rect.height,
-							);
-					if (line < end.line) {
-						const point = this.geometry.point({
-							line,
-							column: content.length + 1,
-						});
-						rectangle(
-							"editor-custom-selection",
-							point.x,
-							point.y,
-							8,
-							this.lineHeight,
-						);
-					}
-				}
-			const active = selection.direction === "backward" ? start : end,
-				visual = this.layout.position(
-					active.line,
-					active.column,
-					selection.affinity,
-				);
-			if (this.visible.some((row) => row.index === visual.index)) {
-				const point = this.geometry.point(active, selection.affinity);
-				rectangle(
-					"editor-custom-caret",
-					point.x,
-					point.y,
-					2,
-					point.height,
-				);
-			}
-		}
-		if (this.dropOffset !== undefined) {
-			const point = this.geometry.point(
-				this.model.getPositionAtInputOffset(this.dropOffset),
-			);
-			rectangle(
-				"editor-custom-caret editor-drop-caret",
-				point.x,
-				point.y,
-				2,
-				point.height,
-			);
-		}
-		if (this.options.indentGuides)
-			for (const row of this.visible) {
-				if (row.from) continue;
-				const text = this.model.getLineContent(row.line),
-					leading = text.match(/^[\t ]*/)?.[0] ?? "",
-					width = this.geometry.measure(leading),
-					tab = this.columnWidth * this.options.tabSize;
-				for (let x = tab; x < width; x += tab)
-					rectangle(
-						"editor-indent-guide",
-						this.padding + x,
-						this.padding +
-							row.index * this.lineHeight -
-							(this.accessible ? this.viewport.scrollTop : 0),
-						1,
-						this.lineHeight,
-					);
-			}
-		this.selectionLayer.replaceChildren(fragment);
-		const rulerFragment = this.root.ownerDocument.createDocumentFragment();
-		for (const column of this.options.rulers) {
-			const ruler = this.root.ownerDocument.createElement("div");
-			ruler.className = "editor-ruler";
-			ruler.style.left = `${this.padding + column * this.columnWidth}px`;
-			rulerFragment.append(ruler);
-		}
-		this.rulerLayer.replaceChildren(rulerFragment);
-		if (this.input && !this.accessible && this.selections[0]) {
-			const selection = this.selections[0],
-				point = this.point(
-					this.model.getPositionAtInputOffset(
-						selection.direction === "backward"
-							? selection.start
-							: selection.end,
-					),
-					selection.affinity,
-				);
-			this.input.style.left = `${Math.max(this.viewport.scrollLeft, Math.min(point.x, this.viewport.scrollLeft + this.viewport.clientWidth - 4))}px`;
-			this.input.style.top = `${Math.max(this.viewport.scrollTop, Math.min(point.y, this.viewport.scrollTop + this.viewport.clientHeight - this.lineHeight))}px`;
-			this.input.style.height = `${this.lineHeight}px`;
-		}
+		paintSelectionLayers({
+			root: this.root,
+			visible: this.visible,
+			accessible: this.accessible,
+			selections: this.selections,
+			model: this.model,
+			geometry: this.geometry,
+			lineHeight: this.lineHeight,
+			layout: this.layout,
+			dropOffset: this.dropOffset,
+			options: this.options,
+			columnWidth: this.columnWidth,
+			padding: this.padding,
+			viewport: this.viewport,
+			selectionLayer: this.selectionLayer,
+			rulerLayer: this.rulerLayer,
+			input: this.input,
+			point: (p, affinity) => this.point(p, affinity),
+		});
 	}
 	private paintOverview(): void {
-		const height = this.viewport.clientHeight,
-			fragment = this.root.ownerDocument.createDocumentFragment();
-		this.overview.style.height = `${height}px`;
-		for (const decoration of this.decorations) {
-			if (!decoration.overview) continue;
-			const node = this.root.ownerDocument.createElement("button");
-			node.type = "button";
-			node.className = "editor-overview-marker";
-			node.title = decoration.hover ?? "Decoration";
-			node.style.cssText = `top:${(this.layout.position(decoration.range.startLine, 1).index / Math.max(1, this.layout.rowCount)) * height}px;background:${decoration.overview}`;
-			node.onclick = () =>
-				this.callbacks.onSelectLine?.(decoration.range.startLine);
-			fragment.append(node);
-		}
-		this.overview.replaceChildren(fragment);
-		if (!this.options.minimap) return;
-		const scale = devicePixelRatio || 1,
-			width = 80;
-		this.minimap.width = width * scale;
-		this.minimap.height = Math.max(1, height * scale);
-		this.minimap.style.height = `${height}px`;
-		const context = this.minimap.getContext("2d");
-		if (!context) return;
-		context.scale(scale, scale);
-		const style = getComputedStyle(this.root),
-			foreground = style.getPropertyValue("--editor-foreground");
-		context.fillStyle = foreground;
-		context.globalAlpha = 0.45;
-		const count = Math.min(2000, this.layout.rowCount);
-		for (let index = 0; index < count; index++) {
-			const row = this.layout.row(
-					Math.floor((index / count) * this.layout.rowCount),
-				),
-				text = this.model
-					.getLineContent(row.line)
-					.slice(row.from, Math.min(row.to, row.from + 120));
-			for (const match of text.matchAll(/\S+/g))
-				context.fillRect(
-					3 + match.index * 0.6,
-					(index / count) * height,
-					Math.min(74 - match.index * 0.6, match[0].length * 0.6),
-					Math.max(1, height / count),
-				);
-		}
-		context.globalAlpha = 0.18;
-		context.fillStyle = style.getPropertyValue("--editor-accent");
-		const total = this.layout.rowCount * this.lineHeight;
-		context.fillRect(
-			0,
-			(this.viewport.scrollTop / total) * height,
-			width,
-			Math.max(6, (height / total) * height),
-		);
+		paintOverview({
+			viewport: this.viewport,
+			root: this.root,
+			overview: this.overview,
+			decorations: this.decorations,
+			layout: this.layout,
+			callbacks: this.callbacks,
+			options: this.options,
+			minimap: this.minimap,
+			model: this.model,
+			lineHeight: this.lineHeight,
+		});
 	}
 	private paintSticky(): void {
-		const first =
-			this.visible.find(
-				(row) =>
-					this.padding + row.index * this.lineHeight >=
-					this.viewport.scrollTop,
-			)?.line ?? 1;
-		const ancestors =
-			this.options.stickyScroll && !this.accessible
-				? this.folds
-						.filter(
-							(fold) => fold.start < first && fold.end >= first,
-						)
-						.slice(-3)
-				: [];
-		const fragment = this.root.ownerDocument.createDocumentFragment();
-		for (const fold of ancestors) {
-			const button = this.root.ownerDocument.createElement("button");
-			button.type = "button";
-			button.textContent = this.model.getLineContent(fold.start);
-			button.onclick = () => this.callbacks.onSelectLine?.(fold.start);
-			fragment.append(button);
-		}
-		this.sticky.replaceChildren(fragment);
-		this.sticky.style.left = `${this.viewport.scrollLeft}px`;
-		this.sticky.style.top = `${this.viewport.scrollTop}px`;
+		paintStickyHeaders({
+			visible: this.visible,
+			padding: this.padding,
+			lineHeight: this.lineHeight,
+			viewport: this.viewport,
+			options: this.options,
+			accessible: this.accessible,
+			folds: this.folds,
+			root: this.root,
+			model: this.model,
+			callbacks: this.callbacks,
+			sticky: this.sticky,
+		});
 	}
 	private readonly mapClick = (event: PointerEvent): void => {
 		const rect = this.minimap.getBoundingClientRect();
