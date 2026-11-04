@@ -112,6 +112,29 @@ export function registerEverydayShortcuts(
 			...modifiers,
 			run: () => execute(id),
 		});
+	bind("language.complete", " ", { ctrl: true });
+	bind("language.hover", "k", {
+		primary: true,
+		chord: [{ key: "i", primary: true }],
+	});
+	bind("language.formatSelection", "k", {
+		primary: true,
+		chord: [{ key: "f", primary: true }],
+	});
+	bind("language.signature", " ", { primary: true, shift: true });
+	bind("language.definitions", "F12");
+	bind("language.references", "F12", { shift: true });
+	bind("language.rename", "F2");
+	bind("language.symbols", "o", { primary: true, shift: true });
+	bind("language.problems", "m", { primary: true, shift: true });
+	bind("language.format", "f", { shift: true, alt: true });
+	bind("language.actions", ".", { primary: true });
+	bind("language.inline", "\\", { alt: true });
+	bind("view.toggleFold", "[", { primary: true, shift: true });
+	bind("view.unfoldAll", "]", { primary: true, shift: true });
+	bind("view.toggleWrap", "z", { alt: true });
+	bind("view.toggleFold", "{", { primary: true, shift: true });
+	bind("view.unfoldAll", "}", { primary: true, shift: true });
 	bind("editor.action.quickCommand", "F1");
 	bind("editor.action.quickCommand", "p", {
 		primary: true,

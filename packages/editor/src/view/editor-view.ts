@@ -3,6 +3,15 @@ import type {
 	EditorViewOptions,
 	EditorViewState,
 } from "../api/editor-options";
+import { defaultViewOptions, validateViewOptions } from "../api/editor-options";
+import type {
+	Analysis,
+	Completion,
+	Diagnostic,
+	LanguageEdit,
+	Location,
+	Token,
+} from "../api/languages";
 import type {
 	ContentChange,
 	Disposable,
@@ -16,20 +25,26 @@ import { CommandMenu } from "../features/command-menu";
 import { CommandRegistry } from "../features/commands";
 import { planBlockComment, planLineComment } from "../features/comments";
 import {
+	DecorationCollection,
+	diagnosticDecorations,
+} from "../features/decorations";
+import {
 	expansionRanges,
 	planTextCommand,
 	planWordCommand,
 	type TextCommand,
 	wordRange,
 } from "../features/editing-commands";
-import type { EditingPlan } from "../features/editing-plan";
+import { type EditingPlan, mapSelection } from "../features/editing-plan";
 import { registerEditorActions } from "../features/editor-actions";
 import { FindReplace, type SearchEdit } from "../features/find-replace";
+import { type FoldingRange, FoldingState } from "../features/folding";
 import { GoToLine } from "../features/go-to-line";
 import { planIndentation, type TextSelection } from "../features/indentation";
 import {
 	detectIndentation,
 	type IndentationOptions,
+	indentationUnit,
 	planIndentationConversion,
 	resolveIndentation,
 } from "../features/indentation-options";
@@ -38,6 +53,7 @@ import {
 	registerCommentShortcuts,
 	registerLineShortcuts,
 } from "../features/keyboard-shortcuts";
+import { LanguageFeatures } from "../features/language-features";
 import { type LineCommand, planLineCommand } from "../features/line-commands";
 import {
 	caret,
@@ -49,6 +65,8 @@ import {
 	replacementPlan,
 	selectionLimit,
 } from "../features/selections";
+import { parseSnippet } from "../features/snippets";
+import { languageEngine } from "../languages/client";
 import {
 	getLanguageConfiguration,
 	type LanguageConfiguration,
@@ -75,6 +93,9 @@ export class EditorView implements Disposable {
 	private readonly menu: CommandMenu;
 	private readonly clipboard: EditorClipboard;
 	private options: EditorOptions;
+	private readonly modelListeners = new Set<
+		(model: TextModel | null) => void
+	>();
 	private readonly optionListeners = new Set<
 		(options: EditorOptions) => void
 	>();
@@ -101,6 +122,7 @@ export class EditorView implements Disposable {
 			selections: {
 				range: TrackedRange;
 				direction: TextSelection["direction"];
+				affinity?: TextSelection["affinity"];
 			}[];
 			direction: TextSelection["direction"];
 			anchor: TrackedRange;
@@ -127,6 +149,32 @@ export class EditorView implements Disposable {
 		| undefined;
 	private pendingSelection: TextSelection | undefined;
 	private readonly owner = crypto.randomUUID();
+	private readonly languageFeatures: LanguageFeatures;
+	private readonly locationHandler: EditorViewOptions["onOpenLocation"];
+	private snippetStops: {
+		index: number;
+		ranges: TrackedRange[];
+		choices?: readonly string[];
+	}[] = [];
+	private snippetIndex = -1;
+	private colorWidgets: Disposable[] = [];
+	private readonly contentWidgets = new Set<Disposable>();
+	private readonly diagnosticOwners = new WeakMap<
+		TextModel,
+		Map<
+			string,
+			{ collection: DecorationCollection; values: readonly Diagnostic[] }
+		>
+	>();
+	private readonly modelAssets = new Map<
+		TextModel,
+		{
+			folding: FoldingState;
+			collections: Set<DecorationCollection>;
+			markers: DecorationCollection;
+			subscription: Disposable;
+		}
+	>();
 	private groupSequence = 0;
 	private beforeInputState: HistoryViewState | undefined;
 	private lastSelection: TextSelection = {
@@ -165,6 +213,7 @@ export class EditorView implements Disposable {
 		options: EditorViewOptions = {},
 	) {
 		this.model = model;
+		this.locationHandler = options.onOpenLocation;
 		this.attachedModel = model;
 		this.languageOverride = options.languageConfiguration;
 		let indentation = resolveIndentation(
@@ -184,6 +233,8 @@ export class EditorView implements Disposable {
 				indentation,
 			);
 		this.options = {
+			...defaultViewOptions,
+			...options,
 			...indentation,
 			readOnly: options.readOnly ?? false,
 			tabFocusMode: options.tabFocusMode ?? false,
@@ -195,6 +246,7 @@ export class EditorView implements Disposable {
 			!["auto", "on", "off"].includes(this.options.accessibilitySupport)
 		)
 			throw new TypeError("readOnly and tabFocusMode must be booleans.");
+		validateViewOptions(this.options);
 		this.language = resolveLanguageConfiguration(
 			options.languageConfiguration ??
 				getLanguageConfiguration(model.getLanguageId()),
@@ -236,6 +288,7 @@ export class EditorView implements Disposable {
 			height: "100%",
 			onSelectLine: this.selectLine,
 		});
+		this.renderer.configure(this.options);
 		this.element.attachViewport(this.renderer.viewport);
 		this.renderer.setAccessible(this.options.accessibilitySupport === "on");
 		this.element.attachViewport(this.renderer.viewport);
@@ -400,12 +453,47 @@ export class EditorView implements Disposable {
 				offsetAtPoint: (x, y) => this.offsetAtPoint(x, y),
 				columnWidth: () => this.renderer.columnWidth,
 				viewport: () => this.element.viewport,
-				pointAtOffset: (offset) =>
+				pointAtOffset: (offset, affinity) =>
 					this.renderer.point(
 						this.model.getPositionAtInputOffset(offset),
+						affinity,
 					).x,
 				offsetAtLineX: (line, x) =>
 					this.renderer.offsetAtLineX(line, x),
+				verticalMove: (offset, rows, x, affinity) =>
+					this.renderer.verticalMove(offset, rows, x, affinity),
+				visualAffinity: (row, offset) =>
+					this.renderer.visualAffinity(row, offset),
+				verticalOffset: (offset, rows, x, affinity) =>
+					this.renderer.verticalOffset(offset, rows, x, affinity),
+				rowBoundary: (offset, end, affinity) =>
+					this.renderer.rowBoundary(offset, end, affinity),
+				pageRows: () =>
+					Math.max(
+						1,
+						Math.floor(
+							this.element.clientHeight / this.options.lineHeight,
+						) - 1,
+					),
+				toggleFold: (line) => this.toggleFold(line),
+				visualIndex: (offset) => {
+					const position =
+						this.model.getPositionAtInputOffset(offset);
+					return this.renderer.layout.position(
+						position.line,
+						position.column,
+					).index;
+				},
+				visualRowCount: () => this.renderer.layout.rowCount,
+				offsetAtVisualRowX: (row, x) =>
+					this.renderer.verticalOffset(
+						this.model.getInputOffsetAt({
+							line: this.renderer.layout.row(row).line,
+							column: this.renderer.layout.row(row).from + 1,
+						}),
+						0,
+						x,
+					),
 				isBounded: () => this.options.accessibilitySupport !== "on",
 				previewDrop: (offset) => this.renderer.setDropOffset(offset),
 				moveSelection: (selection, target, copy) =>
@@ -413,6 +501,43 @@ export class EditorView implements Disposable {
 				isComposing: () => this.isComposing,
 			},
 		);
+		this.languageFeatures = new LanguageFeatures({
+			frame: this.frame,
+			input: this.element.native,
+			viewport: this.renderer.interactionElement,
+			model: () => this.attachedModel,
+			selection: () => this.getSelection(),
+			diagnostics: () => this.getDiagnostics(),
+			analysisOptions: () => ({
+				inlayHints: this.options.inlayHints,
+				codeLens: this.options.codeLens,
+			}),
+			canEdit: () =>
+				!!this.attachedModel &&
+				!this.options.readOnly &&
+				!this.isComposing,
+			point: (offset) => {
+				const point = this.renderer.point(
+						this.model.getPositionAtInputOffset(offset),
+					),
+					bounds = this.element.getBoundingClientRect();
+				return {
+					x: bounds.left + point.x - this.element.scrollLeft,
+					y: bounds.top + point.y - this.element.scrollTop,
+					height: point.height,
+				};
+			},
+			offsetAtPoint: (x, y) => this.offsetAtPoint(x, y),
+			analysis: (value) => this.setLanguageAnalysis(value),
+			apply: (edits) => this.applyLanguageEdits(edits),
+			accept: (item) => this.acceptCompletion(item),
+			snippet: (body) => this.insertSnippet(body),
+			nextSnippet: (backward) => this.nextSnippet(backward),
+			cancelSnippet: () => this.clearSnippet(),
+			open: (location) => this.openLocation(location),
+			announce: (message) => this.announce(message),
+		});
+		this.languageFeatures.setModel(model);
 		this.bindModel(model);
 		this.render();
 	}
@@ -429,6 +554,591 @@ export class EditorView implements Disposable {
 		this.goTo.open();
 	}
 
+	addContentWidget(
+		id: string,
+		node: HTMLElement,
+		position: import("../api/types").Position,
+		placement: "above" | "below" | "inline" = "below",
+	): Disposable {
+		const model = this.model,
+			tracked = model.trackRange({
+				startLine: position.line,
+				startColumn: position.column,
+				endLine: position.line,
+				endColumn: position.column,
+			});
+		let widget: Disposable;
+		try {
+			widget = this.renderer.addWidget(
+				id,
+				node,
+				() => {
+					const range = tracked.getRange();
+					return range
+						? { line: range.startLine, column: range.startColumn }
+						: position;
+				},
+				placement,
+			);
+		} catch (error) {
+			tracked.dispose();
+			throw error;
+		}
+		let active = true;
+		const subscription = model.onWillDispose(() => release());
+		const release = () => {
+			if (!active) return;
+			active = false;
+			widget.dispose();
+			tracked.dispose();
+			subscription.dispose();
+			this.contentWidgets.delete(handle);
+		};
+		const handle = { dispose: release };
+		this.contentWidgets.add(handle);
+		return handle;
+	}
+
+	private setLanguageAnalysis(value: Analysis): void {
+		if (this.disposed || !this.attachedModel) return;
+		const anchor = this.renderer.captureAnchor();
+		this.renderer.setAssistance(
+			value.hints ?? [],
+			(value.lenses ?? []).map((lens) => ({
+				line: this.model.getPositionAtInputOffset(lens.offset).line,
+				label: lens.label,
+				run: () => {
+					this.setSelections([caret(lens.offset)], true);
+					void this.executeCommand(lens.command);
+				},
+			})),
+		);
+		this.setSyntaxTokens(value.tokens);
+		this.setDiagnostics(value.diagnostics);
+		this.setFoldingRanges(value.folds);
+		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
+		this.renderer.restoreAnchor(anchor);
+		for (const color of value.colors ?? []) {
+			const button = this.frame.ownerDocument.createElement("button");
+			button.type = "button";
+			button.className = "editor-color-swatch";
+			button.style.background = color.color;
+			button.title = `Change color ${color.color}`;
+			button.setAttribute("aria-label", `Change color ${color.color}`);
+			button.onclick = () => {
+				this.setSelections(
+					[
+						{
+							start: color.from,
+							end: color.to,
+							direction: "forward",
+						},
+					],
+					true,
+				);
+				this.runLanguageCommand("color");
+			};
+			this.colorWidgets.push(
+				this.addContentWidget(
+					`color-${color.from}`,
+					button,
+					this.model.getPositionAtInputOffset(color.from),
+					"inline",
+				),
+			);
+		}
+	}
+
+	runLanguageCommand(command: string): void {
+		void this.languageFeatures.run(command);
+	}
+	private applyLanguageEdits(edits: readonly LanguageEdit[]): void {
+		if (!edits.length || !this.canEdit()) return;
+		const groups = new Map<TextModel, LanguageEdit[]>();
+		for (const edit of edits) {
+			const model = [this.model, ...languageEngine.getModels()].find(
+				(model) => model.uri.toString() === edit.uri,
+			);
+			if (!model) throw new Error(`Document is not open: ${edit.uri}`);
+			if (
+				edit.version !== undefined &&
+				edit.version !== model.getVersionId()
+			)
+				throw new Error("The document changed. Run the command again.");
+			const length = model.getValue({ eol: "\n" }).length;
+			if (
+				!Number.isInteger(edit.from) ||
+				!Number.isInteger(edit.to) ||
+				edit.from < 0 ||
+				edit.to < edit.from ||
+				edit.to > length
+			)
+				throw new RangeError("Invalid language edit.");
+			const group = groups.get(model) ?? [];
+			group.push(edit);
+			groups.set(model, group);
+		}
+		for (const group of groups.values()) {
+			group.sort((a, b) => a.from - b.from || a.to - b.to);
+			for (let index = 1; index < group.length; index++)
+				if ((group[index]?.from ?? 0) < (group[index - 1]?.to ?? 0))
+					throw new Error("Language edits overlap.");
+		}
+		for (const [model, group] of groups) {
+			if (model === this.model) {
+				const selections = this.getSelections().map((selection) =>
+					mapSelection(selection, group),
+				);
+				this.applyMultiPlan({
+					edits: group,
+					selection: selections[0] ?? caret(0),
+					selections,
+				});
+			} else
+				model.edit(
+					group.map((edit) => {
+						const start = model.getPositionAtInputOffset(edit.from),
+							end = model.getPositionAtInputOffset(edit.to);
+						return {
+							range: {
+								startLine: start.line,
+								startColumn: start.column,
+								endLine: end.line,
+								endColumn: end.column,
+							},
+							text: edit.text.replace(/\n/g, model.getEOL()),
+						};
+					}),
+				);
+		}
+	}
+	private mergeCompletionEdits(
+		plan: MultiEditingPlan,
+		extras: readonly LanguageEdit[],
+	): MultiEditingPlan {
+		const local = extras.filter(
+			(edit) => edit.uri === this.model.uri.toString(),
+		);
+		for (const edit of local)
+			if (
+				(edit.version !== undefined &&
+					edit.version !== this.model.getVersionId()) ||
+				edit.from < 0 ||
+				edit.to < edit.from ||
+				edit.to > this.element.value.length
+			)
+				throw new Error("Completion edits are stale or invalid.");
+		const own = plan.edits.map((edit) => ({
+			offset: edit.from,
+			length: edit.to - edit.from,
+			text: edit.text,
+		}));
+		const mapped = local.map((edit) => ({
+			from: mapOffset(edit.from, own, "before"),
+			to: mapOffset(edit.to, own, "before"),
+			text: edit.text,
+		}));
+		const selections = plan.selections.map((selection) =>
+			mapSelection(selection, mapped),
+		);
+		const edits = plan.edits.map((edit) => ({ ...edit }));
+		for (const edit of local) {
+			const replacement = edits.find((value) => value.from === edit.from);
+			if (edit.from === edit.to && replacement)
+				replacement.text = edit.text + replacement.text;
+			else edits.push({ from: edit.from, to: edit.to, text: edit.text });
+		}
+		edits.sort((a, b) => a.from - b.from || a.to - b.to);
+		for (let i = 1; i < edits.length; i++)
+			if ((edits[i]?.from ?? 0) < (edits[i - 1]?.to ?? 0))
+				throw new Error("Completion edits overlap.");
+		this.applyLanguageEdits(
+			extras.filter((edit) => edit.uri !== this.model.uri.toString()),
+		);
+		return { edits, selection: selections[0] ?? caret(0), selections };
+	}
+	private acceptCompletion(item: Completion): void {
+		if (!this.canEdit()) return;
+		const primary = this.getSelection(),
+			values = this.getSelections().map((selection) => ({
+				...selection,
+				start: Math.max(0, selection.start + item.from - primary.start),
+				end: Math.max(0, selection.end + item.to - primary.end),
+			}));
+		if (item.snippet)
+			this.insertSnippet(
+				item.insertText,
+				{},
+				values,
+				item.additionalEdits,
+			);
+		else
+			this.applyMultiPlan(
+				this.mergeCompletionEdits(
+					combinePlans(
+						values.map((selection) =>
+							replacementPlan(selection, item.insertText),
+						),
+						this.element.value.length,
+					),
+					item.additionalEdits ?? [],
+				),
+			);
+	}
+
+	insertSnippet(
+		body: string,
+		variables: Readonly<Record<string, string>> = {},
+		targets?: readonly TextSelection[],
+		extras: readonly LanguageEdit[] = [],
+	): void {
+		if (!this.canEdit()) return;
+		this.clearSnippet();
+		const selected = this.getSelection(),
+			indent = getLineIndent(this.element.value, selected.start),
+			source = body
+				.replace(/\t/g, indentationUnit(this.options))
+				.replace(/\n/g, `\n${indent}`);
+		const position = this.model.getPositionAtInputOffset(selected.start),
+			filename = this.model.uri.path.split("/").at(-1) ?? "",
+			word = wordRange(this.element.value, selected.start),
+			date = new Date();
+		const parsed = parseSnippet(source, {
+			TM_SELECTED_TEXT: this.element.value.slice(
+				selected.start,
+				selected.end,
+			),
+			TM_FILENAME: filename,
+			TM_FILENAME_BASE: filename.replace(/\.[^.]+$/, ""),
+			TM_DIRECTORY: this.model.uri.path.slice(
+				0,
+				this.model.uri.path.lastIndexOf("/"),
+			),
+			TM_FILEPATH: this.model.uri.path,
+			TM_CURRENT_LINE: this.model.getLineContent(position.line),
+			TM_CURRENT_WORD: this.element.value.slice(word.from, word.to),
+			TM_LINE_INDEX: String(position.line - 1),
+			TM_LINE_NUMBER: String(position.line),
+			CURRENT_YEAR: String(date.getFullYear()),
+			CURRENT_MONTH: String(date.getMonth() + 1).padStart(2, "0"),
+			CURRENT_DATE: String(date.getDate()).padStart(2, "0"),
+			CURRENT_HOUR: String(date.getHours()).padStart(2, "0"),
+			CURRENT_MINUTE: String(date.getMinutes()).padStart(2, "0"),
+			CURRENT_SECOND: String(date.getSeconds()).padStart(2, "0"),
+			UUID: crypto.randomUUID(),
+			...variables,
+		});
+		const basePlan = combinePlans(
+			(targets ?? this.getSelections()).map((selection) =>
+				replacementPlan(selection, parsed.text),
+			),
+			this.element.value.length,
+		);
+		const plan = this.mergeCompletionEdits(basePlan, extras);
+		this.applyMultiPlan(plan);
+		const groups = new Map<number, TrackedRange[]>();
+		for (const selection of plan.selections) {
+			const base = selection.end - parsed.text.length;
+			for (const stop of parsed.stops) {
+				const start = this.model.getPositionAtInputOffset(
+						base + stop.from,
+					),
+					end = this.model.getPositionAtInputOffset(base + stop.to),
+					ranges = groups.get(stop.index) ?? [];
+				ranges.push(
+					this.model.trackRange(
+						{
+							startLine: start.line,
+							startColumn: start.column,
+							endLine: end.line,
+							endColumn: end.column,
+						},
+						{ stickiness: "always" },
+					),
+				);
+				groups.set(stop.index, ranges);
+			}
+		}
+		if (!groups.has(0))
+			groups.set(
+				0,
+				plan.selections.map((selection) => {
+					const point = this.model.getPositionAtInputOffset(
+						selection.end,
+					);
+					return this.model.trackRange({
+						startLine: point.line,
+						startColumn: point.column,
+						endLine: point.line,
+						endColumn: point.column,
+					});
+				}),
+			);
+		this.snippetStops = [...groups]
+			.sort(
+				([a], [b]) =>
+					(a === 0 ? Infinity : a) - (b === 0 ? Infinity : b),
+			)
+			.map(([index, ranges]) => ({
+				index,
+				ranges,
+				...(parsed.stops.find((stop) => stop.index === index)?.choices
+					? {
+							choices:
+								parsed.stops.find(
+									(stop) => stop.index === index,
+								)?.choices ?? [],
+						}
+					: {}),
+			}));
+		this.snippetIndex = -1;
+		this.nextSnippet(false);
+	}
+	private nextSnippet(backward: boolean): boolean {
+		if (!this.snippetStops.length) return false;
+		if (this.options.readOnly || !this.attachedModel || this.isComposing) {
+			this.clearSnippet();
+			return false;
+		}
+		this.snippetIndex = Math.max(
+			0,
+			this.snippetIndex + (backward ? -1 : 1),
+		);
+		const stop = this.snippetStops[this.snippetIndex];
+		if (!stop) {
+			this.clearSnippet();
+			return false;
+		}
+		const values = stop.ranges.flatMap((tracked) => {
+			const range = tracked.getRange();
+			return range
+				? [
+						{
+							start: this.model.getInputOffsetAt({
+								line: range.startLine,
+								column: range.startColumn,
+							}),
+							end: this.model.getInputOffsetAt({
+								line: range.endLine,
+								column: range.endColumn,
+							}),
+							direction: "forward" as const,
+						},
+					]
+				: [];
+		});
+		if (!values.length) {
+			this.clearSnippet();
+			return false;
+		}
+		this.setSelections(values, true);
+		if (stop.index === 0) this.clearSnippet();
+		else if (stop.choices?.length)
+			this.languageFeatures.offerSnippetChoices(stop.choices);
+		return true;
+	}
+	private clearSnippet(): void {
+		for (const stop of this.snippetStops)
+			for (const range of stop.ranges) range.dispose();
+		this.snippetStops = [];
+		this.snippetIndex = -1;
+	}
+	private openLocation(location: Location): void {
+		if (this.locationHandler) {
+			this.locationHandler(location);
+			return;
+		}
+		const model = languageEngine
+			.getModels()
+			.find((model) => model.uri.toString() === location.uri);
+		if (!model) {
+			this.languageFeatures.peek(location);
+			return;
+		}
+		if (model !== this.model) this.setModel(model);
+		this.setSelections(
+			[{ start: location.from, end: location.to, direction: "forward" }],
+			true,
+		);
+		this.focus();
+	}
+
+	private assets(model = this.model) {
+		let assets = this.modelAssets.get(model);
+		if (assets) return assets;
+		const collections = new Set<DecorationCollection>();
+		const markers = new DecorationCollection(model, () =>
+			this.refreshDecorations(model),
+		);
+		collections.add(markers);
+		assets = {
+			folding: new FoldingState(model),
+			collections,
+			markers,
+			subscription: model.onWillDispose(() => this.releaseAssets(model)),
+		};
+		this.modelAssets.set(model, assets);
+		return assets;
+	}
+	private releaseAssets(model: TextModel): void {
+		const assets = this.modelAssets.get(model);
+		if (!assets) return;
+		this.modelAssets.delete(model);
+		this.diagnosticOwners.delete(model);
+		assets.subscription.dispose();
+		assets.folding.dispose();
+		for (const collection of assets.collections) collection.dispose();
+	}
+	private refreshDecorations(model: TextModel): void {
+		if (!this.disposed && this.model === model)
+			this.renderer.setDecorations(
+				[...(this.modelAssets.get(model)?.collections ?? [])].flatMap(
+					(collection) => collection.get(),
+				),
+			);
+	}
+	createDecorations(): DecorationCollection {
+		const model = this.model;
+		const collection = new DecorationCollection(
+			model,
+			() => this.refreshDecorations(model),
+			() => this.modelAssets.get(model)?.collections.delete(collection),
+		);
+		this.assets(model).collections.add(collection);
+		return collection;
+	}
+
+	setDiagnostics(
+		diagnostics: readonly Diagnostic[],
+		owner = "language",
+	): void {
+		if (!owner) throw new TypeError("Diagnostic owner required.");
+		let owners = this.diagnosticOwners.get(this.model);
+		if (!owners) {
+			owners = new Map();
+			this.diagnosticOwners.set(this.model, owners);
+		}
+		let entry = owners.get(owner);
+		if (!entry) {
+			entry = {
+				collection:
+					owner === "language"
+						? this.assets().markers
+						: this.createDecorations(),
+				values: [],
+			};
+			owners.set(owner, entry);
+		}
+		entry.values = diagnostics.map((diagnostic) => ({ ...diagnostic }));
+		entry.collection.set(diagnosticDecorations(this.model, diagnostics));
+		if (!diagnostics.length && owner !== "language") {
+			entry.collection.dispose();
+			owners.delete(owner);
+		}
+		this.languageFeatures?.updateStatus(this.getDiagnostics());
+	}
+	getDiagnostics(owner?: string): readonly Diagnostic[] {
+		const owners = this.diagnosticOwners.get(this.model);
+		if (!owners) return [];
+		return [...owners]
+			.filter(([key]) => owner === undefined || key === owner)
+			.flatMap(([, entry]) =>
+				entry.collection.get().flatMap((decoration, index) => {
+					const original = entry.values[index];
+					if (!original) return [];
+					return [
+						{
+							...original,
+							from: this.model.getInputOffsetAt({
+								line: decoration.range.startLine,
+								column: decoration.range.startColumn,
+							}),
+							to: this.model.getInputOffsetAt({
+								line: decoration.range.endLine,
+								column: decoration.range.endColumn,
+							}),
+						},
+					];
+				}),
+			);
+	}
+
+	setSyntaxTokens(tokens: readonly Token[]): void {
+		this.renderer.setTokens(tokens);
+	}
+	setFoldingRanges(ranges: readonly FoldingRange[]): void {
+		const anchor = this.renderer.captureAnchor();
+		this.assets().folding.set(ranges);
+		this.renderer.setFolds(this.assets().folding.get());
+		this.renderer.restoreAnchor(anchor);
+	}
+	toggleFold(line?: number): void {
+		const folding = this.assets().folding,
+			position = this.model.getPositionAtInputOffset(
+				this.getSelection().start,
+			);
+		const region =
+			line === undefined
+				? folding
+						.get()
+						.filter(
+							(region) =>
+								region.start <= position.line &&
+								region.end >= position.line,
+						)
+						.sort((a, b) => b.start - a.start)[0]
+				: folding.get().find((region) => region.start === line);
+		if (!region) return;
+		folding.toggle(region.start);
+		this.renderer.setFolds(folding.get());
+		if (
+			!region.collapsed &&
+			position.line > region.start &&
+			position.line <= region.end
+		)
+			this.setSelections(
+				[
+					caret(
+						this.model.getInputOffsetAt({
+							line: region.start,
+							column: this.model.getLineMaxColumn(region.start),
+						}),
+					),
+				],
+				true,
+			);
+		this.updateCursor();
+	}
+	foldAll(collapsed: boolean): void {
+		this.assets().folding.all(collapsed);
+		this.renderer.setFolds(this.assets().folding.get());
+		if (collapsed) {
+			const head = this.model.getPositionAtInputOffset(
+					this.getSelection().start,
+				),
+				parent = this.assets()
+					.folding.get()
+					.find(
+						(region) =>
+							region.collapsed &&
+							head.line > region.start &&
+							head.line <= region.end,
+					);
+			if (parent)
+				this.setSelections(
+					[
+						caret(
+							this.model.getInputOffsetAt({
+								line: parent.start,
+								column: 1,
+							}),
+						),
+					],
+					true,
+				);
+		}
+		this.updateCursor();
+	}
 	getModel(): TextModel | null {
 		return this.attachedModel;
 	}
@@ -460,7 +1170,10 @@ export class EditorView implements Disposable {
 					);
 					this.deferredComposition.flush ||= event.flush;
 					this.frame.classList.add("editor-composition-pending");
-					if (event.flush) this.find.close(false);
+					if (event.flush) {
+						this.find.close(false);
+						this.clearSnippet();
+					}
 					return;
 				}
 				if (event.flush) this.find.close(false);
@@ -524,7 +1237,12 @@ export class EditorView implements Disposable {
 		this.element.setSelectionRange(0, 0);
 		this.element.scrollTop = 0;
 		this.element.scrollLeft = 0;
+		this.clearSnippet();
+		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
+		this.languageFeatures.setModel(model);
 		this.renderer.setModel(this.model);
+		this.renderer.setFolds(this.assets().folding.get());
+		this.refreshDecorations(this.model);
 		if (model) {
 			this.bindModel(model);
 			const options = model.getOptions();
@@ -551,7 +1269,8 @@ export class EditorView implements Disposable {
 				if (anchor)
 					this.element.scrollTop = Math.max(
 						0,
-						16 + (anchor.startLine - 1) * 24 + state.scrollOffset,
+						this.renderer.lineTop(anchor.startLine) +
+							state.scrollOffset,
 					);
 				if (range) this.element.scrollLeft = state.scrollLeft;
 				const values = state.selections.flatMap((value) => {
@@ -568,6 +1287,9 @@ export class EditorView implements Disposable {
 										column: tracked.endColumn,
 									}),
 									direction: value.direction,
+									...(value.affinity
+										? { affinity: value.affinity }
+										: {}),
 								},
 							]
 						: [];
@@ -586,6 +1308,13 @@ export class EditorView implements Disposable {
 		);
 		this.updateLanguage();
 		this.render();
+		for (const listener of this.modelListeners) {
+			try {
+				listener(this.attachedModel);
+			} catch (error) {
+				console.error("Model listener failed", error);
+			}
+		}
 	}
 	private rememberModel(model: TextModel): void {
 		this.releaseSavedModel(model);
@@ -596,7 +1325,7 @@ export class EditorView implements Disposable {
 			1,
 			Math.min(
 				model.getLineCount(),
-				Math.floor(Math.max(0, this.element.scrollTop - 16) / 24) + 1,
+				this.renderer.lineAtScrollOffset(this.element.scrollTop),
 			),
 		);
 		const range = model.trackRange(
@@ -631,11 +1360,12 @@ export class EditorView implements Disposable {
 						{ stickiness: "never" },
 					),
 					direction: value.direction,
+					...(value.affinity ? { affinity: value.affinity } : {}),
 				};
 			}),
 			direction: selection.direction,
 			anchor,
-			scrollOffset: this.element.scrollTop - (16 + (line - 1) * 24),
+			scrollOffset: this.element.scrollTop - this.renderer.lineTop(line),
 			scrollLeft: this.element.scrollLeft,
 			subscription,
 		});
@@ -846,6 +1576,16 @@ export class EditorView implements Disposable {
 		return this.model.canRedo();
 	}
 
+	onDidChangeModel(listener: (model: TextModel | null) => void): Disposable {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		this.modelListeners.add(listener);
+		return {
+			dispose: () => {
+				this.modelListeners.delete(listener);
+			},
+		};
+	}
+
 	onDidChangeOptions(listener: (options: EditorOptions) => void): Disposable {
 		if (this.disposed) throw new Error("Editor view disposed.");
 		this.optionListeners.add(listener);
@@ -865,29 +1605,24 @@ export class EditorView implements Disposable {
 			insertSpaces: options.insertSpaces ?? this.options.insertSpaces,
 		});
 		const next = { ...this.options, ...options, ...indentation };
+		validateViewOptions(next);
 		if (
 			typeof next.readOnly !== "boolean" ||
 			typeof next.tabFocusMode !== "boolean" ||
 			!["auto", "on", "off"].includes(next.accessibilitySupport)
 		)
 			throw new TypeError("readOnly and tabFocusMode must be booleans.");
-		if (
-			next.tabSize === this.options.tabSize &&
-			next.insertSpaces === this.options.insertSpaces &&
-			next.readOnly === this.options.readOnly &&
-			next.tabFocusMode === this.options.tabFocusMode &&
-			next.accessibilitySupport === this.options.accessibilitySupport
-		)
-			return;
-		const previousScrollTop = this.element.scrollTop;
-		const previousScrollLeft = this.element.scrollLeft;
+		if (JSON.stringify(next) === JSON.stringify(this.options)) return;
+		const anchor = this.renderer.captureAnchor();
+		const refreshAssistance =
+			next.inlayHints !== this.options.inlayHints ||
+			next.codeLens !== this.options.codeLens;
 		this.options = next;
+		this.renderer.configure(next);
 		this.renderer.setAccessible(next.accessibilitySupport === "on");
 		this.element.attachViewport(this.renderer.viewport);
 		this.element.setAccessible(next.accessibilitySupport === "on");
-		this.element.scrollTop = previousScrollTop;
-		this.element.scrollLeft = previousScrollLeft;
-		this.renderer.render();
+		this.renderer.restoreAnchor(anchor);
 		this.frame.classList.toggle(
 			"editor-bounded-input",
 			next.accessibilitySupport !== "on",
@@ -902,6 +1637,7 @@ export class EditorView implements Disposable {
 			next.tabFocusMode || this.element.readOnly,
 		);
 		this.renderer.setTabSize(next.tabSize);
+		if (refreshAssistance) this.languageFeatures.refresh();
 		this.find.refresh();
 		this.updateCursor();
 		if (this.attachedModel) {
@@ -1404,6 +2140,7 @@ export class EditorView implements Disposable {
 		if (!this.canEdit()) return;
 		this.breakHistoryGroup();
 		this.beforeInputState = undefined;
+		this.clearSnippet();
 		this.model.undo();
 		this.element.focus({ preventScroll: true });
 		this.revealCursor();
@@ -1413,6 +2150,7 @@ export class EditorView implements Disposable {
 		if (!this.canEdit()) return;
 		this.breakHistoryGroup();
 		this.beforeInputState = undefined;
+		this.clearSnippet();
 		this.model.redo();
 		this.element.focus({ preventScroll: true });
 		this.revealCursor();
@@ -1424,9 +2162,15 @@ export class EditorView implements Disposable {
 	};
 
 	private captureState(): HistoryViewState {
+		const previous = this.selectionsValue[0];
 		const selection: TextSelection = {
 			start: this.element.selectionStart,
 			end: this.element.selectionEnd,
+			...(previous?.affinity &&
+			previous.start === this.element.selectionStart &&
+			previous.end === this.element.selectionEnd
+				? { affinity: previous.affinity }
+				: {}),
 			direction:
 				this.element.selectionStart === this.element.selectionEnd
 					? "none"
@@ -1624,8 +2368,9 @@ export class EditorView implements Disposable {
 	private readonly selectLine = (line: number): void => {
 		const { from, to } = getInputLineRange(this.element.value, line);
 		this.element.focus({ preventScroll: true });
-		this.element.setSelectionRange(from, to, "backward");
+		this.writeSelections([{ start: from, end: to, direction: "backward" }]);
 		this.updateCursor();
+		this.revealCursor();
 	};
 
 	private readonly handleBeforeInput = (event: InputEvent): void => {
@@ -1747,16 +2492,25 @@ export class EditorView implements Disposable {
 		const position = this.deferredComposition
 			? getInputPosition(this.element.value, offset)
 			: this.model.getPositionAtInputOffset(offset);
-		const top = 16 + (position.line - 1) * 24;
+		if (this.assets().folding.reveal(position.line))
+			this.renderer.setFolds(this.assets().folding.get());
+		const top = this.renderer.point(
+			position,
+			this.getSelection().affinity,
+		).y;
 		if (top < this.element.scrollTop + 16)
 			this.element.scrollTop = Math.max(0, top - 16);
 		else if (
-			top + 24 >
+			top + this.options.lineHeight >
 			this.element.scrollTop + this.element.clientHeight - 16
 		) {
-			this.element.scrollTop = top + 24 + 16 - this.element.clientHeight;
+			this.element.scrollTop =
+				top + this.options.lineHeight + 16 - this.element.clientHeight;
 		}
-		const left = this.renderer.point(position).x;
+		const left = this.renderer.point(
+			position,
+			this.getSelection().affinity,
+		).x;
 		if (left < this.element.scrollLeft + 16)
 			this.element.scrollLeft = Math.max(0, left - 16);
 		else if (
@@ -1939,6 +2693,7 @@ export class EditorView implements Disposable {
 			this.multiExpansion.length = 0;
 		}
 		if (event?.flush) {
+			this.clearSnippet();
 			this.selectionsValue = [caret(0)];
 			this.cursorUndo.length = 0;
 			this.cursorRedo.length = 0;
@@ -1946,6 +2701,11 @@ export class EditorView implements Disposable {
 			this.element.scrollTop = 0;
 			this.element.scrollLeft = 0;
 		}
+		const scrollAnchor = this.renderer.captureAnchor();
+		const oldAnchorOffset =
+			getInputLineRange(this.element.value, scrollAnchor.line).from +
+			scrollAnchor.column -
+			1;
 		const previousSelections = this.getSelections();
 		if (event && !event.flush) {
 			this.cursorUndo.length = 0;
@@ -1983,26 +2743,7 @@ export class EditorView implements Disposable {
 						: "before",
 				);
 			const { selectionDirection, scrollTop, scrollLeft } = this.element;
-			let anchoredScrollTop = scrollTop;
-			if (
-				event &&
-				!event.flush &&
-				!this.pendingSelection &&
-				scrollTop > 0
-			) {
-				const oldLine =
-					Math.floor(Math.max(0, scrollTop - 16) / 24) + 1;
-				const anchor = getInputLineRange(
-					this.element.value,
-					oldLine,
-				).from;
-				const mapped = mapModelInputOffset(anchor, event, "after");
-				anchoredScrollTop = Math.max(
-					0,
-					scrollTop +
-						(getInputPosition(text, mapped).line - oldLine) * 24,
-				);
-			}
+			const anchoredScrollTop = scrollTop;
 			this.element.value = text;
 			this.element.setSelectionRange(
 				start,
@@ -2033,6 +2774,9 @@ export class EditorView implements Disposable {
 								: "before",
 						),
 						direction: selection.direction,
+						...(selection.affinity
+							? { affinity: selection.affinity }
+							: {}),
 					}))
 					.map((selection) => ({
 						...selection,
@@ -2045,7 +2789,24 @@ export class EditorView implements Disposable {
 			this.element.scrollTop = state.scrollTop;
 			this.element.scrollLeft = state.scrollLeft;
 		}
+		this.renderer.setFolds(this.assets().folding.get());
+		this.refreshDecorations(this.model);
 		this.renderer.render();
+		if (
+			event &&
+			!event.flush &&
+			!this.pendingSelection &&
+			event.historyState?.owner !== this.owner
+		) {
+			const position = this.model.getPositionAtInputOffset(
+				mapModelInputOffset(oldAnchorOffset, event, "after"),
+			);
+			this.renderer.restoreAnchor({
+				...scrollAnchor,
+				line: position.line,
+				column: position.column,
+			});
+		}
 		this.updateCursor();
 		this.find.refresh();
 	}
@@ -2057,6 +2818,7 @@ export class EditorView implements Disposable {
 		this.analysis = undefined;
 		if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer);
 		this.optionListeners.clear();
+		this.modelListeners.clear();
 		this.selectionHistory.length = 0;
 		this.multiExpansion.length = 0;
 		this.multiExpandedKey = "";
@@ -2069,6 +2831,10 @@ export class EditorView implements Disposable {
 		this.selectionsValue = [caret(0)];
 		this.cursorUndo.length = 0;
 		this.cursorRedo.length = 0;
+		this.clearSnippet();
+		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
+		for (const widget of [...this.contentWidgets]) widget.dispose();
+		this.languageFeatures.dispose();
 		this.clipboard.dispose();
 		this.menu.dispose();
 		this.commands.dispose();
@@ -2096,6 +2862,8 @@ export class EditorView implements Disposable {
 			subscription.dispose();
 		for (const model of [...this.savedModels.keys()])
 			this.releaseSavedModel(model);
+		for (const model of [...this.modelAssets.keys()])
+			this.releaseAssets(model);
 		this.renderer.dispose();
 		this.emptyModel.dispose();
 		this.attachedModel = null;

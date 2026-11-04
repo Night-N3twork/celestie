@@ -1,106 +1,75 @@
-import type { calculateViewport } from "./layout";
-
-interface GutterLayout {
-	readonly viewport: ReturnType<typeof calculateViewport>;
-	readonly lineCount: number;
-	readonly scrollTop: number;
-	readonly viewportHeight: number;
-	readonly paddingTop?: number;
-}
-
+import type { FoldRegion, VisualRow } from "./visual-layout";
 export class LineNumberGutter {
 	private readonly element: HTMLDivElement;
-	private readonly numbers: HTMLDivElement;
-	private firstLine = 0;
-	private lastLine = 0;
-	private activeLine = 0;
-
 	constructor(
 		container: HTMLElement,
-		private readonly lineHeight = 24,
-		private readonly onSelectLine?: (line: number) => void,
+		_lineHeight = 24,
+		_onSelectLine?: (line: number) => void,
 	) {
-		const document = container.ownerDocument;
-		this.element = document.createElement("div");
-		this.element.className = "editor-gutter";
-		if (onSelectLine)
-			this.element.classList.add("editor-gutter-interactive");
+		this.element = container.ownerDocument.createElement("div");
+		this.element.className = "editor-gutter editor-gutter-interactive";
 		this.element.setAttribute("aria-hidden", "true");
-		this.element.style.cssText = `
-			position: relative;
-			overflow: hidden;
-			flex: none;
-			font: 16px/${lineHeight}px monospace;
-			color: #858585;
-			background: #1e1e1e;
-			text-align: right;
-			user-select: none;
-		`;
-		this.numbers = document.createElement("div");
-		this.numbers.style.cssText = "position: absolute; inset: 0 8px auto;";
-		this.element.appendChild(this.numbers);
-		container.appendChild(this.element);
-		this.element.addEventListener("pointerdown", this.handlePointerDown);
+		container.append(this.element);
 	}
-
-	render(layout: GutterLayout): void {
-		const {
-			viewport,
-			lineCount,
-			scrollTop,
-			viewportHeight,
-			paddingTop = 0,
-		} = layout;
-		const digits = Math.max(3, String(lineCount).length);
-		this.element.style.width = `calc(${digits}ch + 16px)`;
-		this.element.style.height = `${viewportHeight}px`;
-		this.numbers.style.transform = `translateY(${paddingTop + viewport.offsetTop - scrollTop}px)`;
-
-		if (
-			this.firstLine === viewport.firstLine &&
-			this.lastLine === viewport.lastLine
-		)
-			return;
+	renderRows(
+		rows: readonly VisualRow[],
+		scrollTop: number,
+		height: number,
+		lineHeight: number,
+		padding: number,
+		lineCount: number,
+		active: number,
+		mode: "on" | "off" | "relative",
+		folds: readonly FoldRegion[],
+		glyphs: ReadonlyMap<
+			number,
+			{ label: string; title: string; color: string }
+		>,
+	): void {
+		this.element.style.width =
+			mode === "off"
+				? "22px"
+				: `calc(${Math.max(3, String(lineCount).length)}ch + 32px)`;
+		this.element.style.height = `${height}px`;
 		const fragment = this.element.ownerDocument.createDocumentFragment();
-		for (let line = viewport.firstLine; line <= viewport.lastLine; line++) {
+		for (const row of rows) {
 			const number = this.element.ownerDocument.createElement("div");
-			number.dataset.line = String(line);
-			number.classList.toggle("is-active", line === this.activeLine);
-			number.style.height = `${this.lineHeight}px`;
-			number.textContent = String(line);
-			fragment.appendChild(number);
+			number.dataset.line = String(row.line);
+			number.classList.toggle("is-active", row.line === active);
+			number.style.cssText = `position:absolute;left:0;right:0;top:${padding + row.index * lineHeight - scrollTop}px;height:${lineHeight}px;line-height:${lineHeight}px`;
+			const fold = folds.find((value) => value.start === row.line);
+			if (fold && row.from === 0 && row.kind !== "zone") {
+				const button = this.element.ownerDocument.createElement("span");
+				button.dataset.fold = String(row.line);
+				button.className = "editor-fold-toggle";
+				button.textContent = fold.collapsed ? "▸" : "▾";
+				number.append(button);
+			}
+			const glyph = glyphs.get(row.line);
+			if (glyph && row.from === 0 && row.kind !== "zone") {
+				const icon = this.element.ownerDocument.createElement("span");
+				icon.className = "editor-gutter-glyph";
+				icon.textContent = glyph.label;
+				icon.title = glyph.title;
+				icon.style.color = glyph.color;
+				number.append(icon);
+			}
+			const label = this.element.ownerDocument.createElement("span");
+			label.textContent =
+				mode === "off" || row.kind === "zone"
+					? ""
+					: row.from
+						? "↪"
+						: mode === "relative" && row.line !== active
+							? String(Math.abs(row.line - active))
+							: String(row.line);
+			number.append(label);
+			fragment.append(number);
 		}
-		this.numbers.replaceChildren(fragment);
-		this.firstLine = viewport.firstLine;
-		this.lastLine = viewport.lastLine;
+		this.element.replaceChildren(fragment);
 	}
-
-	setActiveLine(line: number): void {
-		if (line === this.activeLine) return;
-		this.activeLine = line;
-		for (const number of this.numbers.children) {
-			number.classList.toggle(
-				"is-active",
-				Number(number.getAttribute("data-line")) === line,
-			);
-		}
-	}
-
-	private readonly handlePointerDown = (event: PointerEvent): void => {
-		if (
-			event.button !== 0 ||
-			!this.onSelectLine ||
-			!(event.target instanceof Element)
-		)
-			return;
-		const number = event.target.closest<HTMLElement>("[data-line]");
-		if (!number || !this.numbers.contains(number)) return;
-		event.preventDefault();
-		this.onSelectLine(Number(number.dataset.line));
-	};
-
+	setActiveLine(_line: number): void {}
 	dispose(): void {
-		this.element.removeEventListener("pointerdown", this.handlePointerDown);
 		this.element.remove();
 	}
 }

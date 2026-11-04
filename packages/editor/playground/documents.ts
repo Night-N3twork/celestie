@@ -1,4 +1,6 @@
+import { getLanguages } from "../src/api/languages";
 import { Uri } from "../src/api/uri";
+import { LanguageWorkspace } from "../src/languages/client";
 import { Emitter } from "../src/model/events";
 import { ModelRegistry } from "../src/model/model-registry";
 import type { EndOfLine, TextModel } from "../src/model/text-model";
@@ -26,6 +28,39 @@ export function createPlaygroundDocuments(
 			},
 		),
 	];
+	models.push(
+		registry.createModel(
+			".card {\n\tcolor: #75beff;\n\tpadding: 16px;\n}\n",
+			{
+				uri: Uri.parse("inmemory://playground/styles.css"),
+				languageId: "css",
+			},
+		),
+		registry.createModel(
+			'<main class="card">\n\t<h1>Hello editor</h1>\n</main>\n',
+			{
+				uri: Uri.parse("inmemory://playground/index.html"),
+				languageId: "html",
+			},
+		),
+		registry.createModel(
+			'{\n\t"name": "Celestie",\n\t"enabled": true\n}\n',
+			{
+				uri: Uri.parse("inmemory://playground/settings.json"),
+				languageId: "json",
+			},
+		),
+	);
+	models.push(
+		registry.createModel(
+			"export function sum(left: number, right: number): number {\n\treturn left + right;\n}\n",
+			{
+				uri: Uri.parse("inmemory://playground/utilities.ts"),
+				languageId: "typescript",
+			},
+		),
+	);
+	const workspace = new LanguageWorkspace(models);
 	const primary = new EditorView(container, models[0] as TextModel);
 	let secondary: EditorView | undefined;
 	let active = primary;
@@ -39,6 +74,14 @@ export function createPlaygroundDocuments(
 	const panes = document.getElementById("editor-panes") as HTMLDivElement;
 	const eol = document.getElementById("line-endings") as HTMLSelectElement;
 	const language = document.getElementById("language") as HTMLSelectElement;
+	language.replaceChildren(
+		...getLanguages().map((definition) => {
+			const option = document.createElement("option");
+			option.value = definition.id;
+			option.textContent = definition.id;
+			return option;
+		}),
+	);
 	const title = document.getElementById("file-title") as HTMLHeadingElement;
 	const status = document.getElementById(
 		"document-status",
@@ -120,9 +163,12 @@ export function createPlaygroundDocuments(
 		secondFocus();
 	};
 	let secondaryOptions: { dispose(): void } | undefined;
+	let secondaryModel: { dispose(): void } | undefined;
 	const toggleSecond = () => {
 		secondaryOptions?.dispose();
+		secondaryModel?.dispose();
 		secondaryOptions = undefined;
+		secondaryModel = undefined;
 		if (split.checked) {
 			second.hidden = false;
 			secondSelector.parentElement?.removeAttribute("hidden");
@@ -133,6 +179,7 @@ export function createPlaygroundDocuments(
 				{ ariaLabel: "Second editor" },
 			);
 			if (!primary.getModel()) secondary.setModel(null);
+			secondaryModel = secondary.onDidChangeModel(update);
 			secondaryOptions = secondary.onDidChangeOptions(() => {
 				update();
 				changed.emit(active);
@@ -179,6 +226,7 @@ export function createPlaygroundDocuments(
 	]);
 	subscriptions.push(
 		registry.onWillDisposeModel(update),
+		primary.onDidChangeModel(update),
 		primary.onDidChangeOptions(() => {
 			update();
 			changed.emit(active);
@@ -202,9 +250,11 @@ export function createPlaygroundDocuments(
 			language.removeEventListener("change", changeLanguage);
 			for (const subscription of subscriptions) subscription.dispose();
 			secondaryOptions?.dispose();
+			secondaryModel?.dispose();
 			changed.dispose();
 			secondary?.dispose();
 			primary.dispose();
+			workspace.dispose();
 			registry.dispose();
 		},
 	};

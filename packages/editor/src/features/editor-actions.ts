@@ -4,6 +4,56 @@ import { registerEverydayShortcuts } from "./keyboard-shortcuts";
 import type { LineCommand } from "./line-commands";
 
 export function registerEditorActions(view: EditorView): void {
+	for (const [id, label, shortcut] of [
+		["complete", "Trigger Suggestions", "Ctrl+Space"],
+		["color", "Change Document Color", ""],
+		["hover", "Show Hover", "Ctrl+K Ctrl+I"],
+		["signature", "Signature Help", "Ctrl+Shift+Space"],
+		["definitions", "Go to Definition", "F12"],
+		["references", "Find References", "Shift+F12"],
+		["symbols", "Go to Symbol", "Ctrl+Shift+O"],
+		["rename", "Rename Symbol", "F2"],
+		["format", "Format Document", "Shift+Alt+F"],
+		["formatSelection", "Format Selection", "Ctrl+K Ctrl+F"],
+		["actions", "Quick Fix / Code Actions", "Ctrl+."],
+		["snippet", "Insert Snippet", ""],
+		["inline", "Suggest Inline Completion", "Alt+\\"],
+		["problems", "Show Problems", "Ctrl+Shift+M"],
+	] as const)
+		view.commands.register({
+			id: `language.${id}`,
+			label,
+			shortcut,
+			run: () => view.runLanguageCommand(id),
+			when: () => !!view.getModel() && !view.isComposing,
+			menu: id === "format" || id === "rename" || id === "definitions",
+		});
+	view.commands.register({
+		id: "view.toggleFold",
+		label: "Toggle Fold",
+		shortcut: "Ctrl+Shift+[",
+		run: () => view.toggleFold(),
+	});
+	view.commands.register({
+		id: "view.foldAll",
+		label: "Fold All",
+		run: () => view.foldAll(true),
+	});
+	view.commands.register({
+		id: "view.unfoldAll",
+		label: "Unfold All",
+		shortcut: "Ctrl+Shift+]",
+		run: () => view.foldAll(false),
+	});
+	view.commands.register({
+		id: "view.toggleWrap",
+		label: "Toggle Word Wrap",
+		shortcut: "Alt+Z",
+		run: () =>
+			view.updateOptions({
+				wordWrap: view.getOptions().wordWrap === "off" ? "on" : "off",
+			}),
+	});
 	const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 	const primary = mac ? "Cmd" : "Ctrl";
 	const edit = () =>

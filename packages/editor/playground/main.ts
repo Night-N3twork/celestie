@@ -72,8 +72,22 @@ for (let size = 1; size <= 16; size++) {
 	option.textContent = String(size);
 	tabSize.append(option);
 }
+const wrap = document.getElementById("word-wrap") as HTMLSelectElement;
+const wrapColumn = document.getElementById("wrap-column") as HTMLInputElement;
+const theme = document.getElementById("theme") as HTMLSelectElement;
+const minimap = document.getElementById("minimap") as HTMLInputElement;
+const whitespace = document.getElementById("whitespace") as HTMLInputElement;
+const inlayHints = document.getElementById("inlay-hints") as HTMLInputElement;
+const codeLens = document.getElementById("code-lens") as HTMLInputElement;
 const syncOptions = () => {
 	const options = documents.activeView.getOptions();
+	inlayHints.checked = options.inlayHints;
+	codeLens.checked = options.codeLens;
+	wrap.value = options.wordWrap;
+	wrapColumn.value = String(options.wordWrapColumn);
+	theme.value = options.theme;
+	minimap.checked = options.minimap;
+	whitespace.checked = options.renderWhitespace === "all";
 	tabSize.value = String(options.tabSize);
 	insertSpaces.checked = options.insertSpaces;
 	readOnly.checked = options.readOnly;
@@ -82,6 +96,13 @@ const syncOptions = () => {
 };
 const changeOptions = () => {
 	documents.activeView.updateOptions({
+		inlayHints: inlayHints.checked,
+		codeLens: codeLens.checked,
+		wordWrap: wrap.value as "off" | "on" | "wordWrapColumn" | "bounded",
+		wordWrapColumn: Number(wrapColumn.value),
+		theme: theme.value,
+		minimap: minimap.checked,
+		renderWhitespace: whitespace.checked ? "all" : "none",
 		tabSize: Number(tabSize.value),
 		insertSpaces: insertSpaces.checked,
 		readOnly: readOnly.checked,
@@ -90,6 +111,28 @@ const changeOptions = () => {
 	});
 	syncOptions();
 };
+const liveWrapColumn = () => {
+	if (Number(wrapColumn.value) >= 8 && Number(wrapColumn.value) <= 10000)
+		changeOptions();
+};
+wrapColumn.addEventListener("input", liveWrapColumn);
+const featureButtons: [string, () => void][] = [
+	["fold", () => documents.activeView.toggleFold()],
+	["unfold", () => documents.activeView.foldAll(false)],
+	[
+		"format-document",
+		() => documents.activeView.runLanguageCommand("format"),
+	],
+	[
+		"suggest",
+		() => {
+			documents.activeView.focus();
+			documents.activeView.runLanguageCommand("complete");
+		},
+	],
+];
+for (const [id, run] of featureButtons)
+	document.getElementById(id)?.addEventListener("click", run);
 const openCommands = () => documents.activeView.openCommandPalette();
 commandsButton.addEventListener("click", openCommands);
 for (const control of [
@@ -98,6 +141,13 @@ for (const control of [
 	readOnly,
 	tabFocus,
 	accessibleInput,
+	wrap,
+	wrapColumn,
+	theme,
+	minimap,
+	whitespace,
+	inlayHints,
+	codeLens,
 ])
 	control.addEventListener("change", changeOptions);
 const optionsSubscription = documents.onDidChangeActiveView(syncOptions);
@@ -146,6 +196,9 @@ indentButton.addEventListener("pointerdown", preserveSelection);
 outdentButton.addEventListener("pointerdown", preserveSelection);
 
 import.meta.hot?.dispose(() => {
+	for (const [id, run] of featureButtons)
+		document.getElementById(id)?.removeEventListener("click", run);
+	wrapColumn.removeEventListener("input", liveWrapColumn);
 	commandsButton.removeEventListener("click", openCommands);
 	for (const control of [
 		tabSize,
@@ -153,6 +206,13 @@ import.meta.hot?.dispose(() => {
 		readOnly,
 		tabFocus,
 		accessibleInput,
+		wrap,
+		wrapColumn,
+		theme,
+		minimap,
+		whitespace,
+		inlayHints,
+		codeLens,
 	])
 		control.removeEventListener("change", changeOptions);
 	optionsSubscription.dispose();

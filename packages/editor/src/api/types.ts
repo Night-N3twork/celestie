@@ -19,6 +19,7 @@ export interface TextSelection {
 	readonly start: number;
 	readonly end: number;
 	readonly direction: "forward" | "backward" | "none";
+	readonly affinity?: "before" | "after";
 }
 
 export interface HistoryViewState {

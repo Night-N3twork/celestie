@@ -20,8 +20,32 @@ interface SelectionHost {
 	isComposing(): boolean;
 	viewport(): HTMLElement;
 	isBounded(): boolean;
-	pointAtOffset(offset: number): number;
+	pointAtOffset(offset: number, affinity?: TextSelection["affinity"]): number;
 	offsetAtLineX(line: number, x: number): number;
+	verticalOffset(
+		offset: number,
+		rows: number,
+		x: number,
+		affinity?: TextSelection["affinity"],
+	): number;
+	verticalMove(
+		offset: number,
+		rows: number,
+		x: number,
+		affinity?: TextSelection["affinity"],
+	): { offset: number; affinity: "before" | "after" };
+	visualAffinity(row: number, offset: number): "before" | "after";
+
+	rowBoundary(
+		offset: number,
+		end: boolean,
+		affinity?: TextSelection["affinity"],
+	): number;
+	pageRows(): number;
+	toggleFold(line: number): void;
+	visualIndex(offset: number): number;
+	visualRowCount(): number;
+	offsetAtVisualRowX(row: number, x: number): number;
 	previewDrop(offset: number | undefined): void;
 	moveSelection(
 		selection: TextSelection,
@@ -87,38 +111,29 @@ export class SelectionController implements Disposable {
 			"PageDown",
 		].includes(key);
 		const next = values.map((selection, index) => {
-			const active = head(selection),
-				position = getInputPosition(text, active);
+			const active = head(selection);
 			let target = active;
+			let affinity: "before" | "after" = "after";
 			if (vertical) {
 				const column =
-					this.preferred[index] ?? this.host.pointAtOffset(active);
+					this.preferred[index] ??
+					this.host.pointAtOffset(active, selection.affinity);
 				this.preferred[index] = column;
-				const count = text.split("\n").length;
-				const number = Math.max(
-					1,
-					Math.min(
-						count,
-						position.line +
-							(key === "ArrowUp" || key === "PageUp" ? -1 : 1) *
-								(key.startsWith("Page")
-									? Math.max(
-											1,
-											Math.floor(
-												this.host.viewport()
-													.clientHeight / 24,
-											) - 1,
-										)
-									: 1),
-					),
+				const movement = this.host.verticalMove(
+					active,
+					(key === "ArrowUp" || key === "PageUp" ? -1 : 1) *
+						(key.startsWith("Page") ? this.host.pageRows() : 1),
+					column,
+					selection.affinity,
 				);
-				target = this.host.offsetAtLineX(number, column);
+				target = movement.offset;
+				affinity = movement.affinity;
 			} else if (key === "Home" || key === "End") {
-				const range = getInputLineRange(text, position.line);
-				target =
-					key === "Home"
-						? range.from
-						: range.to - (text[range.to - 1] === "\n" ? 1 : 0);
+				target = this.host.rowBoundary(
+					active,
+					key === "End",
+					selection.affinity,
+				);
 			} else {
 				const direction = key === "ArrowLeft" ? -1 : 1;
 				target =
@@ -128,34 +143,36 @@ export class SelectionController implements Disposable {
 							: selection.end
 						: graphemeOffset(text, active, direction);
 			}
-			return extend ? directed(anchor(selection), target) : caret(target);
+			if (key === "End") affinity = "before";
+			return extend
+				? directed(anchor(selection), target, affinity)
+				: caret(target, affinity);
 		});
 		if (!vertical) this.reset();
 		this.host.setSelections(next, true);
 	}
 	addVertical(direction: -1 | 1): void {
-		const text = this.host.getText(),
-			values = this.host.getSelections();
-		const source = values[0] ?? caret(0),
-			position = getInputPosition(text, head(source));
-		const line = position.line + direction;
-		if (
-			line < 1 ||
-			line > text.split("\n").length ||
-			values.length >= selectionLimit
-		)
-			return;
+		const values = this.host.getSelections();
+		const source = values[0] ?? caret(0);
+		if (values.length >= selectionLimit) return;
 		const column =
-			this.preferred[0] ?? this.host.pointAtOffset(head(source));
-		const next = caret(this.host.offsetAtLineX(line, column));
+				this.preferred[0] ??
+				this.host.pointAtOffset(head(source), source.affinity),
+			movement = this.host.verticalMove(
+				head(source),
+				direction,
+				column,
+				source.affinity,
+			),
+			next = caret(movement.offset, movement.affinity);
+		if (next.start === head(source)) return;
 		this.host.setSelections([next, ...values], true);
 		this.preferred = [column, ...this.preferred];
 	}
 	column(direction: "Up" | "Down" | "Left" | "Right"): void {
-		const text = this.host.getText(),
-			source = this.host.getSelections()[0] ?? caret(0);
+		const source = this.host.getSelections()[0] ?? caret(0);
 		if (!this.rectangle) {
-			const position = getInputPosition(text, head(source));
+			const position = { line: this.host.visualIndex(head(source)) };
 			const column = this.host.pointAtOffset(head(source));
 			this.rectangle = {
 				line: position.line,
@@ -165,11 +182,11 @@ export class SelectionController implements Disposable {
 			};
 		}
 		const rect = this.rectangle,
-			count = text.split("\n").length;
+			count = this.host.visualRowCount();
 		rect.endLine = Math.max(
-			1,
+			0,
 			Math.min(
-				count,
+				count - 1,
 				rect.endLine +
 					(direction === "Up" ? -1 : direction === "Down" ? 1 : 0),
 			),
@@ -189,8 +206,12 @@ export class SelectionController implements Disposable {
 		) {
 			values.push(
 				directed(
-					this.host.offsetAtLineX(line, rect.column),
-					this.host.offsetAtLineX(line, rect.endColumn),
+					this.host.offsetAtVisualRowX(line, rect.column),
+					this.host.offsetAtVisualRowX(line, rect.endColumn),
+					this.host.visualAffinity(
+						line,
+						this.host.offsetAtVisualRowX(line, rect.endColumn),
+					),
 				),
 			);
 			if (line === rect.line) break;
@@ -254,6 +275,16 @@ export class SelectionController implements Disposable {
 			!(event.target instanceof Element)
 		)
 			return;
+		if (event.target.closest(".editor-sticky button,[data-editor-widget]"))
+			return;
+		const fold = event.target.closest<HTMLElement>("[data-fold]");
+		if (fold) {
+			event.preventDefault();
+			event.stopPropagation();
+			this.host.toggleFold(Number(fold.dataset.fold));
+			this.input.focus({ preventScroll: true });
+			return;
+		}
 		const gutter = event.target.closest(".editor-gutter");
 		const bounded = this.host.isBounded();
 		if (
@@ -445,19 +476,25 @@ export class SelectionController implements Disposable {
 		const a = drag.startColumn;
 		const b = this.columnAtPoint(drag.x);
 		const values: TextSelection[] = [];
-		const direction = last.line < first.line ? -1 : 1;
+		const firstRow = this.host.visualIndex(drag.start),
+			lastRow = this.host.visualIndex(end);
+		const direction = lastRow < firstRow ? -1 : 1;
 		for (
-			let line = last.line;
+			let line = lastRow;
 			values.length < selectionLimit;
 			line -= direction
 		) {
 			values.push(
 				directed(
-					this.host.offsetAtLineX(line, a),
-					this.host.offsetAtLineX(line, b),
+					this.host.offsetAtVisualRowX(line, a),
+					this.host.offsetAtVisualRowX(line, b),
+					this.host.visualAffinity(
+						line,
+						this.host.offsetAtVisualRowX(line, b),
+					),
 				),
 			);
-			if (line === first.line) break;
+			if (line === firstRow) break;
 		}
 		this.host.setSelections(normalizeSelections(values, text.length));
 	}

@@ -7,19 +7,28 @@ export const selectionLimit = 1000;
 const graphemeSegments = new Intl.Segmenter(undefined, {
 	granularity: "grapheme",
 });
-export const caret = (offset: number): TextSelection => ({
+export const caret = (
+	offset: number,
+	affinity?: TextSelection["affinity"],
+): TextSelection => ({
 	start: offset,
 	end: offset,
 	direction: "none",
+	...(affinity ? { affinity } : {}),
 });
 export const head = (selection: TextSelection): number =>
 	selection.direction === "backward" ? selection.start : selection.end;
 export const anchor = (selection: TextSelection): number =>
 	selection.direction === "backward" ? selection.end : selection.start;
-export const directed = (from: number, to: number): TextSelection => ({
+export const directed = (
+	from: number,
+	to: number,
+	affinity?: TextSelection["affinity"],
+): TextSelection => ({
 	start: Math.min(from, to),
 	end: Math.max(from, to),
 	direction: to < from ? "backward" : to > from ? "forward" : "none",
+	...(affinity ? { affinity } : {}),
 });
 
 export function normalizeSelections(
@@ -61,13 +70,19 @@ export function normalizeSelections(
 				start: previous.start,
 				end: Math.max(previous.end, value.end),
 				direction: primary.direction,
+				...(primary.affinity ? { affinity: primary.affinity } : {}),
 				index: Math.min(previous.index, value.index),
 			};
 		} else result.push(value);
 	}
 	return result
 		.sort((a, b) => a.index - b.index)
-		.map(({ start, end, direction }) => ({ start, end, direction }));
+		.map(({ start, end, direction, affinity }) => ({
+			start,
+			end,
+			direction,
+			...(affinity ? { affinity } : {}),
+		}));
 }
 
 const changes = (edits: readonly InputEdit[]) =>

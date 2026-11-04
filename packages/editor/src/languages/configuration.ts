@@ -1,3 +1,4 @@
+import { getLanguage } from "../api/languages";
 export type CharacterPair = readonly [open: string, close: string];
 
 export interface LanguageConfiguration {
@@ -73,6 +74,18 @@ export const typescriptConfiguration: LanguageConfiguration = {
 export function getLanguageConfiguration(
 	languageId: string,
 ): LanguageConfiguration {
+	const registered = getLanguage(languageId)?.configuration;
+	if (registered) return resolveLanguageConfiguration(registered);
+	if (["css", "scss", "less", "rust"].includes(languageId))
+		return {
+			...plainTextConfiguration,
+			lineComment: languageId === "css" ? undefined : "//",
+			blockComment: ["/*", "*/"],
+		} as LanguageConfiguration;
+	if (languageId === "html")
+		return { ...plainTextConfiguration, blockComment: ["<!--", "-->"] };
+	if (languageId === "python" || languageId === "shell")
+		return { ...plainTextConfiguration, lineComment: "#" };
 	if (
 		[
 			"typescript",

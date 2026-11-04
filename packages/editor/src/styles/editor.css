@@ -102,8 +102,15 @@
 	overflow: hidden;
 	background: #1e1e1e;
 	color: #d4d4d4;
-	font: 16px / 24px monospace;
+	font:
+		var(--editor-font-size, 16px) / var(--editor-line-height, 24px)
+		var(--editor-font-family, monospace);
 	tab-size: 4;
+}
+
+.editor-renderer {
+	background: var(--editor-background, #1e1e1e);
+	color: var(--editor-foreground, #d4d4d4);
 }
 
 .editor-view-frame > .editor-renderer {
@@ -180,6 +187,10 @@
 	tab-size: inherit;
 	scrollbar-color: #666 #1e1e1e;
 	-webkit-text-fill-color: transparent;
+}
+
+.editor-native-input {
+	caret-color: var(--editor-foreground, #fff);
 }
 
 .editor-native-input::selection {
@@ -381,7 +392,10 @@
 	background: rgb(57 115 185 / 50%);
 }
 .editor-custom-caret {
-	background: #fff;
+	background: var(--editor-foreground);
+}
+.editor-view-frame:not(:focus-within) .editor-custom-caret {
+	visibility: hidden;
 }
 .editor-view-frame:not(:focus-within) .editor-custom-caret {
 	visibility: hidden;
@@ -392,4 +406,296 @@
 
 .editor-drop-caret {
 	background: #75beff;
+}
+
+.editor-gutter {
+	position: relative;
+	overflow: hidden;
+	flex: none;
+	font: inherit;
+	color: var(--editor-foreground);
+	background: var(--editor-background);
+	text-align: right;
+	user-select: none;
+}
+.editor-gutter > div {
+	padding-right: 8px;
+	box-sizing: border-box;
+	opacity: 0.7;
+}
+.editor-gutter > div.is-active {
+	opacity: 1;
+}
+.editor-fold-toggle {
+	position: absolute;
+	left: 2px;
+	cursor: pointer;
+}
+.editor-gutter-glyph {
+	position: absolute;
+	left: 15px;
+	font-size: 10px;
+	cursor: help;
+}
+.editor-visual-row {
+	white-space: pre;
+	width: max-content;
+}
+.editor-active-visual-line {
+	background: color-mix(in srgb, var(--editor-foreground) 4%, transparent);
+}
+.editor-token-keyword {
+	color: var(--editor-keyword);
+}
+.editor-token-string {
+	color: var(--editor-string);
+}
+.editor-token-number {
+	color: var(--editor-number);
+}
+.editor-token-comment {
+	color: var(--editor-comment);
+	font-style: italic;
+}
+.editor-token-type {
+	color: var(--editor-type);
+}
+.editor-token-bracket0,
+.editor-token-bracket3 {
+	color: #e2c08d;
+}
+.editor-token-bracket1,
+.editor-token-bracket4 {
+	color: #c586c0;
+}
+.editor-token-bracket2,
+.editor-token-bracket5 {
+	color: #4ec9b0;
+}
+.editor-visible-whitespace {
+	position: relative;
+}
+.editor-visible-whitespace::before {
+	content: attr(data-whitespace);
+	position: absolute;
+	left: 0;
+	color: color-mix(in srgb, var(--editor-foreground) 30%, transparent);
+	pointer-events: none;
+}
+.editor-indent-guide {
+	background: color-mix(in srgb, var(--editor-foreground) 18%, transparent);
+}
+.editor-ruler-layer {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+.editor-ruler {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	border-left: 1px solid
+		color-mix(in srgb, var(--editor-foreground) 15%, transparent);
+}
+.editor-fold-placeholder {
+	display: inline-block;
+	position: relative;
+	width: 22px;
+	pointer-events: auto;
+	cursor: pointer;
+}
+.editor-fold-placeholder::after {
+	content: " ⋯ ";
+	color: var(--editor-accent);
+	background: var(--editor-panel);
+	border-radius: 3px;
+}
+.editor-minimap {
+	width: 80px;
+	flex: none;
+	cursor: pointer;
+	background: var(--editor-background);
+}
+.editor-minimap[hidden] {
+	display: none;
+}
+.editor-overview {
+	position: relative;
+	flex: none;
+	width: 8px;
+	background: var(--editor-background);
+}
+.editor-overview-marker {
+	position: absolute;
+	left: 0;
+	width: 100%;
+	height: 4px;
+	min-height: 4px;
+	padding: 0;
+	border: 0;
+	cursor: pointer;
+}
+.editor-sticky {
+	position: absolute;
+	z-index: 5;
+	height: 0;
+	max-width: 100%;
+}
+.editor-sticky button {
+	display: block;
+	border: 0;
+	border-bottom: 1px solid var(--editor-border);
+	background: var(--editor-panel);
+	color: var(--editor-foreground);
+	font: inherit;
+	padding: 2px 16px;
+	white-space: pre;
+	text-align: left;
+	cursor: pointer;
+}
+.editor-language-widget {
+	position: absolute;
+	z-index: 40;
+	min-width: 260px;
+	width: 360px;
+	max-width: calc(100% - 16px);
+	max-height: 300px;
+	overflow: auto;
+	border: 1px solid var(--editor-border, #666);
+	border-radius: 4px;
+	background: var(--editor-panel, #252526);
+	color: var(--editor-foreground, #ddd);
+	box-shadow: 0 5px 20px #0006;
+	font: 13px / 1.5 system-ui;
+}
+.editor-language-widget[hidden],
+.editor-inline-completion[hidden] {
+	display: none;
+}
+.editor-language-widget input {
+	box-sizing: border-box;
+	width: 100%;
+	border: 1px solid var(--editor-accent);
+	background: var(--editor-background);
+	color: var(--editor-foreground);
+	padding: 6px;
+	font: inherit;
+}
+.editor-language-widget label,
+.editor-language-widget strong {
+	display: block;
+	padding: 6px;
+}
+.editor-language-widget pre {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 230px;
+	overflow: auto;
+	margin: 8px;
+	font: 13px / 1.5 monospace;
+}
+.editor-language-list {
+	max-height: 240px;
+	overflow: auto;
+}
+.editor-language-list button {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	text-align: left;
+	width: 100%;
+	padding: 5px 8px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+.editor-language-list button[aria-selected="true"] {
+	background: var(--editor-selection);
+}
+.editor-language-list small {
+	opacity: 0.65;
+	max-width: 130px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.editor-language-status {
+	position: absolute;
+	left: 10px;
+	bottom: 7px;
+	z-index: 2;
+	border: 0;
+	background: transparent;
+	color: var(--editor-foreground, #bbb);
+	font: 11px system-ui;
+	cursor: pointer;
+}
+.editor-inline-completion {
+	position: absolute;
+	z-index: 4;
+	pointer-events: none;
+	white-space: pre;
+	color: var(--editor-foreground);
+	opacity: 0.4;
+	font:
+		var(--editor-font-size, 16px) / var(--editor-line-height, 24px)
+		var(--editor-font-family, monospace);
+}
+.editor-custom-selection {
+	background: var(--editor-selection);
+	opacity: 0.7;
+}
+.editor-view-frame .editor-command-menu,
+.editor-view-frame .editor-find-panel,
+.editor-view-frame .editor-cursor-label {
+	background: var(--editor-panel, #252526);
+	color: var(--editor-foreground, #ddd);
+	border-color: var(--editor-border, #444);
+}
+
+.editor-settings button,
+.editor-settings input[type="number"] {
+	background: #333;
+	color: #ddd;
+	border: 1px solid #555;
+	padding: 4px 7px;
+	font: 12px system-ui;
+}
+
+.editor-content-widget {
+	position: absolute;
+	z-index: 7;
+	pointer-events: auto;
+}
+.editor-color-swatch {
+	width: 9px;
+	height: 12px;
+	border: 1px solid var(--editor-foreground);
+	padding: 0;
+	cursor: pointer;
+}
+
+.editor-inlay-hint {
+	font-size: 0.8em;
+	padding: 0 3px;
+	border-radius: 3px;
+	background: var(--editor-panel);
+	color: color-mix(in srgb, var(--editor-foreground) 65%, transparent);
+	user-select: none;
+}
+.editor-code-lens {
+	pointer-events: auto;
+}
+.editor-code-lens button {
+	border: 0;
+	background: transparent;
+	color: var(--editor-accent);
+	font: 12px system-ui;
+	cursor: pointer;
+	padding: 0 5px;
+}
+.editor-token-function {
+	color: var(--editor-function, #dcdcaa);
 }

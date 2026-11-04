@@ -193,6 +193,47 @@
 					><input type="checkbox" id="accessible-input" />Accessible
 					input</label
 				>
+				<label
+					>Wrap
+					<select id="word-wrap" aria-label="Word wrap">
+						<option value="off">Off</option>
+						<option value="on">Viewport</option>
+						<option value="wordWrapColumn">Column</option>
+						<option value="bounded">Bounded</option>
+					</select></label
+				>
+				<label
+					>Wrap column
+					<input
+						id="wrap-column"
+						aria-label="Wrap column"
+						type="number"
+						min="8"
+						max="10000"
+						value="80"
+						style="width:60px"
+					/></label
+				>
+				<label
+					>Theme
+					<select id="theme" aria-label="Theme">
+						<option value="dark">Dark</option>
+						<option value="light">Light</option>
+						<option value="contrast">High contrast</option>
+					</select></label
+				>
+				<label><input type="checkbox" id="minimap" />Minimap</label>
+				<label
+					><input type="checkbox" id="whitespace" />Whitespace</label
+				>
+				<label
+					><input type="checkbox" id="inlay-hints" />Inlay
+					hints</label
+				><label><input type="checkbox" id="code-lens" />CodeLens</label>
+				<button type="button" id="fold">Fold</button
+				><button type="button" id="unfold">Unfold all</button
+				><button type="button" id="format-document">Format</button
+				><button type="button" id="suggest">Suggest</button>
 			</fieldset>
 			<div class="editor-panes" id="editor-panes">
 				<div id="editor"></div>
