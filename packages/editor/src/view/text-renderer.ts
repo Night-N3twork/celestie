@@ -9,6 +9,7 @@ import "../styles/editor.css";
 import { LineNumberGutter } from "./line-number-gutter";
 import { paintOverview, paintStickyHeaders } from "./overview-painter";
 import { appendRow } from "./row-painter";
+import { ScrollAxis } from "./scroll-axis";
 import { paintSelectionLayers } from "./selection-painter";
 import { TextGeometry } from "./text-geometry";
 import { type FoldRegion, VisualLayout, type VisualRow } from "./visual-layout";
@@ -77,6 +78,40 @@ export class TextRenderer implements Disposable {
 	private revision = 0;
 	private visible: VisualRow[] = [];
 	private widest = 0;
+	private readonly verticalScroll = new ScrollAxis();
+	private readonly horizontalScroll = new ScrollAxis();
+	get scrollLeft(): number {
+		return this.accessible
+			? this.viewport.scrollLeft
+			: this.horizontalScroll.read(this.scroller.scrollLeft);
+	}
+	set scrollLeft(value: number) {
+		if (this.accessible) this.viewport.scrollLeft = value;
+		else
+			this.horizontalScroll.write(value, (native) => {
+				this.scroller.scrollLeft = native;
+				return this.scroller.scrollLeft;
+			});
+	}
+	private get horizontalOrigin(): number {
+		return this.accessible ? 0 : this.scrollLeft - this.scroller.scrollLeft;
+	}
+	get scrollTop(): number {
+		return this.accessible
+			? this.viewport.scrollTop
+			: this.verticalScroll.read(this.scroller.scrollTop);
+	}
+	set scrollTop(value: number) {
+		if (this.accessible) this.viewport.scrollTop = value;
+		else
+			this.verticalScroll.write(value, (native) => {
+				this.scroller.scrollTop = native;
+				return this.scroller.scrollTop;
+			});
+	}
+	private get scrollOrigin(): number {
+		return this.accessible ? 0 : this.scrollTop - this.scroller.scrollTop;
+	}
 	private dropOffset: number | undefined;
 	private paintedVersion = -1;
 	private readonly widgets = new Map<
@@ -156,6 +191,7 @@ export class TextRenderer implements Disposable {
 			this.padding,
 		);
 		this.scroller.addEventListener("scroll", this.render);
+		this.scroller.addEventListener("wheel", this.wheel, { passive: false });
 		this.input?.addEventListener("scroll", this.inputScroll);
 		this.minimap.addEventListener("pointerdown", this.mapClick);
 		this.minimap.addEventListener("keydown", this.mapKey);
@@ -181,6 +217,28 @@ export class TextRenderer implements Disposable {
 		this.revision++;
 		this.render();
 		this.restoreAnchor(anchor);
+	};
+	private readonly wheel = (event: WheelEvent): void => {
+		if (
+			(!this.verticalScroll.compressed &&
+				!this.horizontalScroll.compressed) ||
+			this.accessible ||
+			event.ctrlKey
+		)
+			return;
+		event.preventDefault();
+		const unit =
+			event.deltaMode === 1
+				? this.lineHeight
+				: event.deltaMode === 2
+					? this.viewport.clientHeight
+					: 1;
+		this.scrollTop +=
+			(event.shiftKey && !event.deltaX ? 0 : event.deltaY) * unit;
+		this.scrollLeft +=
+			(event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX) *
+			unit;
+		this.render();
 	};
 	private readonly inputScroll = (): void => {
 		if (this.accessible) this.render();
@@ -238,12 +296,11 @@ export class TextRenderer implements Disposable {
 				line: 1,
 				column: 1,
 				offset: 0,
-				left: this.viewport?.scrollLeft ?? 0,
+				left: this.viewport ? this.scrollLeft : 0,
 			};
 		const row = this.layout.row(
 			Math.floor(
-				Math.max(0, this.viewport.scrollTop - this.padding) /
-					this.lineHeight,
+				Math.max(0, this.scrollTop - this.padding) / this.lineHeight,
 			),
 		);
 		return {
@@ -251,9 +308,8 @@ export class TextRenderer implements Disposable {
 			column: row.from + 1,
 			...(row.kind === "zone" ? { zone: true } : {}),
 			offset:
-				this.viewport.scrollTop -
-				(this.padding + row.index * this.lineHeight),
-			left: this.viewport.scrollLeft,
+				this.scrollTop - (this.padding + row.index * this.lineHeight),
+			left: this.scrollLeft,
 		};
 	}
 	restoreAnchor(anchor: ScrollAnchor): void {
@@ -261,11 +317,11 @@ export class TextRenderer implements Disposable {
 		let row = this.layout.position(anchor.line, anchor.column);
 		if (anchor.zone && this.layout.row(row.index - 1).kind === "zone")
 			row = this.layout.row(row.index - 1);
-		this.viewport.scrollTop = Math.max(
+		this.scrollTop = Math.max(
 			0,
 			this.padding + row.index * this.lineHeight + anchor.offset,
 		);
-		this.viewport.scrollLeft = anchor.left;
+		this.scrollLeft = anchor.left;
 		this.render();
 	}
 	lineTop(line: number): number {
@@ -304,12 +360,7 @@ export class TextRenderer implements Disposable {
 		this.render();
 	}
 	hitTest(x: number, y: number): number {
-		return this.geometry.hitTest(
-			x,
-			y,
-			this.viewport.scrollTop,
-			this.viewport.scrollLeft,
-		);
+		return this.geometry.hitTest(x, y, this.scrollTop, this.scrollLeft);
 	}
 	point(
 		position: Position,
@@ -319,8 +370,14 @@ export class TextRenderer implements Disposable {
 			relative = this.accessible && this.geometry.hasLine(position.line);
 		return {
 			...point,
-			x: point.x + (relative ? this.viewport.scrollLeft : 0),
-			y: point.y + (relative ? this.viewport.scrollTop : 0),
+			x:
+				point.x +
+				this.horizontalOrigin +
+				(relative ? this.viewport.scrollLeft : 0),
+			y:
+				point.y +
+				this.scrollOrigin +
+				(relative ? this.viewport.scrollTop : 0),
 		};
 	}
 	offsetAtLineX(line: number, x: number): number {
@@ -414,38 +471,64 @@ export class TextRenderer implements Disposable {
 			this.rowsKey = "";
 			this.widest = 0;
 		}
+		const top = this.scrollTop;
+		this.verticalScroll.configure(
+			this.layout.rowCount * this.lineHeight + 2 * this.padding,
+			source.clientHeight,
+		);
+		this.surface.style.height = `${this.accessible ? source.clientHeight : this.verticalScroll.extent}px`;
+		this.scrollTop = top;
+		const scrollTop = this.scrollTop;
+		this.geometry.originY = this.scrollOrigin;
 		const first = Math.max(
 				0,
-				Math.floor(
-					(source.scrollTop - this.padding) / this.lineHeight,
-				) - 4,
+				Math.floor((scrollTop - this.padding) / this.lineHeight) - 4,
 			),
 			last = Math.min(
 				this.layout.rowCount - 1,
 				Math.ceil(
-					(source.scrollTop + source.clientHeight - this.padding) /
+					(scrollTop + source.clientHeight - this.padding) /
 						this.lineHeight,
 				) + 4,
 			);
 		this.visible = [];
 		for (let index = first; index <= last; index++)
 			this.visible.push(this.layout.row(index));
-		this.surface.style.height = `${this.accessible ? source.clientHeight : this.layout.rowCount * this.lineHeight + 2 * this.padding}px`;
-		this.surface.style.width = `${this.accessible ? source.clientWidth : Math.max(source.clientWidth, this.widest)}px`;
+		const left = this.scrollLeft;
+		this.widest = Math.max(
+			this.widest,
+			...this.visible
+				.filter((row) => row.kind !== "zone")
+				.map((row) => this.padding * 2 + this.geometry.rowWidth(row)),
+		);
+		this.horizontalScroll.configure(
+			Math.max(source.clientWidth, this.widest),
+			source.clientWidth,
+		);
+		this.surface.style.width = `${this.accessible ? source.clientWidth : this.horizontalScroll.extent}px`;
+		this.scrollLeft = left;
+		this.geometry.originX = this.horizontalOrigin;
 		this.rows.style.top = "0";
 		this.rows.style.left = "0";
-		const key = `${this.model.id}:${this.model.getVersionId()}:${first}:${last}:${this.revision}:${this.accessible ? `${source.scrollTop},${source.scrollLeft}` : ""}`;
+		const key = `${this.model.id}:${this.model.getVersionId()}:${first}:${last}:${this.revision}:${this.scrollLeft}:${this.horizontalOrigin}:${this.scrollOrigin}:${this.accessible ? `${source.scrollTop},${source.scrollLeft}` : ""}`;
 		if (key !== this.rowsKey) {
 			this.rowsKey = key;
 			const fragment = this.root.ownerDocument.createDocumentFragment();
 			this.geometry.clear();
-			for (const row of this.visible) {
+			for (const fullRow of this.visible) {
+				const row = this.accessible
+					? fullRow
+					: this.geometry.window(
+							fullRow,
+							this.scrollLeft,
+							source.clientWidth,
+						);
 				const element = this.root.ownerDocument.createElement("div");
 				element.dataset.line = String(row.line);
 				element.dataset.from = String(row.from);
 				element.className = "editor-visual-row";
 				element.style.minWidth = `${Math.max(0, source.clientWidth - 2 * this.padding - row.indent)}px`;
-				element.style.cssText = `position:absolute;top:${this.padding + row.index * this.lineHeight - (this.accessible ? source.scrollTop : 0)}px;left:${this.padding + row.indent - (this.accessible ? source.scrollLeft : 0)}px;height:${this.lineHeight}px;line-height:${this.lineHeight}px`;
+				element.style.cssText = `position:absolute;top:${this.padding + row.index * this.lineHeight - this.scrollOrigin - (this.accessible ? source.scrollTop : 0)}px;left:${this.padding + row.indent - this.horizontalOrigin - (this.accessible ? source.scrollLeft : 0)}px;height:${this.lineHeight}px;line-height:${this.lineHeight}px`;
 				element.classList.toggle(
 					"editor-active-visual-line",
 					row.line === this.activeLine,
@@ -467,6 +550,15 @@ export class TextRenderer implements Disposable {
 					element.setAttribute("aria-hidden", "true");
 					this.appendText(element, row);
 				}
+				if (row.from !== fullRow.from) {
+					const phase =
+						row.indent % (this.columnWidth * this.options.tabSize);
+					const spacer =
+						this.root.ownerDocument.createElement("span");
+					spacer.style.cssText = `display:inline-block;width:${phase}px`;
+					element.prepend(spacer);
+					element.style.left = `${this.padding + row.indent - phase - this.horizontalOrigin}px`;
+				}
 				fragment.append(element);
 				if (row.kind !== "zone") this.geometry.register(row, element);
 			}
@@ -474,16 +566,25 @@ export class TextRenderer implements Disposable {
 		}
 		this.widest = Math.max(
 			this.widest,
+			...this.visible
+				.filter((row) => row.kind !== "zone")
+				.map((row) => this.padding * 2 + this.geometry.rowWidth(row)),
 			...Array.from(
 				this.rows.children,
 				(element) =>
 					(element as HTMLElement).offsetLeft +
+					this.horizontalOrigin +
 					(element as HTMLElement).offsetWidth +
 					this.padding,
 			),
 		);
-		if (!this.accessible)
-			this.surface.style.width = `${Math.max(source.clientWidth, this.widest)}px`;
+		if (!this.accessible) {
+			this.horizontalScroll.configure(
+				Math.max(source.clientWidth, this.widest),
+				source.clientWidth,
+			);
+			this.surface.style.width = `${this.horizontalScroll.extent}px`;
+		}
 		const glyphs = new Map<
 			number,
 			{ label: string; title: string; color: string }
@@ -497,7 +598,7 @@ export class TextRenderer implements Disposable {
 				});
 		this.gutter.renderRows(
 			this.visible,
-			source.scrollTop,
+			scrollTop,
 			source.clientHeight,
 			this.lineHeight,
 			this.padding,
@@ -544,6 +645,8 @@ export class TextRenderer implements Disposable {
 			selections: this.selections,
 			model: this.model,
 			geometry: this.geometry,
+			originY: this.scrollOrigin,
+			originX: this.horizontalOrigin,
 			lineHeight: this.lineHeight,
 			layout: this.layout,
 			dropOffset: this.dropOffset,
@@ -559,6 +662,7 @@ export class TextRenderer implements Disposable {
 	}
 	private paintOverview(): void {
 		paintOverview({
+			scrollTop: this.scrollTop,
 			viewport: this.viewport,
 			root: this.root,
 			overview: this.overview,
@@ -573,6 +677,7 @@ export class TextRenderer implements Disposable {
 	}
 	private paintSticky(): void {
 		paintStickyHeaders({
+			scrollTop: this.scrollTop,
 			visible: this.visible,
 			padding: this.padding,
 			lineHeight: this.lineHeight,
@@ -588,7 +693,7 @@ export class TextRenderer implements Disposable {
 	}
 	private readonly mapClick = (event: PointerEvent): void => {
 		const rect = this.minimap.getBoundingClientRect();
-		this.viewport.scrollTop =
+		this.scrollTop =
 			((event.clientY - rect.top) / Math.max(1, rect.height)) *
 				this.layout.rowCount *
 				this.lineHeight -
@@ -600,7 +705,7 @@ export class TextRenderer implements Disposable {
 			["ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(event.key)
 		) {
 			event.preventDefault();
-			this.viewport.scrollTop +=
+			this.scrollTop +=
 				(event.key.includes("Up") ? -1 : 1) *
 				(event.key.startsWith("Page")
 					? this.viewport.clientHeight
@@ -638,6 +743,10 @@ export class TextRenderer implements Disposable {
 				!this.visible.some((value) => value.index === row.index);
 			if (widget.node.hidden) continue;
 			const point = this.geometry.point(position);
+			widget.node.hidden =
+				point.x + widget.node.offsetWidth < this.viewport.scrollLeft ||
+				point.x > this.viewport.scrollLeft + this.viewport.clientWidth;
+			if (widget.node.hidden) continue;
 			widget.node.style.left = `${point.x + (widget.placement === "inline" ? -11 : 0)}px`;
 			widget.node.style.top = `${point.y + (widget.placement === "above" ? -widget.node.offsetHeight : widget.placement === "below" ? this.lineHeight : 5)}px`;
 		}
@@ -705,11 +814,12 @@ export class TextRenderer implements Disposable {
 			this.fontsChanged,
 		);
 		this.scroller.removeEventListener("scroll", this.render);
+		this.scroller.removeEventListener("wheel", this.wheel);
 		this.input?.removeEventListener("scroll", this.inputScroll);
 		this.minimap.removeEventListener("pointerdown", this.mapClick);
 		this.minimap.removeEventListener("keydown", this.mapKey);
 		this.subscription?.dispose();
-		this.geometry.clear();
+		this.geometry.dispose();
 		this.rows.replaceChildren();
 		this.gutter.dispose();
 		for (const widget of this.widgets.values()) widget.node.remove();

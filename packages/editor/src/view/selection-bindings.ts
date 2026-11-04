@@ -33,6 +33,12 @@ export function createSelectionController(
 		offsetAtPoint: (x, y) => host.offsetAtPoint(x, y),
 		columnWidth: () => renderer.columnWidth,
 		viewport: () => input.viewport,
+		scrollLeft: () => input.scrollLeft,
+		scrollBy: (x, y) => {
+			input.scrollTop += y;
+			input.scrollLeft += x;
+			renderer.render();
+		},
 		pointAtOffset: (offset, affinity) =>
 			renderer.point(
 				host.model().getPositionAtInputOffset(offset),

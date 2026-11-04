@@ -59,6 +59,14 @@ export class InputSurface implements Disposable {
 		direction: "none",
 	});
 	private viewportValue: HTMLElement | undefined;
+	private scrollCoordinates:
+		| {
+				get(): number;
+				set(value: number): void;
+				getLeft(): number;
+				setLeft(value: number): void;
+		  }
+		| undefined;
 	private composing = false;
 	private accessible = false;
 	private syncing = false;
@@ -72,8 +80,17 @@ export class InputSurface implements Disposable {
 		native.addEventListener("compositionstart", this.compositionStart);
 		native.addEventListener("compositionend", this.compositionEnd);
 	}
-	attachViewport(viewport: HTMLElement): void {
+	attachViewport(
+		viewport: HTMLElement,
+		scrollCoordinates?: {
+			get(): number;
+			set(value: number): void;
+			getLeft(): number;
+			setLeft(value: number): void;
+		},
+	): void {
 		this.viewportValue = viewport;
+		this.scrollCoordinates = scrollCoordinates;
 	}
 	setAccessible(value: boolean): void {
 		this.accessible = value;
@@ -225,16 +242,18 @@ export class InputSurface implements Disposable {
 		return this.native.ownerDocument;
 	}
 	get scrollTop(): number {
-		return this.viewport.scrollTop;
+		return this.scrollCoordinates?.get() ?? this.viewport.scrollTop;
 	}
 	set scrollTop(value: number) {
-		this.viewport.scrollTop = value;
+		if (this.scrollCoordinates) this.scrollCoordinates.set(value);
+		else this.viewport.scrollTop = value;
 	}
 	get scrollLeft(): number {
-		return this.viewport.scrollLeft;
+		return this.scrollCoordinates?.getLeft() ?? this.viewport.scrollLeft;
 	}
 	set scrollLeft(value: number) {
-		this.viewport.scrollLeft = value;
+		if (this.scrollCoordinates) this.scrollCoordinates.setLeft(value);
+		else this.viewport.scrollLeft = value;
 	}
 	get clientHeight(): number {
 		return this.viewport.clientHeight;
@@ -306,6 +325,8 @@ export class InputSurface implements Disposable {
 	dispose(): void {
 		this.disposed = true;
 		this.source = "";
+		this.scrollCoordinates = undefined;
+		this.viewportValue = undefined;
 		this.native.removeEventListener(
 			"beforeinput",
 			this.captureNativeSelection,

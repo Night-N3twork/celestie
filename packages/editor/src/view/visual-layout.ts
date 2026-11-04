@@ -1,5 +1,6 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { TextModel } from "../model/text-model";
+import { longLineLimit } from "./line-metrics";
 export interface FoldRegion {
 	readonly start: number;
 	readonly end: number;
@@ -27,7 +28,7 @@ export function wrapLine(
 	indentMode: EditorOptions["wrapIndent"],
 	extra: (offset: number) => number = () => 0,
 ): Segment[] {
-	if (!Number.isFinite(width) || width <= 0)
+	if (!Number.isFinite(width) || width <= 0 || text.length > longLineLimit)
 		return [{ from: 0, to: text.length, indent: 0 }];
 	const space = measure(" ") || 8,
 		tab = space * tabSize;
@@ -79,6 +80,7 @@ export class VisualLayout {
 	private segments = new Map<number, Segment[]>();
 	private key = "";
 	private total = 0;
+	private uniform = false;
 	private zones = new Set<number>();
 	private hintWidths = new Map<number, number>();
 	private wrapCache = new Map<string, Segment[]>();
@@ -133,6 +135,12 @@ export class VisualLayout {
 			: folds
 					.filter((fold) => fold.collapsed)
 					.sort((a, b) => a.start - b.start);
+		this.uniform =
+			!Number.isFinite(width) && !hidden.length && !this.zones.size;
+		if (this.uniform) {
+			this.total = model.getLineCount();
+			return true;
+		}
 		let cursor = 0,
 			hiddenThrough = 0;
 		for (let line = 1; line <= model.getLineCount(); line++) {
@@ -164,11 +172,19 @@ export class VisualLayout {
 	getSegments(line: number): Segment[] {
 		let segments = this.segments.get(line);
 		if (!segments) {
-			const text = this.model().getLineContent(line),
-				base = this.model().getInputOffsetAt({ line, column: 1 }),
-				withHints = [...this.hintWidths.keys()].some(
-					(offset) => offset >= base && offset <= base + text.length,
-				),
+			const text = this.model().getLineContent(line);
+			if (!Number.isFinite(this.width) || text.length > longLineLimit) {
+				segments = [{ from: 0, to: text.length, indent: 0 }];
+				this.segments.set(line, segments);
+				return segments;
+			}
+			const base = this.model().getInputOffsetAt({ line, column: 1 }),
+				withHints =
+					text.length <= longLineLimit &&
+					[...this.hintWidths.keys()].some(
+						(offset) =>
+							offset >= base && offset <= base + text.length,
+					),
 				key = `${this.width}:${this.options?.tabSize}:${this.options?.wrapIndent}:${this.options?.fontFamily}:${this.options?.fontSize}:${text}`;
 			segments = withHints ? undefined : this.wrapCache.get(key);
 			if (!segments) {
@@ -192,6 +208,16 @@ export class VisualLayout {
 
 	row(index: number): VisualRow {
 		index = Math.max(0, Math.min(this.total - 1, index));
+		if (this.uniform)
+			return {
+				index,
+				line: index + 1,
+				...(this.getSegments(index + 1)[0] ?? {
+					from: 0,
+					to: 0,
+					indent: 0,
+				}),
+			};
 		let low = 0,
 			high = this.starts.length - 1;
 		while (low < high) {
@@ -219,6 +245,14 @@ export class VisualLayout {
 		column: number,
 		affinity: "before" | "after" = "after",
 	): VisualRow {
+		if (this.uniform) {
+			line = Math.max(1, Math.min(this.total, line));
+			return {
+				index: line - 1,
+				line,
+				...(this.getSegments(line)[0] ?? { from: 0, to: 0, indent: 0 }),
+			};
+		}
 		line = Math.max(1, Math.min(this.starts.length, line));
 		while (line > 1 && !this.counts[line - 1]) line--;
 		const segments = this.getSegments(line);

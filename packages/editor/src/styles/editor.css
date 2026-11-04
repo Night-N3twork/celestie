@@ -123,6 +123,7 @@
 	flex: 1;
 	min-width: 0;
 	overflow: auto;
+	overflow-anchor: none;
 	scrollbar-color: #666 #1e1e1e;
 }
 
@@ -364,7 +365,7 @@
 }
 .editor-bounded-renderer .editor-text-surface {
 	position: relative;
-	overflow: visible;
+	overflow: clip;
 }
 .editor-bounded-renderer .editor-text-rows {
 	user-select: none;

@@ -4,6 +4,7 @@ import type { Position } from "../api/types";
 import type { VisibleDecoration } from "../features/decorations";
 import type { SearchMatch } from "../features/search";
 import type { TextModel } from "../model/text-model";
+import { longLineLimit } from "./line-metrics";
 import type { FoldRegion, VisualRow } from "./visual-layout";
 
 interface appendRowState {
@@ -113,6 +114,7 @@ export function appendRow(
 				boundaries.add(column + 1);
 			}
 	const hints =
+		text.length <= longLineLimit &&
 		state.options.inlayHints &&
 		!state.accessible &&
 		state.assistanceVersion === state.model.getVersionId()

@@ -227,16 +227,14 @@ export function graphemeOffset(
 	const lineEnd = end < 0 ? text.length : end;
 	if (direction > 0 && offset === lineEnd)
 		return Math.min(text.length, offset + 1);
-	let previous = start;
-	for (const segment of graphemeSegments.segment(
-		text.slice(start, lineEnd),
-	)) {
-		const position = start + segment.index;
-		if (direction < 0 && position >= offset) return previous;
-		if (direction > 0 && position > offset) return position;
-		previous = position;
-	}
-	return direction < 0 ? previous : lineEnd;
+	const segment = graphemeSegments
+		.segment(text.slice(start, lineEnd))
+		.containing(offset - start - (direction < 0 ? 1 : 0));
+	return segment
+		? start + segment.index + (direction > 0 ? segment.segment.length : 0)
+		: direction < 0
+			? start
+			: lineEnd;
 }
 
 export function visualColumn(text: string, tabSize: number): number {

@@ -1,5 +1,6 @@
 import type { Position } from "../api/types";
 import type { TextModel } from "../model/text-model";
+import { LineMetrics, longLineLimit } from "./line-metrics";
 import type { VisualLayout, VisualRow } from "./visual-layout";
 
 interface RowGeometry {
@@ -22,10 +23,42 @@ export class TextGeometry {
 	private tabSize = 4;
 	private font = "16px monospace";
 	private widths = new Map<string, number>();
+	private metrics = new Map<number, LineMetrics>();
+	originY = 0;
+	originX = 0;
+	private lineMetrics(line: number): LineMetrics {
+		const text = this.model().getLineContent(line);
+		let metrics = this.metrics.get(line);
+		if (!metrics || metrics.text !== text) {
+			metrics = new LineMetrics(text, (value, initial) =>
+				this.measure(value, initial),
+			);
+			if (this.metrics.size >= 16) this.metrics.clear();
+			this.metrics.set(line, metrics);
+		}
+		return metrics;
+	}
+	window(row: VisualRow, left: number, width: number): VisualRow {
+		if (row.kind || row.to - row.from <= longLineLimit) return row;
+		const metrics = this.lineMetrics(row.line),
+			from = metrics.offsetAt(Math.max(0, left - this.padding - 256)),
+			to = metrics.offsetAt(left + width + 256);
+		return { ...row, from, to, indent: metrics.xAt(from) };
+	}
+	rowWidth(row: VisualRow): number {
+		return row.to - row.from > longLineLimit
+			? this.lineMetrics(row.line).width
+			: this.measure(
+					this.model()
+						.getLineContent(row.line)
+						.slice(row.from, row.to),
+				) + row.indent;
+	}
 	resetMeasurements(): void {
 		const style = getComputedStyle(this.viewport);
 		this.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
 		this.widths.clear();
+		this.metrics.clear();
 	}
 	lineHeight = 24;
 	constructor(
@@ -41,6 +74,11 @@ export class TextGeometry {
 	}
 	clear(): void {
 		this.rows.clear();
+	}
+	dispose(): void {
+		this.clear();
+		this.metrics.clear();
+		this.widths.clear();
 	}
 	hasLine(line: number): boolean {
 		return [...this.rows.values()].some((value) => value.row.line === line);
@@ -108,7 +146,11 @@ export class TextGeometry {
 			),
 			row = this.rows.get(segment.index),
 			origin = this.surface.getBoundingClientRect();
-		if (row) {
+		if (
+			row &&
+			position.column - 1 >= row.row.from &&
+			position.column - 1 <= row.row.to
+		) {
 			const column = Math.max(
 					row.row.from,
 					Math.min(row.row.to, position.column - 1),
@@ -126,21 +168,26 @@ export class TextGeometry {
 			x:
 				this.padding +
 				segment.indent +
-				this.measure(text.slice(segment.from, position.column - 1)),
-			y: this.padding + segment.index * this.lineHeight,
+				(text.length > longLineLimit
+					? this.lineMetrics(segment.line).xAt(position.column - 1)
+					: this.measure(
+							text.slice(segment.from, position.column - 1),
+						)) -
+				this.originX,
+			y: this.padding + segment.index * this.lineHeight - this.originY,
 			height: this.lineHeight,
 		};
 	}
 	spaceWidth(): number {
 		return this.measure(" ");
 	}
-	measure(text: string): number {
-		const cached = this.widths.get(text);
+	measure(text: string, initial = 0): number {
+		const cached = initial === 0 ? this.widths.get(text) : undefined;
 		if (cached !== undefined) return cached;
 		if (this.canvas) this.canvas.font = this.font;
 		const space = this.canvas?.measureText(" ").width ?? 8,
 			tab = space * this.tabSize;
-		let width = 0;
+		let width = initial;
 		const runs = text.split("\t");
 		for (let i = 0; i < runs.length; i++) {
 			const run = runs[i] ?? "";
@@ -148,7 +195,8 @@ export class TextGeometry {
 			if (i < runs.length - 1)
 				width = (Math.floor(width / tab) + 1) * tab;
 		}
-		if (text.length < 128) {
+		width -= initial;
+		if (initial === 0 && text.length < 128) {
 			if (this.widths.size >= 20000) this.widths.clear();
 			this.widths.set(text, width);
 		}
@@ -173,11 +221,25 @@ export class TextGeometry {
 			text = model.getLineContent(segment.line),
 			row = this.rows.get(segment.index),
 			origin = this.surface.getBoundingClientRect();
+		const mounted = row?.element.getBoundingClientRect();
+		if (
+			text.length > longLineLimit &&
+			(!mounted ||
+				x < mounted.left - origin.left + this.originX ||
+				x > mounted.right - origin.left + this.originX)
+		)
+			return model.getInputOffsetAt({
+				line: segment.line,
+				column:
+					this.lineMetrics(segment.line).offsetAt(x - this.padding) +
+					1,
+			});
+		const measured = row?.row ?? segment;
 		const boundaries = [
-			segment.from,
+			measured.from,
 			...Array.from(
-				this.segments.segment(text.slice(segment.from, segment.to)),
-				(unit) => segment.from + unit.index + unit.segment.length,
+				this.segments.segment(text.slice(measured.from, measured.to)),
+				(unit) => measured.from + unit.index + unit.segment.length,
 			),
 		];
 		const coordinate = (offset: number) => {
@@ -189,7 +251,8 @@ export class TextGeometry {
 				).getClientRects()[0];
 				return (
 					(rect?.left ?? row.element.getBoundingClientRect().left) -
-					origin.left
+					origin.left +
+					this.originX
 				);
 			}
 			return (
@@ -199,7 +262,11 @@ export class TextGeometry {
 			);
 		};
 		let offset = segment.from;
-		if (/[\u0590-\u08ff\ufb1d-\ufeff]/u.test(text)) {
+		if (
+			/[\u0590-\u08ff\ufb1d-\ufeff]/u.test(
+				text.slice(measured.from, measured.to),
+			)
+		) {
 			let distance = Infinity;
 			for (const boundary of boundaries) {
 				const next = Math.abs(coordinate(boundary) - x);

@@ -19,6 +19,8 @@ interface SelectionHost {
 	columnWidth(): number;
 	isComposing(): boolean;
 	viewport(): HTMLElement;
+	scrollBy(x: number, y: number): void;
+	scrollLeft(): number;
 	isBounded(): boolean;
 	pointAtOffset(offset: number, affinity?: TextSelection["affinity"]): number;
 	offsetAtLineX(line: number, x: number): number;
@@ -286,6 +288,17 @@ export class SelectionController implements Disposable {
 			return;
 		}
 		const gutter = event.target.closest(".editor-gutter");
+		const viewport = this.host.viewport();
+		if (!gutter && viewport.contains(event.target)) {
+			const bounds = viewport.getBoundingClientRect();
+			if (
+				event.clientX >=
+					bounds.left + viewport.clientLeft + viewport.clientWidth ||
+				event.clientY >=
+					bounds.top + viewport.clientTop + viewport.clientHeight
+			)
+				return;
+		}
 		const bounded = this.host.isBounded();
 		if (
 			event.target !== this.input &&
@@ -427,7 +440,7 @@ export class SelectionController implements Disposable {
 			0,
 			x -
 				this.host.viewport().getBoundingClientRect().left +
-				this.host.viewport().scrollLeft,
+				this.host.scrollLeft(),
 		);
 	}
 
@@ -515,10 +528,10 @@ export class SelectionController implements Disposable {
 					? drag.x - bounds.right
 					: 0;
 		if (dy || dx) {
-			this.host.viewport().scrollTop +=
-				Math.sign(dy) * Math.min(48, Math.abs(dy) / 3 + 4);
-			this.host.viewport().scrollLeft +=
-				Math.sign(dx) * Math.min(48, Math.abs(dx) / 3 + 4);
+			this.host.scrollBy(
+				Math.sign(dx) * Math.min(48, Math.abs(dx) / 3 + 4),
+				Math.sign(dy) * Math.min(48, Math.abs(dy) / 3 + 4),
+			);
 			this.updateDrag();
 		}
 		this.animation = requestAnimationFrame(this.tick);

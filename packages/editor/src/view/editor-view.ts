@@ -334,9 +334,27 @@ export class EditorView implements Disposable {
 			this.renderer,
 		);
 		this.renderer.configure(this.options);
-		this.element.attachViewport(this.renderer.viewport);
+		this.element.attachViewport(this.renderer.viewport, {
+			get: () => this.renderer.scrollTop,
+			getLeft: () => this.renderer.scrollLeft,
+			setLeft: (value) => {
+				this.renderer.scrollLeft = value;
+			},
+			set: (value) => {
+				this.renderer.scrollTop = value;
+			},
+		});
 		this.renderer.setAccessible(this.options.accessibilitySupport === "on");
-		this.element.attachViewport(this.renderer.viewport);
+		this.element.attachViewport(this.renderer.viewport, {
+			get: () => this.renderer.scrollTop,
+			getLeft: () => this.renderer.scrollLeft,
+			setLeft: (value) => {
+				this.renderer.scrollLeft = value;
+			},
+			set: (value) => {
+				this.renderer.scrollTop = value;
+			},
+		});
 		this.element.setAccessible(this.options.accessibilitySupport === "on");
 		this.frame.classList.toggle(
 			"editor-bounded-input",
@@ -976,7 +994,16 @@ export class EditorView implements Disposable {
 		this.options = next;
 		this.renderer.configure(next);
 		this.renderer.setAccessible(next.accessibilitySupport === "on");
-		this.element.attachViewport(this.renderer.viewport);
+		this.element.attachViewport(this.renderer.viewport, {
+			get: () => this.renderer.scrollTop,
+			getLeft: () => this.renderer.scrollLeft,
+			setLeft: (value) => {
+				this.renderer.scrollLeft = value;
+			},
+			set: (value) => {
+				this.renderer.scrollTop = value;
+			},
+		});
 		this.element.setAccessible(next.accessibilitySupport === "on");
 		this.renderer.restoreAnchor(anchor);
 		this.frame.classList.toggle(

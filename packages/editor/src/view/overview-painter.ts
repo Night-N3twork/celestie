@@ -4,6 +4,7 @@ import type { TextModel } from "../model/text-model";
 import type { FoldRegion, VisualLayout, VisualRow } from "./visual-layout";
 
 interface paintOverviewState {
+	readonly scrollTop: number;
 	readonly viewport: HTMLElement;
 	readonly root: HTMLElement;
 	readonly overview: HTMLElement;
@@ -65,13 +66,14 @@ export function paintOverview(state: paintOverviewState): void {
 	const total = state.layout.rowCount * state.lineHeight;
 	context.fillRect(
 		0,
-		(state.viewport.scrollTop / total) * height,
+		(state.scrollTop / total) * height,
 		width,
 		Math.max(6, (height / total) * height),
 	);
 }
 
 interface paintStickyHeadersState {
+	readonly scrollTop: number;
 	readonly visible: readonly VisualRow[];
 	readonly padding: number;
 	readonly lineHeight: number;
@@ -88,8 +90,7 @@ export function paintStickyHeaders(state: paintStickyHeadersState): void {
 	const first =
 		state.visible.find(
 			(row) =>
-				state.padding + row.index * state.lineHeight >=
-				state.viewport.scrollTop,
+				state.padding + row.index * state.lineHeight >= state.scrollTop,
 		)?.line ?? 1;
 	const ancestors =
 		state.options.stickyScroll && !state.accessible
@@ -101,7 +102,9 @@ export function paintStickyHeaders(state: paintStickyHeadersState): void {
 	for (const fold of ancestors) {
 		const button = state.root.ownerDocument.createElement("button");
 		button.type = "button";
-		button.textContent = state.model.getLineContent(fold.start);
+		button.textContent = state.model
+			.getLineContent(fold.start)
+			.slice(0, 2000);
 		button.onclick = () => state.callbacks.onSelectLine?.(fold.start);
 		fragment.append(button);
 	}
