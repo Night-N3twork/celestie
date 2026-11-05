@@ -1,6 +1,80 @@
-import { getLanguage, type LanguageServiceSettings } from "../api/languages";
+import {
+	getLanguage,
+	getLanguages,
+	languageRegistryVersion,
+} from "../api/languages";
 import type { Disposable } from "../api/types";
 import type { TextModel } from "../model/text-model";
+import type {
+	EmbeddedLanguage,
+	LanguageProfile,
+	SerializedPattern,
+} from "../workers/language-protocol";
+import { getLanguageConfiguration, wordExpression } from "./configuration";
+
+const serialized = (pattern: RegExp): SerializedPattern => ({
+	source: pattern.source,
+	flags: pattern.flags.replace(/[gy]/g, ""),
+});
+
+export function languageProfile(languageId: string): LanguageProfile {
+	const definition = getLanguage(languageId),
+		configuration = getLanguageConfiguration(languageId),
+		markers = configuration.folding?.markers;
+	return {
+		...(definition?.grammar ? { grammar: definition.grammar } : {}),
+		...(configuration.lineComment
+			? { lineComment: configuration.lineComment }
+			: {}),
+		...(configuration.blockComment
+			? { blockComment: configuration.blockComment }
+			: {}),
+		quotes: configuration.quotes,
+		...(configuration.templateQuote
+			? { templateQuote: configuration.templateQuote }
+			: {}),
+		colorizedBrackets:
+			configuration.colorizedBracketPairs ?? configuration.brackets,
+		keywords: definition?.keywords ?? [],
+		word: serialized(wordExpression(configuration)),
+		...(configuration.folding
+			? {
+					folding: {
+						offSide: configuration.folding.offSide === true,
+						...(markers
+							? {
+									markers: {
+										start: serialized(markers.start),
+										end: serialized(markers.end),
+									},
+								}
+							: {}),
+					},
+				}
+			: {}),
+	};
+}
+
+export function embeddedLanguages(): EmbeddedLanguage[] {
+	return getLanguages().flatMap((definition) =>
+		definition.grammar
+			? [
+					{
+						grammar: definition.grammar,
+						names: [
+							definition.id,
+							...(definition.aliases ?? []),
+							...definition.extensions
+								.filter((extension) =>
+									/^\.[^.]+$/.test(extension),
+								)
+								.map((extension) => extension.slice(1)),
+						].map((name) => name.toLowerCase()),
+					},
+				]
+			: [],
+	);
+}
 
 interface Pending {
 	resolve(value: unknown): void;
@@ -11,32 +85,12 @@ interface Pending {
 class LanguageEngine {
 	private worker: Worker | undefined;
 	private sequence = 0;
-	private settings: LanguageServiceSettings = {};
-	private configurationError = "";
-	configure(settings: LanguageServiceSettings): void {
-		this.settings = structuredClone(settings);
-		this.configurationError = "";
-		this.worker?.postMessage({
-			id: 0,
-			method: "configure",
-			settings: this.settings,
-		});
-	}
+	private registryVersion = -1;
 	private readonly pending = new Map<number, Pending>();
 	private readonly models = new Map<
 		TextModel,
 		{ references: number; subscriptions: Disposable[] }
 	>();
-	private filename(model: TextModel): string {
-		const extension =
-			model.getLanguageId() === "javascript"
-				? ".js"
-				: model.getLanguageId().startsWith("json")
-					? ".json"
-					: ".ts";
-		const path = model.uri.path || `/${model.id}${extension}`;
-		return `/workspace${path.startsWith("/") ? path : `/${path}`}`;
-	}
 	private ensure(): Worker {
 		if (this.worker) return this.worker;
 		const worker = new Worker(
@@ -44,19 +98,13 @@ class LanguageEngine {
 			{ type: "module" },
 		);
 		this.worker = worker;
-		worker.postMessage({
-			id: 0,
-			method: "configure",
-			settings: this.settings,
-		});
+		this.registryVersion = -1;
 		worker.onmessage = (event) => {
 			const message = event.data as {
 				id: number;
 				result?: unknown;
 				error?: string;
 			};
-			if (message.id === 0 && message.error)
-				this.configurationError = message.error;
 			const pending = this.pending.get(message.id);
 			if (!pending) return;
 			this.pending.delete(message.id);
@@ -84,7 +132,17 @@ class LanguageEngine {
 		return worker;
 	}
 	private sync(model: TextModel): void {
-		this.worker?.postMessage({
+		const worker = this.worker;
+		if (!worker) return;
+		if (this.registryVersion !== languageRegistryVersion()) {
+			this.registryVersion = languageRegistryVersion();
+			worker.postMessage({
+				id: 0,
+				method: "languages",
+				languages: embeddedLanguages(),
+			});
+		}
+		worker.postMessage({
 			id: 0,
 			method: "sync",
 			document: {
@@ -93,8 +151,7 @@ class LanguageEngine {
 				text: model.getValue({ eol: "\n" }),
 				version: model.getVersionId(),
 				language: model.getLanguageId(),
-				keywords: getLanguage(model.getLanguageId())?.keywords ?? [],
-				file: this.filename(model),
+				profile: languageProfile(model.getLanguageId()),
 			},
 		});
 	}
@@ -153,8 +210,6 @@ class LanguageEngine {
 		signal: AbortSignal,
 		extra: Record<string, unknown> = {},
 	): Promise<T> {
-		if (this.configurationError)
-			return Promise.reject(new Error(this.configurationError));
 		if (signal.aborted)
 			return Promise.reject(new DOMException("Cancelled", "AbortError"));
 		if (this.pending.size >= 32)
@@ -186,27 +241,9 @@ class LanguageEngine {
 				method,
 				documentId: model.id,
 				offset,
-				options: model.getOptions(),
 				...extra,
 			});
 		});
 	}
 }
 export const languageEngine = new LanguageEngine();
-export class LanguageWorkspace implements Disposable {
-	private readonly attachments: Disposable[] = [];
-	constructor(models: readonly TextModel[]) {
-		for (const model of models)
-			this.attachments.push(languageEngine.attach(model));
-	}
-	dispose(): void {
-		for (const attachment of this.attachments.splice(0))
-			attachment.dispose();
-	}
-}
-
-export function configureLanguageServices(
-	settings: LanguageServiceSettings,
-): void {
-	languageEngine.configure(settings);
-}

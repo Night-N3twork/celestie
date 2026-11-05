@@ -18,6 +18,7 @@ interface Host {
 		copy: boolean,
 	): void;
 	isComposing(): boolean;
+	wordPattern(): RegExp;
 }
 export function createSelectionController(
 	input: InputSurface,
@@ -58,6 +59,7 @@ export function createSelectionController(
 				Math.floor(input.clientHeight / host.options().lineHeight) - 1,
 			),
 		toggleFold: (line) => host.toggleFold(line),
+		wordPattern: () => host.wordPattern(),
 		visualIndex: (offset) => {
 			const position = host.model().getPositionAtInputOffset(offset);
 			return renderer.layout.position(position.line, position.column)

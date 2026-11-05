@@ -1,6 +1,7 @@
 import { defaultViewOptions, type EditorOptions } from "../api/editor-options";
 import type { InlayHint, Token } from "../api/languages";
 import type { Disposable, Position, TextSelection } from "../api/types";
+import type { SyntaxPalette } from "../features/clipboard-payload";
 import type { VisibleDecoration } from "../features/decorations";
 import type { SearchMatch } from "../features/search";
 import { applyTheme } from "../features/themes";
@@ -342,6 +343,37 @@ export class TextRenderer implements Disposable {
 		this.tokens = tokens;
 		this.revision++;
 		this.render();
+	}
+	syntaxPalette(): SyntaxPalette {
+		const view = this.root.ownerDocument.defaultView,
+			style = view?.getComputedStyle(this.root);
+		const foreground =
+			style?.getPropertyValue("--editor-foreground").trim() ||
+			style?.color ||
+			"";
+		const probe = this.root.ownerDocument.createElement("span");
+		this.root.append(probe);
+		const colors = new Map<string, string>();
+		for (const { kind } of this.tokens)
+			if (!colors.has(kind) && /^[a-z0-9-]+$/.test(kind)) {
+				probe.className = `editor-token-${kind}`;
+				colors.set(kind, view?.getComputedStyle(probe).color ?? "");
+			}
+		probe.className = "";
+		const plain = view?.getComputedStyle(probe).color;
+		probe.remove();
+		return {
+			tokens: this.tokens,
+			background:
+				style?.getPropertyValue("--editor-background").trim() ||
+				style?.backgroundColor ||
+				"",
+			foreground,
+			color: (kind) => {
+				const color = colors.get(kind);
+				return color && color !== plain ? color : undefined;
+			},
+		};
 	}
 	setAssistance(
 		hints: readonly InlayHint[],

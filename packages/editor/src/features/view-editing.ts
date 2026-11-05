@@ -1,6 +1,9 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { TextSelection } from "../api/types";
-import type { LanguageConfiguration } from "../languages/configuration";
+import {
+	type LanguageConfiguration,
+	wordExpression,
+} from "../languages/configuration";
 import type { BracketAnalysis } from "./bracket-analysis";
 import { planBlockComment, planLineComment } from "./comments";
 import {
@@ -51,12 +54,22 @@ export class ViewEditing {
 			].includes(command)
 		) {
 			this.applyPerLine((selection) =>
-				planTextCommand(this.host.text(), selection, command),
+				planTextCommand(
+					this.host.text(),
+					selection,
+					command,
+					wordExpression(this.host.language()),
+				),
 			);
 			return;
 		}
 		this.applyPerSelection((selection) =>
-			planTextCommand(this.host.text(), selection, command),
+			planTextCommand(
+				this.host.text(),
+				selection,
+				command,
+				wordExpression(this.host.language()),
+			),
 		);
 	}
 	moveWord(
@@ -71,6 +84,7 @@ export class ViewEditing {
 				direction,
 				action,
 				subword,
+				wordExpression(this.host.language()),
 			),
 		);
 	}
@@ -124,6 +138,7 @@ export class ViewEditing {
 						this.host.text(),
 						selection,
 						this.host.getAnalysis(),
+						wordExpression(this.host.language()),
 					)[0];
 					return next ? { edits: [], selection: next } : undefined;
 				});
@@ -143,6 +158,7 @@ export class ViewEditing {
 					this.host.text(),
 					selection,
 					this.host.getAnalysis(),
+					wordExpression(this.host.language()),
 				)[0];
 		if (!next) return;
 		if (!shrink) this.selectionHistory.push(selection);

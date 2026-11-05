@@ -13,6 +13,7 @@ import { getInputLineRange, getInputPosition } from "./input";
 
 interface SelectionHost {
 	getText(): string;
+	wordPattern(): RegExp;
 	getSelections(): readonly TextSelection[];
 	setSelections(values: readonly TextSelection[], reveal?: boolean): void;
 	offsetAtPoint(x: number, y: number): number;
@@ -356,7 +357,11 @@ export class SelectionController implements Disposable {
 				y: event.clientY,
 				count,
 			};
-			const word = wordRange(this.host.getText(), offset);
+			const word = wordRange(
+				this.host.getText(),
+				offset,
+				this.host.wordPattern(),
+			);
 			const primary = this.host.getSelections()[0] ?? caret(0);
 			this.drag = {
 				x: event.clientX,
@@ -460,7 +465,7 @@ export class SelectionController implements Disposable {
 			return;
 		}
 		if (drag.mode === "word") {
-			const range = wordRange(text, end);
+			const range = wordRange(text, end, this.host.wordPattern());
 			this.host.setSelections([
 				end < drag.start
 					? directed(drag.anchorEnd, range.from)

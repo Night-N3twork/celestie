@@ -1,13 +1,13 @@
+import type { Token } from "../api/languages";
 import type { TextSelection } from "../api/types";
-import type { LanguageConfiguration } from "../languages/configuration";
 import { normalizeInputText } from "../view/input";
-import { BracketAnalysis } from "./bracket-analysis";
 
 interface PayloadHost {
 	getText(): string;
 	getSelection(): TextSelection;
 	getSelections(): readonly TextSelection[];
 	getTabSize(): number;
+	syntaxPalette(): SyntaxPalette | undefined;
 }
 export const selectionsMime = "application/x-celestie-editor-selections";
 export function readSelectionParts(
@@ -45,41 +45,58 @@ const escapeHtml = (text: string): string =>
 			})[unit] ?? unit,
 	);
 
-export function richCopyHtml(
-	text: string,
-	language: LanguageConfiguration,
-	tabSize: number,
-): string {
-	const analysis = new BracketAnalysis(text, language);
-	let html = "";
-	for (const match of text.matchAll(
-		/[\p{ID_Continue}$]+|\s+|[^\p{ID_Continue}$\s]+/gu,
-	)) {
-		const context = analysis.contextAt(match.index + 1);
-		const color = context.includes("comment")
-			? "#6a9955"
-			: context === "string" || context === "template"
-				? "#ce9178"
-				: context === "regex"
-					? "#d16969"
-					: /^(const|let|var|function|return|if|else|class|interface|type|import|export|from|new|async|await|true|false|null|undefined|throw|try|catch|for|while|switch|case|break|extends|implements|public|private|readonly|number|string|boolean|void)$/.test(
-								match[0],
-							)
-						? "#569cd6"
-						: /^\d/.test(match[0])
-							? "#b5cea8"
-							: "";
-		html += color
-			? `<span style="color:${color}">${escapeHtml(match[0])}</span>`
-			: escapeHtml(match[0]);
-	}
-	return `<pre style="white-space:pre;tab-size:${tabSize};font-family:monospace;background:#1e1e1e;color:#d4d4d4">${html}</pre>`;
+export interface SyntaxPalette {
+	readonly tokens: readonly Token[];
+	readonly background: string;
+	readonly foreground: string;
+	color(kind: string): string | undefined;
 }
 
-export function createClipboardPayload(
-	host: PayloadHost,
-	language: LanguageConfiguration,
-) {
+export function highlightedHtml(
+	text: string,
+	start: number,
+	palette: SyntaxPalette | undefined,
+): string {
+	if (!palette) return escapeHtml(text);
+	const { tokens } = palette,
+		end = start + text.length;
+	let low = 0,
+		high = tokens.length;
+	while (low < high) {
+		const mid = (low + high) >>> 1;
+		if ((tokens[mid]?.to ?? 0) <= start) low = mid + 1;
+		else high = mid;
+	}
+	let html = "",
+		position = start;
+	for (let index = low; index < tokens.length; index++) {
+		const token = tokens[index];
+		if (!token || token.from >= end) break;
+		const from = Math.max(token.from, position),
+			to = Math.min(token.to, end);
+		if (to <= from) continue;
+		const color = palette.color(token.kind);
+		html += escapeHtml(text.slice(position - start, from - start));
+		const slice = escapeHtml(text.slice(from - start, to - start));
+		html += color ? `<span style="color:${color}">${slice}</span>` : slice;
+		position = to;
+	}
+	return html + escapeHtml(text.slice(position - start));
+}
+
+export function richCopyHtml(
+	body: string,
+	palette: SyntaxPalette | undefined,
+	tabSize: number,
+): string {
+	const colors = palette
+		? `;background:${palette.background};color:${palette.foreground}`
+		: "";
+	return `<pre style="white-space:pre;tab-size:${tabSize};font-family:monospace${colors}">${body}</pre>`;
+}
+
+export function createClipboardPayload(host: PayloadHost) {
+	const palette = host.syntaxPalette();
 	const text = host.getText();
 	const selection = host.getSelection();
 	const wholeLine = selection.start === selection.end;
@@ -100,7 +117,11 @@ export function createClipboardPayload(
 		.slice()
 		.sort((a, b) => a.start - b.start)
 		.map((value) => {
-			if (!allWholeLine) return text.slice(value.start, value.end);
+			if (!allWholeLine)
+				return {
+					start: value.start,
+					text: text.slice(value.start, value.end),
+				};
 			const start =
 				value.start === 0
 					? 0
@@ -111,30 +132,39 @@ export function createClipboardPayload(
 				text: `${text.slice(start, finish < 0 ? text.length : finish)}\n`,
 			};
 		});
+	const unique = [
+		...new Map(pieces.map((piece) => [piece.start, piece])).values(),
+	];
+	const single = {
+		start: from,
+		text: text.slice(from, to) + (wholeLine && newline === -1 ? "\n" : ""),
+	};
 	const plain =
 		selections.length > 1
 			? allWholeLine
-				? [
-						...new Map(
-							pieces.map((piece) =>
-								typeof piece === "string"
-									? [0, piece]
-									: [piece.start, piece.text],
-							),
-						).values(),
-					].join("")
-				: pieces.join("\n")
-			: text.slice(from, to) + (wholeLine && newline === -1 ? "\n" : "");
-	const parts =
+				? unique.map((piece) => piece.text).join("")
+				: pieces.map((piece) => piece.text).join("\n")
+			: single.text;
+	const body =
 		selections.length > 1
-			? pieces.map((piece) =>
-					typeof piece === "string" ? piece : piece.text,
-				)
-			: undefined;
+			? allWholeLine
+				? unique
+						.map((piece) =>
+							highlightedHtml(piece.text, piece.start, palette),
+						)
+						.join("")
+				: pieces
+						.map((piece) =>
+							highlightedHtml(piece.text, piece.start, palette),
+						)
+						.join("\n")
+			: highlightedHtml(single.text, single.start, palette);
+	const parts =
+		selections.length > 1 ? pieces.map((piece) => piece.text) : undefined;
 	return {
 		plain,
 		parts,
-		html: richCopyHtml(plain, language, host.getTabSize()).replace(
+		html: richCopyHtml(body, palette, host.getTabSize()).replace(
 			"<pre",
 			`<pre${allWholeLine ? ' data-celestie-whole-line="true"' : ""}${parts ? ` data-celestie-selections="${encodeURIComponent(JSON.stringify(parts))}"` : ""}`,
 		),

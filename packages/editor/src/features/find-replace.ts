@@ -23,6 +23,7 @@ interface FindReplaceHost {
 	canReplace(): boolean;
 	onOpen(): void;
 	getText(): string;
+	wordPattern(): RegExp;
 	getSelection(): TextSelection;
 	selectMatch(match: SearchMatch): void;
 	replace(edits: readonly SearchEdit[], expectedText: string): void;
@@ -286,6 +287,7 @@ export class FindReplace implements Disposable {
 		const options: SearchOptions = {
 			matchCase: this.matchCase.checked,
 			wholeWord: this.wholeWord.checked,
+			wordPattern: this.host.wordPattern(),
 			...(this.inSelection.checked && this.scope
 				? { scope: this.scope }
 				: {}),
@@ -293,7 +295,7 @@ export class FindReplace implements Disposable {
 		const key = JSON.stringify([
 			text,
 			this.query.value,
-			options,
+			{ ...options, wordPattern: options.wordPattern?.source },
 			this.regexMode.checked,
 		]);
 		if (this.regexMode.checked && this.query.value) {

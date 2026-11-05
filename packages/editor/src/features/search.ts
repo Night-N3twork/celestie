@@ -1,4 +1,5 @@
 import type { Range } from "../api/types";
+import { isWholeWord } from "../languages/word-pattern";
 import { TextBuffer } from "../model/text-buffer";
 
 export interface SearchMatch {
@@ -13,16 +14,7 @@ export interface SearchOptions {
 	readonly matchCase?: boolean;
 	readonly wholeWord?: boolean;
 	readonly scope?: { readonly from: number; readonly to: number };
-}
-
-const wordCharacter = /[\p{ID_Continue}$]/u;
-
-function characterBefore(text: string, offset: number): string {
-	const last = text.charCodeAt(offset - 1);
-	return text.slice(
-		offset - (last >= 0xdc00 && last <= 0xdfff ? 2 : 1),
-		offset,
-	);
+	readonly wordPattern?: RegExp;
 }
 
 export function findLiteralMatches(
@@ -65,10 +57,7 @@ export function findPatternMatches(
 		if (to > scope.to) break;
 		if (
 			options.wholeWord &&
-			(wordCharacter.test(characterBefore(text, from)) ||
-				wordCharacter.test(
-					String.fromCodePoint(text.codePointAt(to) ?? 32),
-				))
+			!isWholeWord(text, from, to, options.wordPattern)
 		)
 			continue;
 		payloadSize += hit.reduce(

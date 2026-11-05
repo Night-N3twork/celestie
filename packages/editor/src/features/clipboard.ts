@@ -1,10 +1,11 @@
 import type { Disposable, TextSelection } from "../api/types";
-import type { LanguageConfiguration } from "../languages/configuration";
 import { normalizeInputText } from "../view/input";
 import {
 	createClipboardPayload,
+	highlightedHtml,
 	readSelectionParts,
 	richCopyHtml,
+	type SyntaxPalette,
 	selectionsMime,
 	wholeLineMime,
 } from "./clipboard-payload";
@@ -17,7 +18,10 @@ import {
 	replacementPlan,
 } from "./selections";
 
-export { richCopyHtml } from "./clipboard-payload";
+export {
+	richCopyHtml,
+	type SyntaxPalette,
+} from "./clipboard-payload";
 
 export interface TransferContext {
 	readonly text: string;
@@ -40,6 +44,7 @@ interface ClipboardHost {
 	announce(message: string): void;
 	offsetAtPoint(x: number, y: number): number;
 	getTabSize(): number;
+	syntaxPalette(): SyntaxPalette | undefined;
 }
 
 export class EditorClipboard implements Disposable {
@@ -53,7 +58,6 @@ export class EditorClipboard implements Disposable {
 	constructor(
 		private readonly input: HTMLTextAreaElement,
 		private readonly host: ClipboardHost,
-		private language: LanguageConfiguration,
 		private readonly target: HTMLElement = input,
 	) {
 		target.addEventListener("copy", this.copyEvent);
@@ -64,10 +68,6 @@ export class EditorClipboard implements Disposable {
 		target.addEventListener("dragover", this.dragOver);
 		target.addEventListener("drop", this.drop);
 		target.addEventListener("beforeinput", this.beforeInput);
-	}
-
-	setLanguageConfiguration(language: LanguageConfiguration): void {
-		this.language = language;
 	}
 
 	registerPasteProvider(provider: TransferProvider): Disposable {
@@ -104,7 +104,7 @@ export class EditorClipboard implements Disposable {
 	}
 
 	private copyPayload() {
-		return createClipboardPayload(this.host, this.language);
+		return createClipboardPayload(this.host);
 	}
 
 	private sameDocument(text: string, selection: TextSelection): boolean {
@@ -418,7 +418,15 @@ export class EditorClipboard implements Disposable {
 		event.dataTransfer.setData("text/plain", plain);
 		event.dataTransfer.setData(
 			"text/html",
-			richCopyHtml(plain, this.language, this.host.getTabSize()),
+			richCopyHtml(
+				highlightedHtml(
+					plain,
+					selection.start,
+					this.host.syntaxPalette(),
+				),
+				this.host.syntaxPalette(),
+				this.host.getTabSize(),
+			),
 		);
 		event.dataTransfer.effectAllowed = this.host.isReadOnly()
 			? "copy"

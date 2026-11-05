@@ -13,7 +13,10 @@ import {
 } from "../features/keyboard-shortcuts";
 import type { LineCommand } from "../features/line-commands";
 import { caret, type MultiEditingPlan } from "../features/selections";
-import type { LanguageConfiguration } from "../languages/configuration";
+import {
+	type LanguageConfiguration,
+	wordExpression,
+} from "../languages/configuration";
 import { getInputPosition } from "./input";
 import type { InputSurface } from "./input-surface";
 import type { TextRenderer } from "./text-renderer";
@@ -45,6 +48,7 @@ interface Host {
 	toggleLineComment(): void;
 	toggleBlockComment(): void;
 	runLineCommand(command: LineCommand): void;
+	language(): LanguageConfiguration;
 }
 export class ViewServices implements Disposable {
 	readonly shortcuts: KeyboardShortcuts;
@@ -58,7 +62,6 @@ export class ViewServices implements Disposable {
 		private readonly frame: HTMLElement,
 		private readonly renderer: TextRenderer,
 		readonly commands: CommandRegistry,
-		language: LanguageConfiguration,
 	) {
 		this.shortcuts = new KeyboardShortcuts(this.element.native, {
 			indent: () => this.host.indent(),
@@ -95,6 +98,7 @@ export class ViewServices implements Disposable {
 				trackSelection: (selection) =>
 					this.host.trackSelection(selection),
 				getText: () => this.element.value,
+				wordPattern: () => wordExpression(this.host.language()),
 				getSelection: () => this.host.captureState().selection,
 				selectMatch: (match) => {
 					this.host.breakHistoryGroup();
@@ -162,8 +166,8 @@ export class ViewServices implements Disposable {
 				announce: (message) => this.host.announce(message),
 				offsetAtPoint: (x, y) => this.host.offsetAtPoint(x, y),
 				getTabSize: () => this.options.tabSize,
+				syntaxPalette: () => this.renderer.syntaxPalette(),
 			},
-			language,
 			this.renderer.interactionElement,
 		);
 		this.menu = new CommandMenu(this.frame, this.commands, this.shortcuts, {

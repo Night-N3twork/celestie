@@ -4,6 +4,12 @@ import type {
 	LanguageEdit,
 	WorkspaceEdit,
 } from "../api/languages";
+import {
+	getLanguageConfiguration,
+	isWord,
+	wordExpression,
+} from "../languages/configuration";
+import { wordRange } from "./editing-commands";
 import type { LanguageFeatureHost } from "./language-host";
 import type { LanguagePopup } from "./language-popup";
 
@@ -29,19 +35,21 @@ export function showRename(
 		field = dialog.popup.widget.ownerDocument.createElement("input");
 	label.textContent = "New symbol name";
 	field.setAttribute("aria-label", "New symbol name");
-	field.value =
-		(context.text
-			.slice(0, context.offset)
-			.match(/[\p{ID_Continue}$]+$/u)?.[0] ?? "") +
-		(context.text
-			.slice(context.offset)
-			.match(/^[\p{ID_Continue}$]+/u)?.[0] ?? "");
+	const configuration = getLanguageConfiguration(
+		context.model.getLanguageId(),
+	);
+	const word = wordRange(
+		context.text,
+		context.offset,
+		wordExpression(configuration),
+	);
+	field.value = context.text.slice(word.from, word.to);
 	label.append(field);
 	form.append(label);
 	form.onsubmit = (event) => {
 		event.preventDefault();
-		if (!/^[\p{ID_Start}_$][\p{ID_Continue}$]*$/u.test(field.value)) {
-			dialog.editor.announce("Enter a valid identifier.");
+		if (!isWord(configuration, field.value)) {
+			dialog.editor.announce("Enter a single word.");
 			return;
 		}
 		void dialog

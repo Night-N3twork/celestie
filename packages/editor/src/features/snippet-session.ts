@@ -1,6 +1,10 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { LanguageEdit } from "../api/languages";
 import type { Disposable, TextSelection } from "../api/types";
+import {
+	getLanguageConfiguration,
+	wordExpression,
+} from "../languages/configuration";
 import { mapOffset } from "../model/change-mapping";
 import type { TextModel } from "../model/text-model";
 import type { TrackedRange } from "../model/tracked-ranges";
@@ -246,7 +250,13 @@ export class SnippetSession implements Disposable {
 				.replace(/\n/g, `\n${indent}`);
 		const position = this.model.getPositionAtInputOffset(selected.start),
 			filename = this.model.uri.path.split("/").at(-1) ?? "",
-			word = wordRange(this.host.text(), selected.start),
+			word = wordRange(
+				this.host.text(),
+				selected.start,
+				wordExpression(
+					getLanguageConfiguration(this.model.getLanguageId()),
+				),
+			),
 			date = new Date();
 		let parsed = parseSnippet(source, {
 			TM_SELECTED_TEXT: this.host

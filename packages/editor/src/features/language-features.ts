@@ -12,6 +12,7 @@ import type {
 import { getLanguage } from "../api/languages";
 import type { Disposable } from "../api/types";
 import { languageEngine } from "../languages/client";
+import { getLanguageConfiguration, isWord } from "../languages/configuration";
 import type { TextModel } from "../model/text-model";
 import type { TrackedRange } from "../model/tracked-ranges";
 import { prepareCompletions } from "./completion-items";
@@ -592,27 +593,17 @@ export class LanguageFeatures implements Disposable {
 		);
 	}
 	private snippets(): void {
-		const definition = getLanguage(
-				this.host.model()?.getLanguageId() ?? "",
-			),
-			snippets = definition?.snippets ?? [
-				{
-					label: "For loop",
-					body: `for (let \${1:i} = 0; \${1:i} < \${2:count}; \${1:i}++) {\n\t$0\n}`,
-				},
-				{
-					label: "Function",
-					body: `function \${1:name}(\${2:args}) {\n\t$0\n}`,
-				},
-				{
-					label: "Try/catch",
-					body: `try {\n\t$0\n} catch (\${1:error}) {\n\tconsole.error(\${1:error});\n}`,
-				},
-			];
+		const snippets =
+			getLanguage(this.host.model()?.getLanguageId() ?? "")?.snippets ??
+			[];
+		if (!snippets.length) {
+			this.host.announce("No snippets for this language.");
+			return;
+		}
 		this.popup.showChoices(
 			"snippets",
 			snippets.map((snippet) => ({
-				label: snippet.label,
+				label: snippet.description ?? snippet.label,
 				run: () => this.host.snippet(snippet.body),
 			})),
 			this.host.selection().end,
@@ -762,7 +753,15 @@ export class LanguageFeatures implements Disposable {
 			queueMicrotask(() => {
 				if (this.disposed) return;
 				if (data === "(" || data === ",") void this.run("signature");
-				else if (data === "." || /[\p{ID_Continue}$]/u.test(data))
+				else if (
+					data === "." ||
+					isWord(
+						getLanguageConfiguration(
+							this.host.model()?.getLanguageId() ?? "",
+						),
+						data,
+					)
+				)
 					void this.run("complete");
 			});
 	};

@@ -16,7 +16,6 @@ export type {
 	LanguageDefinition,
 	LanguageEdit,
 	LanguageProvider,
-	LanguageServiceSettings,
 	Location,
 	SymbolInformation,
 	Token,
@@ -48,10 +47,6 @@ export type { Decoration, VisibleDecoration } from "./features/decorations";
 export { DecorationCollection } from "./features/decorations";
 export type { IndentationOptions } from "./features/indentation-options";
 export { type EditorTheme, registerTheme } from "./features/themes";
-export {
-	configureLanguageServices,
-	LanguageWorkspace,
-} from "./languages/client";
 export { defaultModelRegistry, ModelRegistry } from "./model/model-registry";
 export {
 	type EndOfLine,

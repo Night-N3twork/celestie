@@ -1,5 +1,10 @@
 import type { TextSelection } from "../api/types";
-import type { LanguageConfiguration } from "../languages/configuration";
+import type {
+	AutoClosingPair,
+	CharacterPair,
+	LanguageConfiguration,
+	ScopeExclusion,
+} from "../languages/configuration";
 import type { BracketAnalysis } from "./bracket-analysis";
 import type { EditingPlan } from "./editing-plan";
 import {
@@ -9,6 +14,11 @@ import {
 	indentationUnit,
 	indentationWidth,
 } from "./indentation-options";
+import {
+	planIndentationEnter,
+	planOnEnterRules,
+	planTypedOutdent,
+} from "./indentation-rules";
 
 function replace(
 	from: number,
@@ -20,6 +30,51 @@ function replace(
 		edits: [{ from, to, text }],
 		selection: { start: caret, end: caret, direction: "none" },
 	};
+}
+
+function defaultPairs(
+	configuration: LanguageConfiguration,
+): readonly CharacterPair[] {
+	return [
+		...configuration.brackets,
+		...configuration.quotes.map((quote) => [quote, quote] as const),
+	];
+}
+
+function scope(context: string): ScopeExclusion | undefined {
+	return context === "line-comment" || context === "block-comment"
+		? "comment"
+		: context === "code"
+			? undefined
+			: "string";
+}
+
+function autoClosingPair(
+	text: string,
+	start: number,
+	data: string,
+	configuration: LanguageConfiguration,
+	analysis: BracketAnalysis,
+): AutoClosingPair | undefined {
+	if (!configuration.autoClosingPairs)
+		return analysis.contextAt(start) === "code"
+			? defaultPairs(configuration)
+					.map(([open, close]) => ({ open, close }))
+					.find((pair) => pair.open === data)
+			: undefined;
+	let best: AutoClosingPair | undefined;
+	for (const pair of configuration.autoClosingPairs) {
+		const openStart = start - pair.open.length + 1;
+		if (
+			openStart < 0 ||
+			(best && best.open.length >= pair.open.length) ||
+			text.slice(openStart, start) + data !== pair.open
+		)
+			continue;
+		const excluded = scope(analysis.contextAt(openStart));
+		if (!excluded || !pair.notIn?.includes(excluded)) best = pair;
+	}
+	return best;
 }
 
 function escaped(text: string, offset: number): boolean {
@@ -127,14 +182,11 @@ export function planBracketInput(
 		) {
 			return replace(start, end, data + block[1], start + 1);
 		}
-		const bracket = configuration.brackets.find(([open]) => open === data);
-		const quote = configuration.quotes.includes(data);
-		if (
-			(bracket || quote) &&
-			(!collapsed || (context === "code" && !escaped(text, start)))
-		) {
-			const close = bracket?.[1] ?? data;
-			if (!collapsed)
+		if (!collapsed) {
+			const close = (
+				configuration.surroundingPairs ?? defaultPairs(configuration)
+			).find(([open]) => open === data)?.[1];
+			if (close !== undefined)
 				return {
 					edits: [
 						{ from: start, to: start, text: data },
@@ -146,9 +198,55 @@ export function planBracketInput(
 						direction: selection.direction,
 					},
 				};
-			const wordBefore = /[\p{ID_Continue}$]/u.test(previous);
-			if ((!quote || !wordBefore) && (!next || /[\s\])};,:]/u.test(next)))
-				return replace(start, end, data + close, start + data.length);
+		} else if (!escaped(text, start)) {
+			const pair = autoClosingPair(
+				text,
+				start,
+				data,
+				configuration,
+				analysis,
+			);
+			if (pair) {
+				const symmetric =
+					configuration.quotes.includes(pair.close) &&
+					pair.open.endsWith(pair.close);
+				const wordBefore = /[\p{ID_Continue}$]/u.test(
+					text[start - pair.open.length] ?? "",
+				);
+				const closable =
+					!next ||
+					(configuration.autoCloseBefore === undefined
+						? /[\s\])};,:]/u.test(next)
+						: configuration.autoCloseBefore.includes(next));
+				if ((!symmetric || !wordBefore) && closable)
+					return (
+						(context === "code" &&
+							planTypedOutdent(
+								text,
+								selection,
+								data + pair.close,
+								configuration,
+								options,
+								data.length,
+							)) ||
+						replace(
+							start,
+							end,
+							data + pair.close,
+							start + data.length,
+						)
+					);
+			}
+		}
+		if (context === "code") {
+			const outdent = planTypedOutdent(
+				text,
+				selection,
+				data,
+				configuration,
+				options,
+			);
+			if (outdent) return outdent;
 		}
 	}
 
@@ -235,6 +333,15 @@ export function planBracketInput(
 				return replace(start, end, `\n${continuation}`);
 			}
 		}
+		if (context !== "block-comment") {
+			const rule = planOnEnterRules(
+				text,
+				selection,
+				configuration,
+				options,
+			);
+			if (rule) return rule;
+		}
 		const last = prefix.trimEnd();
 		const openOffset = lineStart + last.length - 1;
 		const pair = configuration.brackets.find(([open]) =>
@@ -250,6 +357,15 @@ export function planBracketInput(
 					start + first.length,
 				);
 			return replace(start, end, first);
+		}
+		if (context === "code") {
+			const indented = planIndentationEnter(
+				text,
+				selection,
+				configuration,
+				options,
+			);
+			if (indented) return indented;
 		}
 		return replace(start, end, `\n${indent}`);
 	}

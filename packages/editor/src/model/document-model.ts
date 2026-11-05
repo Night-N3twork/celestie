@@ -1,3 +1,4 @@
+import { detectLanguage } from "../api/languages";
 import type {
 	ContentChange,
 	Disposable,
@@ -15,6 +16,10 @@ import {
 	resolveIndentation,
 } from "../features/indentation-options";
 import { findLiteralMatches, type SearchMatch } from "../features/search";
+import {
+	getLanguageConfiguration,
+	wordExpression,
+} from "../languages/configuration";
 import { History } from "./change-history";
 import { composeChanges, inputChanges, inputMappings } from "./change-mapping";
 import { Emitter } from "./events";
@@ -39,6 +44,7 @@ export interface ModelOptions extends IndentationOptions {
 }
 export interface TextModelOptions extends Partial<ModelOptions> {
 	readonly uri?: Uri | string;
+	/** When omitted, detected once from the URI path and initial first line. */
 	readonly languageId?: string;
 	readonly defaultEOL?: EndOfLine;
 	readonly registry?: ModelRegistry;
@@ -201,13 +207,20 @@ export class DocumentModel implements Disposable {
 			(text.match(/\r\n|\r|\n/)?.[0] as EndOfLine | undefined) ??
 			options.defaultEOL ??
 			"\n";
-		this.languageId = options.languageId ?? "plaintext";
-		if (!this.languageId.trim())
-			throw new Error("Language ID must not be empty.");
 		this.uri =
 			typeof options.uri === "string"
 				? Uri.parse(options.uri)
 				: (options.uri ?? Uri.parse(`inmemory://model/${this.id}`));
+		this.languageId =
+			options.languageId ??
+			detectLanguage(
+				this.uri.path,
+				text
+					.slice(this.bom.length, this.bom.length + 1000)
+					.split(/[\r\n]/, 1)[0] ?? "",
+			);
+		if (!this.languageId.trim())
+			throw new Error("Language ID must not be empty.");
 		this.registry =
 			options.register === false
 				? undefined
@@ -356,9 +369,10 @@ export class DocumentModel implements Disposable {
 	getWordAtPosition(position: Position): ModelWord | null {
 		const valid = this.validatePosition(position);
 		for (const match of this.getLineContent(valid.line).matchAll(
-			/[\p{ID_Continue}$]+/gu,
+			wordExpression(getLanguageConfiguration(this.getLanguageId())),
 		))
 			if (
+				match[0] &&
 				match.index <= valid.column - 1 &&
 				valid.column - 1 <= match.index + match[0].length
 			)
@@ -403,6 +417,9 @@ export class DocumentModel implements Disposable {
 				...(options.wholeWord !== undefined
 					? { wholeWord: options.wholeWord }
 					: {}),
+				wordPattern: wordExpression(
+					getLanguageConfiguration(this.getLanguageId()),
+				),
 				...(scope
 					? {
 							scope: {

@@ -1,4 +1,5 @@
 import type { Token } from "../api/languages";
+import type { LanguageProfile } from "../workers/language-protocol";
 
 interface State {
 	mode: string;
@@ -10,185 +11,144 @@ interface LineTokens {
 	outgoing: State;
 	tokens: Token[];
 }
-const keywords = new Set(
-	"const let var function return if else for while class interface type import export from new async await true false null undefined throw try catch switch case break extends implements public private readonly number string boolean void def elif None True False fn pub use impl struct enum match mut self mod crate async await select where yield in of do finally static constructor get set this super package protected abstract override as is keyof typeof instanceof delete void".split(
-		" ",
-	),
-);
-const identifier = /[\p{ID_Start}_$][\p{ID_Continue}$]*/uy,
-	number = /\d+(?:\.\d+)?(?:[eE][+-]?\d+)?n?/y;
-function lineTokens(
-	text: string,
-	state: State,
-	language: string,
-): { tokens: Token[]; outgoing: State } {
-	const tokens: Token[] = [];
-	let mode = state.mode,
-		depth = state.depth,
-		index = 0;
-	const add = (from: number, to: number, kind: string) => {
-		if (to > from) tokens.push({ from, to, kind });
-	};
-	while (index < text.length) {
-		const from = index;
-		if (mode) {
-			const close =
-				mode === "block" ? "*/" : mode === "html" ? "-->" : mode;
-			let end = text.indexOf(close, index);
-			if (close === "`" || close === '"' || close === "'") {
-				while (end >= 0) {
-					let escapes = 0;
-					for (let at = end - 1; at >= 0 && text[at] === "\\"; at--)
-						escapes++;
-					if (escapes % 2 === 0) break;
-					end = text.indexOf(close, end + 1);
+
+class Lexer {
+	readonly key: string;
+	private readonly word: RegExp;
+	private readonly keywords: ReadonlySet<string>;
+	private readonly opens: ReadonlySet<string>;
+	private readonly closes: ReadonlySet<string>;
+	private readonly number = /[-+]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?n?/y;
+	constructor(readonly profile: LanguageProfile) {
+		this.key = JSON.stringify(profile);
+		this.word = new RegExp(
+			profile.word.source,
+			`${profile.word.flags.replace(/[gy]/g, "")}y`,
+		);
+		this.keywords = new Set(profile.keywords);
+		this.opens = new Set(profile.colorizedBrackets.map(([open]) => open));
+		this.closes = new Set(
+			profile.colorizedBrackets.map(([, close]) => close),
+		);
+	}
+	line(text: string, state: State): { tokens: Token[]; outgoing: State } {
+		const { lineComment, blockComment, quotes, templateQuote } =
+			this.profile;
+		const tokens: Token[] = [];
+		let mode = state.mode,
+			depth = state.depth,
+			index = 0;
+		const add = (from: number, to: number, kind: string) => {
+			if (to > from) tokens.push({ from, to, kind });
+		};
+		const closeQuote = (quote: string, from: number): number => {
+			for (let at = from; at < text.length; at++) {
+				if (text[at] === "\\") at++;
+				else if (text.startsWith(quote, at)) return at + quote.length;
+			}
+			return -1;
+		};
+		while (index < text.length) {
+			const from = index;
+			if (mode === "block" && blockComment) {
+				const end = text.indexOf(blockComment[1], index);
+				if (end < 0) {
+					add(index, text.length, "comment");
+					break;
 				}
-			}
-			if (end < 0) {
-				add(
-					index,
-					text.length,
-					mode === "block" || mode === "html" ? "comment" : "string",
-				);
-				break;
-			}
-			index = end + close.length;
-			add(
-				from,
-				index,
-				mode === "block" || mode === "html" ? "comment" : "string",
-			);
-			mode = "";
-			continue;
-		}
-		if (/\s/u.test(text[index] ?? "")) {
-			index++;
-			continue;
-		}
-		if (
-			(text.startsWith("//", index) &&
-				!["html", "markdown", "python", "shell"].includes(language)) ||
-			(text[index] === "#" && ["python", "shell"].includes(language))
-		) {
-			add(index, text.length, "comment");
-			break;
-		}
-		if (
-			text.startsWith("/*", index) &&
-			!["python", "shell", "markdown"].includes(language)
-		) {
-			mode = "block";
-			index += 2;
-			const end = text.indexOf("*/", index);
-			if (end < 0) {
-				add(from, text.length, "comment");
-				break;
-			}
-			index = end + 2;
-			add(from, index, "comment");
-			mode = "";
-			continue;
-		}
-		if (language === "html" && text.startsWith("<!--", index)) {
-			mode = "html";
-			index += 4;
-			const end = text.indexOf("-->", index);
-			if (end < 0) {
-				add(from, text.length, "comment");
-				break;
-			}
-			index = end + 3;
-			add(from, index, "comment");
-			mode = "";
-			continue;
-		}
-		if (language === "markdown" && text.startsWith("```", index)) {
-			mode = "```";
-			add(index, text.length, "string");
-			break;
-		}
-		const quote = text[index];
-		if (quote === '"' || quote === "'" || quote === "`") {
-			const triple =
-					language === "python" &&
-					text.startsWith(quote.repeat(3), index),
-				closing = triple ? quote.repeat(3) : quote;
-			index += closing.length;
-			let end = index;
-			for (; end < text.length; end++) {
-				if (text[end] === "\\") {
-					end++;
-					continue;
-				}
-				if (text.startsWith(closing, end)) break;
-			}
-			if (end >= text.length) {
-				mode = quote === "`" || triple ? closing : "";
-				add(from, text.length, "string");
-				break;
-			}
-			index = end + closing.length;
-			add(
-				from,
-				index,
-				(language === "json" || language === "jsonc") &&
-					/^\s*:/.test(text.slice(index))
-					? "type"
-					: "string",
-			);
-			continue;
-		}
-		if (language === "markdown" && quote === "#") {
-			add(index, text.length, "keyword");
-			break;
-		}
-		if (language === "html" && quote === "<") {
-			const tag = text.slice(index).match(/^<\/?[\w:-]+/);
-			if (tag) {
-				index += tag[0].length;
-				add(from, index, "keyword");
+				index = end + blockComment[1].length;
+				add(from, index, "comment");
+				mode = "";
 				continue;
 			}
-		}
-		identifier.lastIndex = index;
-		const word = identifier.exec(text);
-		if (word) {
-			index = identifier.lastIndex;
-			const kind = keywords.has(word[0])
-				? "keyword"
-				: /^[A-Z]/.test(word[0])
-					? "type"
-					: language === "html" && /^\s*=/.test(text.slice(index))
+			if (mode) {
+				const end = closeQuote(mode, index);
+				if (end < 0) {
+					add(index, text.length, "string");
+					break;
+				}
+				index = end;
+				add(from, index, "string");
+				mode = "";
+				continue;
+			}
+			const char = text[index] ?? "";
+			if (/\s/u.test(char)) {
+				index++;
+				continue;
+			}
+			if (lineComment && text.startsWith(lineComment, index)) {
+				add(index, text.length, "comment");
+				break;
+			}
+			if (blockComment && text.startsWith(blockComment[0], index)) {
+				const end = text.indexOf(
+					blockComment[1],
+					index + blockComment[0].length,
+				);
+				if (end < 0) {
+					mode = "block";
+					add(from, text.length, "comment");
+					break;
+				}
+				index = end + blockComment[1].length;
+				add(from, index, "comment");
+				continue;
+			}
+			if (quotes.includes(char)) {
+				const end = closeQuote(char, index + 1);
+				if (end < 0) {
+					if (char === templateQuote) mode = char;
+					add(from, text.length, "string");
+					break;
+				}
+				index = end;
+				add(from, index, "string");
+				continue;
+			}
+			if (this.opens.has(char) || this.closes.has(char)) {
+				if (!this.opens.has(char)) depth = Math.max(0, depth - 1);
+				add(index, index + 1, `bracket${depth % 3}`);
+				if (!this.closes.has(char)) depth++;
+				index++;
+				continue;
+			}
+			this.number.lastIndex = index;
+			const numeric = this.number.exec(text);
+			if (numeric && !/[\p{L}_$]/u.test(text[index - 1] ?? "")) {
+				index = this.number.lastIndex;
+				add(from, index, "number");
+				continue;
+			}
+			this.word.lastIndex = index;
+			const word = this.word.exec(text);
+			if (word?.[0]) {
+				index = this.word.lastIndex;
+				const kind = this.keywords.has(word[0])
+					? "keyword"
+					: /^\p{Lu}/u.test(word[0])
 						? "type"
 						: "";
-			if (kind) add(from, index, kind);
-			continue;
+				if (kind) add(from, index, kind);
+				continue;
+			}
+			index++;
 		}
-		number.lastIndex = index;
-		const numeric = number.exec(text);
-		if (numeric) {
-			index = number.lastIndex;
-			add(from, index, "number");
-			continue;
-		}
-		if (/[()[\]{}]/.test(quote ?? "")) {
-			if (/[)\]}]/.test(quote ?? "")) depth = Math.max(0, depth - 1);
-			add(index, index + 1, `bracket${depth % 3}`);
-			if (/[([{]/.test(quote ?? "")) depth++;
-		}
-		index++;
+		return { tokens, outgoing: { mode, depth } };
 	}
-	return { tokens, outgoing: { mode, depth } };
 }
+
 export class IncrementalTokenizer {
 	private entries: LineTokens[] = [];
-	private language = "";
+	private lexer: Lexer | undefined;
 	reused = 0;
-	update(text: string, language: string): Token[] {
-		if (language === "plaintext") {
+	update(text: string, profile: LanguageProfile): Token[] {
+		const key = JSON.stringify(profile);
+		if (this.lexer?.key !== key) {
+			this.lexer = new Lexer(profile);
 			this.entries = [];
-			return [];
 		}
+		const lexer = this.lexer;
 		const lines = text.split("\n"),
 			next: LineTokens[] = [],
 			tokens: Token[] = [];
@@ -197,21 +157,17 @@ export class IncrementalTokenizer {
 		this.reused = 0;
 		for (let index = 0; index < lines.length; index++) {
 			const line = lines[index] ?? "",
-				key = `${state.mode}:${state.depth}`,
+				incoming = `${state.mode}:${state.depth}`,
 				old = this.entries[index];
 			let entry: LineTokens;
-			if (
-				language === this.language &&
-				old?.text === line &&
-				old.incoming === key
-			) {
+			if (old?.text === line && old.incoming === incoming) {
 				entry = old;
 				this.reused++;
 			} else {
-				const result = lineTokens(line, state, language);
+				const result = lexer.line(line, state);
 				entry = {
 					text: line,
-					incoming: key,
+					incoming,
 					outgoing: result.outgoing,
 					tokens: result.tokens,
 				};
@@ -228,7 +184,6 @@ export class IncrementalTokenizer {
 			offset += line.length + 1;
 		}
 		this.entries = next;
-		this.language = language;
 		return tokens;
 	}
 }
@@ -236,14 +191,14 @@ const instances = new Map<string, IncrementalTokenizer>();
 export function tokenizeDocument(
 	id: string,
 	text: string,
-	language: string,
+	profile: LanguageProfile,
 ): Token[] {
 	let instance = instances.get(id);
 	if (!instance) {
 		instance = new IncrementalTokenizer();
 		instances.set(id, instance);
 	}
-	return instance.update(text, language);
+	return instance.update(text, profile);
 }
 export function disposeTokens(id: string): void {
 	instances.delete(id);

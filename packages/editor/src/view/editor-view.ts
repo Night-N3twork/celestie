@@ -52,6 +52,7 @@ import {
 	getLanguageConfiguration,
 	type LanguageConfiguration,
 	resolveLanguageConfiguration,
+	wordExpression,
 } from "../languages/configuration";
 import { mapModelInputOffset } from "../model/change-mapping";
 import { TextModel } from "../model/text-model";
@@ -405,12 +406,12 @@ export class EditorView implements Disposable {
 				toggleLineComment: () => this.toggleLineComment(),
 				toggleBlockComment: () => this.toggleBlockComment(),
 				runLineCommand: (c) => this.runLineCommand(c),
+				language: () => this.language,
 			},
 			this.element,
 			this.frame,
 			this.renderer,
 			this.commands,
-			this.language,
 		);
 		registerEditorActions(this);
 		this.renderer.interactionElement.addEventListener(
@@ -443,6 +444,7 @@ export class EditorView implements Disposable {
 				toggleFold: (l) => this.toggleFold(l),
 				moveSelection: (s, t, c) => this.moveSelection(s, t, c),
 				isComposing: () => this.isComposing,
+				wordPattern: () => wordExpression(this.language),
 			},
 		);
 		this.languageFeatures = new LanguageFeatures({
@@ -695,7 +697,6 @@ export class EditorView implements Disposable {
 				getLanguageConfiguration(this.model.getLanguageId()),
 		);
 		this.analysis = undefined;
-		this.clipboard.setLanguageConfiguration(this.language);
 		this.updateCursor();
 	}
 	private switchModel(model: TextModel | null, save: boolean): void {
@@ -908,7 +909,11 @@ export class EditorView implements Disposable {
 		const text = this.element.value,
 			primary = this.getSelection();
 		if (primary.start === primary.end) {
-			const range = wordRange(text, primary.start);
+			const range = wordRange(
+				text,
+				primary.start,
+				wordExpression(this.language),
+			);
 			if (range.from === range.to) return;
 			this.setSelections(
 				[

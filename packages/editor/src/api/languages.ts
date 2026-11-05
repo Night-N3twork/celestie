@@ -1,4 +1,6 @@
+import { builtinLanguages } from "../languages/builtin-languages";
 import type { LanguageConfiguration } from "../languages/configuration";
+import { matchLanguage } from "../languages/file-associations";
 import type { TextModel } from "../model/text-model";
 import type { Disposable } from "./types";
 export interface Token {
@@ -132,7 +134,13 @@ export interface LanguageProvider {
 }
 export interface LanguageDefinition {
 	readonly id: string;
+	readonly name?: string;
+	readonly aliases?: readonly string[];
+	readonly grammar?: string;
 	readonly extensions: readonly string[];
+	readonly filenames?: readonly string[];
+	readonly filenamePatterns?: readonly string[];
+	readonly firstLine?: RegExp;
 	readonly configuration?: LanguageConfiguration;
 	readonly keywords?: readonly string[];
 	readonly snippets?: readonly {
@@ -146,17 +154,23 @@ const providers: {
 	languages: readonly string[];
 	provider: LanguageProvider;
 }[] = [];
+let registryVersion = 0;
 export function registerLanguage(definition: LanguageDefinition): Disposable {
 	if (!definition.id) throw new TypeError("Language id required.");
 	const old = definitions.get(definition.id);
 	definitions.set(definition.id, definition);
+	registryVersion++;
 	return {
 		dispose() {
 			if (definitions.get(definition.id) !== definition) return;
 			if (old) definitions.set(definition.id, old);
 			else definitions.delete(definition.id);
+			registryVersion++;
 		},
 	};
+}
+export function languageRegistryVersion(): number {
+	return registryVersion;
 }
 export function getLanguage(id: string): LanguageDefinition | undefined {
 	return definitions.get(id);
@@ -164,12 +178,8 @@ export function getLanguage(id: string): LanguageDefinition | undefined {
 export function getLanguages(): readonly LanguageDefinition[] {
 	return [...definitions.values()];
 }
-export function detectLanguage(path: string): string {
-	return (
-		[...definitions.values()].find((language) =>
-			language.extensions.some((ext) => path.toLowerCase().endsWith(ext)),
-		)?.id ?? "plaintext"
-	);
+export function detectLanguage(path: string, firstLine = ""): string {
+	return matchLanguage([...definitions.values()], path, firstLine);
 }
 export function registerLanguageProvider(
 	languages: string | readonly string[],
@@ -196,32 +206,4 @@ export function languageProviders(id: string): readonly LanguageProvider[] {
 		.map((entry) => entry.provider)
 		.reverse();
 }
-for (const [id, extensions] of Object.entries({
-	plaintext: [".txt"],
-	typescript: [".ts", ".tsx"],
-	javascript: [".js", ".jsx", ".mjs"],
-	json: [".json"],
-	jsonc: [".jsonc"],
-	html: [".html", ".htm"],
-	css: [".css"],
-	scss: [".scss"],
-	less: [".less"],
-	markdown: [".md"],
-	python: [".py"],
-	rust: [".rs"],
-	shell: [".sh"],
-}))
-	registerLanguage({ id, extensions });
-
-export interface LanguageServiceSettings {
-	readonly compilerOptions?: Readonly<Record<string, unknown>>;
-	readonly extraLibraries?: readonly {
-		readonly path: string;
-		readonly content: string;
-	}[];
-	readonly jsonSchemas?: readonly {
-		readonly uri: string;
-		readonly fileMatch: string[];
-		readonly schema: Record<string, unknown>;
-	}[];
-}
+for (const definition of builtinLanguages) registerLanguage(definition);

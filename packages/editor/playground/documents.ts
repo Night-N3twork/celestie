@@ -1,6 +1,5 @@
 import { getLanguages } from "../src/api/languages";
 import { Uri } from "../src/api/uri";
-import { LanguageWorkspace } from "../src/languages/client";
 import { Emitter } from "../src/model/events";
 import { ModelRegistry } from "../src/model/model-registry";
 import type { EndOfLine, TextModel } from "../src/model/text-model";
@@ -60,7 +59,6 @@ export function createPlaygroundDocuments(
 			},
 		),
 	);
-	const workspace = new LanguageWorkspace(models);
 	const primary = new EditorView(container, models[0] as TextModel);
 	let secondary: EditorView | undefined;
 	let active = primary;
@@ -78,7 +76,7 @@ export function createPlaygroundDocuments(
 		...getLanguages().map((definition) => {
 			const option = document.createElement("option");
 			option.value = definition.id;
-			option.textContent = definition.id;
+			option.textContent = definition.name ?? definition.id;
 			return option;
 		}),
 	);
@@ -254,7 +252,6 @@ export function createPlaygroundDocuments(
 			changed.dispose();
 			secondary?.dispose();
 			primary.dispose();
-			workspace.dispose();
 			registry.dispose();
 		},
 	};

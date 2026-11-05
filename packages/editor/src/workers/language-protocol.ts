@@ -1,26 +1,42 @@
-import type ts from "typescript";
-import type { LanguageServiceSettings } from "../api/languages";
+export interface SerializedPattern {
+	source: string;
+	flags: string;
+}
+
+export interface LanguageProfile {
+	grammar?: string;
+	lineComment?: string;
+	blockComment?: readonly [open: string, close: string];
+	quotes: readonly string[];
+	templateQuote?: string;
+	colorizedBrackets: readonly (readonly [open: string, close: string])[];
+	keywords: readonly string[];
+	word: SerializedPattern;
+	folding?: {
+		offSide?: boolean;
+		markers?: { start: SerializedPattern; end: SerializedPattern };
+	};
+}
+
+export interface EmbeddedLanguage {
+	names: readonly string[];
+	grammar: string;
+}
+
 export interface LanguageDocument {
 	id: string;
 	uri: string;
 	text: string;
 	version: number;
 	language: string;
-	file: string;
-	keywords?: readonly string[];
+	profile: LanguageProfile;
 }
+
 export interface LanguageRequest {
-	source?: string;
-	data?: ts.CompletionEntryData;
-	inlayHints?: boolean;
-	codeLens?: boolean;
-	settings?: LanguageServiceSettings;
 	id: number;
 	method: string;
 	document?: LanguageDocument;
 	documentId?: string;
 	offset?: number;
-	name?: string;
-	range?: { from: number; to: number };
-	options?: { tabSize: number; insertSpaces: boolean };
+	languages?: readonly EmbeddedLanguage[];
 }
