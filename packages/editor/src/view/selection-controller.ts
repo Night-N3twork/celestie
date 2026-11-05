@@ -131,12 +131,28 @@ export class SelectionController implements Disposable {
 				);
 				target = movement.offset;
 				affinity = movement.affinity;
-			} else if (key === "Home" || key === "End") {
+			} else if (key === "End") {
 				target = this.host.rowBoundary(
 					active,
-					key === "End",
+					true,
 					selection.affinity,
 				);
+			} else if (key === "Home") {
+				target = this.host.rowBoundary(
+					active,
+					false,
+					selection.affinity,
+				);
+				if (target === 0 || text[target - 1] === "\n") {
+					let indent = target;
+					while (text[indent] === " " || text[indent] === "\t")
+						indent++;
+					const blank =
+						indent >= text.length ||
+						text[indent] === "\n" ||
+						text[indent] === "\r";
+					if (!blank && active !== indent) target = indent;
+				}
 			} else {
 				const direction = key === "ArrowLeft" ? -1 : 1;
 				target =
