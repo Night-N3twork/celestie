@@ -2,7 +2,7 @@ import type { HistoryViewState, TextSelection } from "../api/types";
 import type { EditingPlan } from "../features/editing-plan";
 import type { SearchEdit } from "../features/find-replace";
 import type { MultiEditingPlan } from "../features/selections";
-import type { TextModel } from "../model/text-model";
+import { TextModel, type WorkspaceTextEdit } from "../model/text-model";
 import { normalizeInputText } from "./input";
 import type { InputSurface } from "./input-surface";
 
@@ -52,7 +52,48 @@ export class ViewTransactions {
 	resetTyping(): void {
 		this.multiTyping = undefined;
 	}
-	applyMultiPlan(plan: MultiEditingPlan, inputKind?: string): void {
+	applyWorkspace(
+		batches: readonly WorkspaceTextEdit[],
+		selections: readonly TextSelection[],
+	): void {
+		if (!this.host.canEdit() || this.host.isComposing()) return;
+		this.host.clearBeforeInput();
+		this.host.breakHistoryGroup();
+		const before = this.host.captureState();
+		this.pendingSelections = selections;
+		this.pendingSelection = selections[0];
+		try {
+			TextModel.applyWorkspaceEdits(
+				batches.map((batch) =>
+					batch.model === this.model
+						? {
+								...batch,
+								history: {
+									before,
+									after: {
+										...before,
+										selection:
+											selections[0] ?? before.selection,
+										selections,
+									},
+								},
+							}
+						: batch,
+				),
+			);
+		} finally {
+			this.pendingSelections = undefined;
+			this.pendingSelection = undefined;
+		}
+		this.host.writeSelections(selections);
+		this.host.updateCursor();
+		this.host.revealCursor();
+	}
+	applyMultiPlan(
+		plan: MultiEditingPlan,
+		inputKind?: string,
+		historyGroup?: string,
+	): void {
 		if (
 			this.host.isComposing() ||
 			(plan.edits.length && !this.host.canEdit())
@@ -63,15 +104,17 @@ export class ViewTransactions {
 			return;
 		}
 		const previous = this.multiTyping;
-		const group = inputKind
-			? previous?.kind === inputKind &&
-				previous.version === this.model.getVerId() &&
-				Date.now() - previous.time <= 750 &&
-				previous.selections ===
-					JSON.stringify(this.host.getSelections())
-				? previous.id
-				: this.nextGroup()
-			: undefined;
+		const group =
+			historyGroup ??
+			(inputKind
+				? previous?.kind === inputKind &&
+					previous.version === this.model.getVerId() &&
+					Date.now() - previous.time <= 750 &&
+					previous.selections ===
+						JSON.stringify(this.host.getSelections())
+					? previous.id
+					: this.nextGroup()
+				: undefined);
 		this.pendingSelections = plan.selections;
 		try {
 			this.replaceSearch(

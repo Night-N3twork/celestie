@@ -6,4 +6,5 @@ export {
 	type ModelWord,
 	type TextModelOptions,
 	type ValueOptions,
+	type WorkspaceTextEdit,
 } from "./document-model";

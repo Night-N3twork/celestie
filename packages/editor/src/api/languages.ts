@@ -21,6 +21,14 @@ export interface LanguageEdit {
 	readonly text: string;
 	readonly version?: number;
 }
+export type WorkspaceFileOperation =
+	| { readonly kind: "create"; readonly uri: string; readonly text?: string }
+	| { readonly kind: "rename"; readonly uri: string; readonly newUri: string }
+	| { readonly kind: "delete"; readonly uri: string };
+export interface WorkspaceEdit {
+	readonly edits: readonly LanguageEdit[];
+	readonly fileOperations?: readonly WorkspaceFileOperation[];
+}
 export interface Location {
 	readonly uri: string;
 	readonly from: number;
@@ -29,6 +37,7 @@ export interface Location {
 	readonly preview?: string;
 }
 export interface Completion {
+	readonly commitCharacters?: readonly string[];
 	readonly source?: string;
 	readonly data?: unknown;
 	readonly additionalEdits?: readonly LanguageEdit[];
@@ -50,7 +59,7 @@ export interface SymbolInformation extends Location {
 	readonly kind: string;
 	readonly children?: readonly SymbolInformation[];
 }
-export interface CodeAction {
+export interface CodeAction extends WorkspaceEdit {
 	readonly title: string;
 	readonly edits: readonly LanguageEdit[];
 }
@@ -109,7 +118,10 @@ export interface LanguageProvider {
 	rename?(
 		context: LanguageContext,
 		newName: string,
-	): Promise<readonly LanguageEdit[]> | readonly LanguageEdit[];
+	):
+		| Promise<readonly LanguageEdit[] | WorkspaceEdit>
+		| readonly LanguageEdit[]
+		| WorkspaceEdit;
 	format?(
 		context: LanguageContext,
 		range?: { from: number; to: number },

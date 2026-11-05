@@ -26,6 +26,11 @@ import {
 	type TrackedRangeOptions,
 	TrackedRanges,
 } from "./tracked-ranges";
+import {
+	type AtomicMutation,
+	commitAtomic,
+	WorkspaceHistory,
+} from "./workspace-history";
 
 export type EndOfLine = "\n" | "\r\n" | "\r";
 export interface ModelOptions extends IndentationOptions {
@@ -53,6 +58,12 @@ export interface ModelSearchOptions {
 	readonly wholeWord?: boolean;
 	readonly range?: Range;
 	readonly limit?: number;
+}
+export interface WorkspaceTextEdit {
+	readonly model: DocumentModel;
+	readonly edits: readonly TextEdit[];
+	readonly version?: number;
+	readonly history?: EditHistoryOptions;
 }
 let sequence = 0;
 
@@ -83,6 +94,70 @@ export class DocumentModel implements Disposable {
 	private disposing = false;
 	private notifying = false;
 	private computing = false;
+	private atomic = false;
+	private readonly notifications: (() => void)[] = [];
+	static applyWorkspaceEdits(batches: readonly WorkspaceTextEdit[]): void {
+		const models = new Set<DocumentModel>();
+		for (const { model, version } of batches) {
+			model.assertWritable();
+			if (models.has(model))
+				throw new Error("Duplicate workspace model batch.");
+			models.add(model);
+			if (version !== undefined && version !== model.version)
+				throw new Error("The document changed. Run the command again.");
+		}
+		const prepared = batches
+			.map((batch) => ({
+				...batch,
+				changes: batch.model.prepare(batch.edits),
+			}))
+			.filter((batch) => batch.changes.length);
+		if (!prepared.length) return;
+		let workspace: WorkspaceHistory | undefined;
+		if (prepared.length > 1)
+			workspace = new WorkspaceHistory(
+				prepared.map(({ model }) => ({
+					available: (redo) =>
+						!model.disposed &&
+						(redo
+							? model.history.peekRedo()
+							: model.history.peekUndo()
+						)?.workspace === workspace,
+					prepare: (redo) =>
+						model.atomicMutation(model.prepareReplay(redo)),
+				})),
+			);
+		const mutations = prepared.map(({ model, changes, history }) =>
+			model.atomicMutation(
+				model.prepareCommit(
+					changes,
+					history ?? {},
+					model.eol,
+					undefined,
+					workspace,
+				),
+			),
+		);
+		commitAtomic(mutations);
+	}
+	private atomicMutation(apply: () => unknown): AtomicMutation {
+		return {
+			begin: () => {
+				this.assertWritable();
+				this.atomic = true;
+			},
+			apply: () => {
+				apply();
+			},
+			notify: () => {
+				for (const notify of this.notifications.splice(0)) notify();
+			},
+			end: () => {
+				this.notifications.length = 0;
+				this.atomic = false;
+			},
+		};
+	}
 
 	constructor(
 		text = "",
@@ -518,7 +593,19 @@ export class DocumentModel implements Disposable {
 			next: TextBuffer,
 		) => HistoryViewState | undefined,
 	): readonly ContentChange[] {
-		if (!changes.length && eol === this.eol) return [];
+		return this.prepareCommit(changes, options, eol, computeAfter)();
+	}
+	private prepareCommit(
+		changes: readonly ContentChange[],
+		options: EditHistoryOptions,
+		eol = this.eol,
+		computeAfter?: (
+			inverse: readonly ContentChange[],
+			next: TextBuffer,
+		) => HistoryViewState | undefined,
+		workspace?: WorkspaceHistory,
+	): () => readonly ContentChange[] {
+		if (!changes.length && eol === this.eol) return () => [];
 		const before = this.buffer;
 		const next = before.applyChanges(changes);
 		let delta = 0;
@@ -552,33 +639,46 @@ export class DocumentModel implements Disposable {
 				this.computing = false;
 			}
 		}
-		const oldEOL = this.eol;
-		const alternative = ++this.nextAlternativeVersion;
-		const retained = this.history.record(
-			{ forward: changes, inverse },
-			historyOptions,
-			this.alternativeVersion,
-			alternative,
-			oldEOL,
-			eol,
-		);
-		this.ranges.map(changes);
-		this.buffer = next;
-		this.eol = eol;
-		this.alternativeVersion = alternative;
-		this.publish(
-			before,
-			changes,
-			false,
-			false,
-			false,
-			undefined,
-			oldEOL !== eol,
-			!retained &&
-				this.options.historyLimit > 0 &&
-				this.options.historyByteLimit > 0,
-		);
-		return Object.freeze(inverse);
+		if (
+			workspace &&
+			!this.history.canRecord(
+				{ forward: changes, inverse },
+				historyOptions,
+			)
+		)
+			throw new Error(
+				"Workspace edit exceeds a document's undo history limits.",
+			);
+		return () => {
+			const oldEOL = this.eol;
+			const alternative = ++this.nextAlternativeVersion;
+			const retained = this.history.record(
+				{ forward: changes, inverse },
+				historyOptions,
+				this.alternativeVersion,
+				alternative,
+				oldEOL,
+				eol,
+				workspace,
+			);
+			this.ranges.map(changes);
+			this.buffer = next;
+			this.eol = eol;
+			this.alternativeVersion = alternative;
+			this.publish(
+				before,
+				changes,
+				false,
+				false,
+				false,
+				undefined,
+				oldEOL !== eol,
+				!retained &&
+					this.options.historyLimit > 0 &&
+					this.options.historyByteLimit > 0,
+			);
+			return Object.freeze(inverse);
+		};
 	}
 	setEOL(eol: EndOfLine): void {
 		this.assertWritable();
@@ -604,11 +704,17 @@ export class DocumentModel implements Disposable {
 	}
 	canUndo(): boolean {
 		this.assertLive();
-		return this.history.undoable();
+		return (
+			this.history.peekUndo()?.workspace?.available(false) ??
+			this.history.undoable()
+		);
 	}
 	canRedo(): boolean {
 		this.assertLive();
-		return this.history.redoable();
+		return (
+			this.history.peekRedo()?.workspace?.available(true) ??
+			this.history.redoable()
+		);
 	}
 	undo(): void {
 		this.replay(false);
@@ -620,6 +726,13 @@ export class DocumentModel implements Disposable {
 		this.assertWritable();
 		const entry = redo ? this.history.peekRedo() : this.history.peekUndo();
 		if (!entry) return;
+		if (entry.workspace) entry.workspace.replay(redo);
+		else this.prepareReplay(redo)();
+	}
+	private prepareReplay(redo: boolean): () => void {
+		this.assertWritable();
+		const entry = redo ? this.history.peekRedo() : this.history.peekUndo();
+		if (!entry) throw new Error("History entry unavailable.");
 		const before = this.buffer;
 		const batches = redo
 			? entry.batches.map((batch) => batch.forward)
@@ -632,26 +745,28 @@ export class DocumentModel implements Disposable {
 			mappingBatches.push(inputMappings(next, after, batch));
 			next = after;
 		}
-		const oldEOL = this.eol;
-		this.eol = (redo ? entry.afterEOL : entry.beforeEOL) as EndOfLine;
-		for (const batch of batches) this.ranges.map(batch);
-		this.buffer = next;
-		this.alternativeVersion = redo
-			? entry.afterVersion
-			: entry.beforeVersion;
-		if (redo) this.history.redo();
-		else this.history.undo();
-		this.publish(
-			before,
-			changes,
-			!redo,
-			redo,
-			false,
-			redo ? entry.afterState : entry.beforeState,
-			oldEOL !== this.eol,
-			false,
-			mappingBatches,
-		);
+		return () => {
+			const oldEOL = this.eol;
+			this.eol = (redo ? entry.afterEOL : entry.beforeEOL) as EndOfLine;
+			for (const batch of batches) this.ranges.map(batch);
+			this.buffer = next;
+			this.alternativeVersion = redo
+				? entry.afterVersion
+				: entry.beforeVersion;
+			if (redo) this.history.redo();
+			else this.history.undo();
+			this.publish(
+				before,
+				changes,
+				!redo,
+				redo,
+				false,
+				redo ? entry.afterState : entry.beforeState,
+				oldEOL !== this.eol,
+				false,
+				mappingBatches,
+			);
+		};
 	}
 
 	trackRange(range: Range, options: TrackedRangeOptions = {}): TrackedRange {
@@ -820,7 +935,9 @@ export class DocumentModel implements Disposable {
 			historyTruncated,
 			...(historyState ? { historyState } : {}),
 		});
-		this.notify(() => this.content.emit(event));
+		const notify = () => this.notify(() => this.content.emit(event));
+		if (this.atomic) this.notifications.push(notify);
+		else notify();
 	}
 	private notify(run: () => void): void {
 		const previous = this.notifying;
@@ -836,7 +953,7 @@ export class DocumentModel implements Disposable {
 	}
 	private assertWritable(): void {
 		this.assertLive();
-		if (this.notifying || this.computing || this.disposing)
+		if (this.notifying || this.computing || this.disposing || this.atomic)
 			throw new Error(
 				"Schedule model changes after the current model callback.",
 			);

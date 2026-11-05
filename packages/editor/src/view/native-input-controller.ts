@@ -43,6 +43,7 @@ interface Host {
 	captureState(): HistoryViewState;
 	getAnalysis(): BracketAnalysis;
 	getSelection(): TextSelection;
+	hasSnippet(): boolean;
 	redo(): void;
 	render(): void;
 	revealCursor(): void;
@@ -146,6 +147,7 @@ export class NativeInputController {
 			return;
 		if (
 			this.selectionsValue.length > 1 ||
+			this.host.hasSnippet() ||
 			this.options.accessibilitySupport !== "on"
 		) {
 			const supported =

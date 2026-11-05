@@ -20,6 +20,8 @@ export type {
 	Location,
 	SymbolInformation,
 	Token,
+	WorkspaceEdit,
+	WorkspaceFileOperation,
 } from "./api/languages";
 export {
 	detectLanguage,
@@ -59,6 +61,7 @@ export {
 	TextModel,
 	type TextModelOptions,
 	type ValueOptions,
+	type WorkspaceTextEdit,
 } from "./model/text-model";
 export type {
 	RangeStickiness,

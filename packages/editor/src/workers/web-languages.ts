@@ -123,6 +123,9 @@ export async function webLanguage(
 					};
 		return {
 			label: item.label,
+			...(item.commitCharacters
+				? { commitCharacters: item.commitCharacters }
+				: {}),
 			insertText: replacement?.newText ?? item.insertText ?? item.label,
 			from: document.offsetAt(span.start),
 			to: document.offsetAt(span.end),

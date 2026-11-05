@@ -11,6 +11,7 @@ import type {
 	LanguageEdit,
 	Location,
 	Token,
+	WorkspaceEdit,
 } from "../api/languages";
 import type {
 	Disposable,
@@ -173,7 +174,9 @@ export class EditorView implements Disposable {
 		getSelection: () => this.getSelection(),
 		getSelections: () => this.getSelections(),
 		setSelections: (v, r) => this.setSelections(v, r),
-		applyMultiPlan: (p) => this.applyMultiPlan(p),
+		applyMultiPlan: (p, g) =>
+			this.transactions.applyMultiPlan(p, undefined, g),
+		applyCompletionPlan: (p, e) => this.languageEdits.applyCompletion(p, e),
 		mergeCompletionEdits: (p, e) => this.mergeCompletionEdits(p, e),
 		offerChoices: (v) => this.languageFeatures.offerSnippetChoices(v),
 	});
@@ -183,8 +186,11 @@ export class EditorView implements Disposable {
 		canEdit: () => this.canEdit(),
 		getSelections: () => this.getSelections(),
 		applyMultiPlan: (p) => this.applyMultiPlan(p),
+		applyWorkspace: (b, s) => this.transactions.applyWorkspace(b, s),
+		workspaceHandler: () => this.workspaceHandler,
 	});
 	private readonly locationHandler: EditorViewOptions["onOpenLocation"];
+	private readonly workspaceHandler: EditorViewOptions["onWorkspaceEdit"];
 	private lastSelection: TextSelection = {
 		start: 0,
 		end: 0,
@@ -201,6 +207,7 @@ export class EditorView implements Disposable {
 	) {
 		this.model = model;
 		this.locationHandler = options.onOpenLocation;
+		this.workspaceHandler = options.onWorkspaceEdit;
 		this.attachedModel = model;
 		this.languageOverride = options.languageConfiguration;
 		let indentation = resolveIndentation(
@@ -282,6 +289,7 @@ export class EditorView implements Disposable {
 			captureState: () => this.captureState(),
 			getAnalysis: () => this.getAnalysis(),
 			getSelection: () => this.getSelection(),
+			hasSnippet: () => this.snippets.active,
 			redo: () => this.redo(),
 			render: () => this.render(),
 			revealCursor: () => this.revealCursor(),
@@ -466,7 +474,7 @@ export class EditorView implements Disposable {
 			offsetAtPoint: (x, y) => this.offsetAtPoint(x, y),
 			analysis: (value) => this.setLanguageAnalysis(value),
 			apply: (edits) => this.applyLanguageEdits(edits),
-			accept: (item) => this.acceptCompletion(item),
+			accept: (item, character) => this.acceptCompletion(item, character),
 			snippet: (body) => this.insertSnippet(body),
 			nextSnippet: (backward) => this.nextSnippet(backward),
 			cancelSnippet: () => this.clearSnippet(),
@@ -511,17 +519,26 @@ export class EditorView implements Disposable {
 	runLanguageCommand(command: string): void {
 		void this.languageFeatures.run(command);
 	}
-	private applyLanguageEdits(edits: readonly LanguageEdit[]): void {
-		this.languageEdits.apply(edits);
+	private applyLanguageEdits(
+		edits: readonly LanguageEdit[] | WorkspaceEdit,
+	): void | Promise<void> {
+		return this.languageEdits.applyResult(edits);
 	}
+
 	private mergeCompletionEdits(
 		plan: MultiEditingPlan,
 		extras: readonly LanguageEdit[],
 	): MultiEditingPlan {
 		return this.languageEdits.mergeCompletion(plan, extras);
 	}
-	private acceptCompletion(item: Completion): void {
+	private acceptCompletion(item: Completion, commitCharacter?: string): void {
 		if (!this.canEdit()) return;
+		if (
+			commitCharacter &&
+			!item.snippet &&
+			!item.insertText.endsWith(commitCharacter)
+		)
+			item = { ...item, insertText: item.insertText + commitCharacter };
 		const primary = this.getSelection(),
 			values = this.getSelections().map((selection) => ({
 				...selection,
@@ -529,14 +546,15 @@ export class EditorView implements Disposable {
 				end: Math.max(0, selection.end + item.to - primary.end),
 			}));
 		if (item.snippet)
-			this.insertSnippet(
+			this.snippets.insert(
 				item.insertText,
 				{},
 				values,
 				item.additionalEdits,
+				commitCharacter,
 			);
 		else
-			this.applyMultiPlan(
+			this.languageEdits.applyCompletion(
 				this.mergeCompletionEdits(
 					combinePlans(
 						values.map((selection) =>
@@ -546,6 +564,7 @@ export class EditorView implements Disposable {
 					),
 					item.additionalEdits ?? [],
 				),
+				item.additionalEdits ?? [],
 			);
 	}
 
@@ -680,6 +699,7 @@ export class EditorView implements Disposable {
 		this.updateCursor();
 	}
 	private switchModel(model: TextModel | null, save: boolean): void {
+		this.languageEdits.cancel();
 		if (model === this.attachedModel) return;
 		this.cursors.reset();
 		this.editing.resetMulti();
@@ -1012,6 +1032,9 @@ export class EditorView implements Disposable {
 		);
 		this.breakHistoryGroup();
 		this.element.readOnly = next.readOnly || !this.attachedModel;
+		if (next.readOnly) this.clearSnippet();
+		if (next.readOnly) this.languageFeatures.cancelRequests();
+		if (next.readOnly) this.languageEdits.cancel();
 		this.element.setAttribute(
 			"aria-readonly",
 			String(this.element.readOnly),
@@ -1233,7 +1256,14 @@ export class EditorView implements Disposable {
 		this.editing.applyPerSelection(planner, inputKind);
 	}
 	private applyMultiPlan(plan: MultiEditingPlan, inputKind?: string): void {
-		this.transactions.applyMultiPlan(plan, inputKind);
+		const group = this.snippets.beforeEdit(plan);
+		let applied = false;
+		try {
+			this.transactions.applyMultiPlan(plan, inputKind, group);
+			applied = true;
+		} finally {
+			if (group) this.snippets.afterEdit(applied);
+		}
 	}
 	private applyEditingPlan(plan: EditingPlan | undefined): void {
 		this.transactions.applyEditingPlan(plan);
@@ -1337,6 +1367,7 @@ export class EditorView implements Disposable {
 			this.cursorRedo.length = 0;
 		}
 		this.selectionsValue[0] = selection;
+		this.snippets.selectionChanged();
 		this.renderer.setSelections(this.selectionsValue);
 		if (
 			this.nativeInput.typingGroup &&
@@ -1372,6 +1403,8 @@ export class EditorView implements Disposable {
 			this.updateCursor();
 	};
 	private readonly handleCompositionStart = (): void => {
+		this.clearSnippet();
+		this.languageFeatures.cancelRequests();
 		this.nativeInput.handleCompositionStart();
 	};
 	private readonly handleCompositionEnd = (event: CompositionEvent): void => {
@@ -1561,6 +1594,7 @@ export class EditorView implements Disposable {
 	}
 
 	dispose(): void {
+		this.languageEdits.cancel();
 		if (this.disposed) return;
 		this.disposed = true;
 		this.nativeInput.deferredComposition = undefined;

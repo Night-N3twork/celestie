@@ -25,6 +25,10 @@ export interface EditorOptions extends IndentationOptions {
 }
 
 export interface EditorViewOptions extends Partial<EditorOptions> {
+	readonly onWorkspaceEdit?: (
+		edit: import("./languages").WorkspaceEdit,
+		signal: AbortSignal,
+	) => void | Promise<void>;
 	readonly ariaLabel?: string;
 	readonly onOpenLocation?: (
 		location: import("./languages").Location,

@@ -13,6 +13,7 @@ import { getLanguage } from "../api/languages";
 import type { Disposable } from "../api/types";
 import { languageEngine } from "../languages/client";
 import type { TextModel } from "../model/text-model";
+import type { TrackedRange } from "../model/tracked-ranges";
 import { prepareCompletions } from "./completion-items";
 import { showColorPicker, showRename } from "./language-dialogs";
 import type { LanguageFeatureHost as Host } from "./language-host";
@@ -43,6 +44,10 @@ export class LanguageFeatures implements Disposable {
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private hoverTimer: ReturnType<typeof setTimeout> | undefined;
 	private completions: readonly Completion[] = [];
+	private completionContext:
+		| { context: LanguageContext; version: number }
+		| undefined;
+	private readonly commitAnchors = new Set<TrackedRange>();
 	private readonly resolved = new WeakMap<
 		Completion,
 		{ detail: string; edits: readonly LanguageEdit[] }
@@ -62,6 +67,7 @@ export class LanguageFeatures implements Disposable {
 			...host,
 			onClose: (clearInline) => {
 				this.completions = [];
+				this.completionContext = undefined;
 				if (clearInline) this.inline = "";
 			},
 		});
@@ -81,6 +87,7 @@ export class LanguageFeatures implements Disposable {
 		this.widget.addEventListener("keydown", this.keydown);
 	}
 	setModel(model: TextModel | null): void {
+		this.cancelRequests();
 		for (const sub of this.subscriptions.splice(0)) sub.dispose();
 		this.abort.abort();
 		this.analysisAbort.abort();
@@ -103,6 +110,12 @@ export class LanguageFeatures implements Disposable {
 	}
 	refresh(): void {
 		this.changed();
+	}
+	cancelRequests(): void {
+		this.abort.abort();
+		for (const anchor of this.commitAnchors) anchor.dispose();
+		this.commitAnchors.clear();
+		this.close();
 	}
 	updateStatus(diagnostics: readonly Diagnostic[]): void {
 		const errors = diagnostics.filter(
@@ -256,6 +269,7 @@ export class LanguageFeatures implements Disposable {
 				);
 				this.completions = ordered.slice(0, 100);
 				this.resolveActive();
+				this.completionContext = { context, version };
 				return;
 			}
 			if (command === "hover") {
@@ -319,7 +333,7 @@ export class LanguageFeatures implements Disposable {
 								}
 							: {},
 					);
-				if (this.valid(context, version)) this.host.apply(result);
+				if (this.valid(context, version)) await this.host.apply(result);
 				return;
 			}
 			if (command === "actions") {
@@ -337,7 +351,17 @@ export class LanguageFeatures implements Disposable {
 								this.valid(context, version) &&
 								this.host.canEdit()
 							)
-								this.host.apply(action.edits);
+								void Promise.resolve()
+									.then(() => {
+										if (
+											this.valid(context, version) &&
+											this.host.canEdit()
+										)
+											return this.host.apply(action);
+									})
+									.catch((error) =>
+										this.host.announce(String(error)),
+									);
 						},
 					})),
 					context.offset,
@@ -373,19 +397,70 @@ export class LanguageFeatures implements Disposable {
 		item: Completion,
 		context: LanguageContext,
 		version: number,
+		commitCharacter?: string,
 	): Promise<void> {
+		const point = context.model.getPositionAtInputOffset(context.offset);
+		const selection = JSON.stringify(this.host.selection());
+		const anchor = commitCharacter
+			? context.model.trackRange(
+					{
+						startLine: point.line,
+						startColumn: point.column,
+						endLine: point.line,
+						endColumn: point.column,
+					},
+					{ stickiness: "before" },
+				)
+			: undefined;
+		let accepted = false;
+		if (anchor) this.commitAnchors.add(anchor);
+		if (commitCharacter) this.close();
 		try {
 			const result = await this.resolveItem(item, context);
-			if (this.valid(context, version) && this.host.canEdit())
-				this.host.accept({
-					...item,
-					...(result?.edits.length
-						? { additionalEdits: result.edits }
-						: {}),
-				});
+			if (
+				this.valid(context, version) &&
+				this.host.canEdit() &&
+				JSON.stringify(this.host.selection()) === selection
+			) {
+				this.host.accept(
+					{
+						...item,
+						...(result?.edits.length
+							? { additionalEdits: result.edits }
+							: {}),
+					},
+					commitCharacter,
+				);
+				accepted = true;
+			}
 		} catch (error) {
 			if (!(error instanceof DOMException && error.name === "AbortError"))
 				this.host.announce(String(error));
+		} finally {
+			const range = anchor?.getRange();
+			anchor?.dispose();
+			if (anchor) this.commitAnchors.delete(anchor);
+			if (
+				commitCharacter &&
+				!accepted &&
+				range &&
+				!this.disposed &&
+				this.host.model() === context.model &&
+				this.host.canEdit()
+			) {
+				const offset = context.model.getInputOffsetAt({
+					line: range.startLine,
+					column: range.startColumn,
+				});
+				this.host.apply([
+					{
+						uri: context.model.uri.toString(),
+						from: offset,
+						to: offset,
+						text: commitCharacter,
+					},
+				]);
+			}
 		}
 	}
 	private resolveActive(): void {
@@ -553,6 +628,36 @@ export class LanguageFeatures implements Disposable {
 	}
 	private readonly keydown = (event: KeyboardEvent): void => {
 		if (event.isComposing) return;
+		if (event.key === "Escape" && this.commitAnchors.size) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			this.host.cancelSnippet();
+			this.cancelRequests();
+			return;
+		}
+		const item = this.completions[this.index],
+			request = this.completionContext;
+		if (
+			!this.widget.hidden &&
+			item &&
+			request &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.altKey &&
+			[...event.key].length === 1 &&
+			item.commitCharacters?.includes(event.key) &&
+			this.host.canEdit()
+		) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			void this.acceptResolved(
+				item,
+				request.context,
+				request.version,
+				event.key,
+			);
+			return;
+		}
 		if (event.key === "Escape") this.host.cancelSnippet();
 		if (event.key === "Escape" && (!this.widget.hidden || this.inline)) {
 			event.preventDefault();
@@ -693,6 +798,7 @@ export class LanguageFeatures implements Disposable {
 	}
 	dispose(): void {
 		this.disposed = true;
+		this.cancelRequests();
 		this.abort.abort();
 		this.analysisAbort.abort();
 		if (this.timer) clearTimeout(this.timer);

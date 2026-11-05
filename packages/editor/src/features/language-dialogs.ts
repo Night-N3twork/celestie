@@ -1,4 +1,9 @@
-import type { Analysis, LanguageContext, LanguageEdit } from "../api/languages";
+import type {
+	Analysis,
+	LanguageContext,
+	LanguageEdit,
+	WorkspaceEdit,
+} from "../api/languages";
 import type { LanguageFeatureHost } from "./language-host";
 import type { LanguagePopup } from "./language-popup";
 
@@ -40,13 +45,17 @@ export function showRename(
 			return;
 		}
 		void dialog
-			.request<readonly LanguageEdit[]>("rename", context, {
-				name: field.value,
-			})
-			.then((edits) => {
+			.request<readonly LanguageEdit[] | WorkspaceEdit>(
+				"rename",
+				context,
+				{
+					name: field.value,
+				},
+			)
+			.then(async (edits) => {
 				if (dialog.valid(context, version) && dialog.editor.canEdit()) {
 					dialog.popup.close();
-					dialog.editor.apply(edits);
+					await dialog.editor.apply(edits);
 					dialog.editor.input.focus({ preventScroll: true });
 				}
 			})

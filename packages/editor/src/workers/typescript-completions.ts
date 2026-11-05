@@ -79,6 +79,15 @@ export function typescriptCompletions(
 					...(entry.source ? { source: entry.source } : {}),
 					...(entry.data ? { data: entry.data } : {}),
 					insertText: entry.insertText ?? entry.name,
+					...((entry.commitCharacters ??
+					result?.defaultCommitCharacters)
+						? {
+								commitCharacters:
+									entry.commitCharacters ??
+									result?.defaultCommitCharacters ??
+									[],
+							}
+						: {}),
 					from:
 						entry.replacementSpan?.start ?? offset - prefix.length,
 					to: entry.replacementSpan

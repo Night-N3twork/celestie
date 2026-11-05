@@ -4,6 +4,7 @@ import type {
 	HistoryViewState,
 } from "../api/types";
 import { copyText } from "./text-utils";
+import type { WorkspaceHistory } from "./workspace-history";
 
 export interface HistoryBatch {
 	readonly forward: readonly ContentChange[];
@@ -19,6 +20,7 @@ export interface HistoryEntry {
 	readonly afterEOL: string;
 	readonly group: string | undefined;
 	readonly bytes: number;
+	readonly workspace: WorkspaceHistory | undefined;
 }
 
 function state(
@@ -67,9 +69,12 @@ export class History {
 		afterVersion: number,
 		beforeEOL: string,
 		afterEOL: string,
+		workspace?: WorkspaceHistory,
 	): boolean {
 		const previous = this.undoEntries.at(-1);
 		const merge =
+			!workspace &&
+			!previous?.workspace &&
 			options.group !== undefined &&
 			this.mergeGroup === options.group &&
 			previous?.group === options.group &&
@@ -104,6 +109,7 @@ export class History {
 			afterEOL,
 			group: options.group,
 			bytes: totalBytes,
+			workspace,
 		});
 		this.redoEntries.length = 0;
 		if (merge) this.undoEntries.pop();
@@ -112,6 +118,16 @@ export class History {
 		this.stop = false;
 		this.trim();
 		return true;
+	}
+	canRecord(batch: HistoryBatch, options: EditHistoryOptions): boolean {
+		const bytes = [...batch.forward, ...batch.inverse].reduce(
+			(total, change) => total + change.text.length * 2 + 96,
+			256 +
+				((options.before?.selections?.length ?? 1) +
+					(options.after?.selections?.length ?? 1)) *
+					96,
+		);
+		return this.limit > 0 && bytes <= this.byteLimit;
 	}
 	undoable(): boolean {
 		return this.undoEntries.length > 0;
