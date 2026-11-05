@@ -28,6 +28,16 @@ export function registerEditorActions(view: EditorView): void {
 			when: () => !!view.getModel() && !view.isComposing,
 			menu: id === "format" || id === "rename" || id === "definitions",
 		});
+	for (const [id, label, delta] of [
+		["view.fontZoomIn", "Editor Font Zoom In", 1],
+		["view.fontZoomOut", "Editor Font Zoom Out", -1],
+		["view.fontZoomReset", "Editor Font Zoom Reset", 0],
+	] as const)
+		view.commands.register({
+			id,
+			label,
+			run: () => view.setFontZoom(delta ? view.getFontZoom() + delta : 0),
+		});
 	view.commands.register({
 		id: "view.toggleFold",
 		label: "Toggle Fold",

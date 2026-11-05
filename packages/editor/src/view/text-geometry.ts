@@ -1,6 +1,7 @@
 import type { Position } from "../api/types";
 import type { TextModel } from "../model/text-model";
 import { LineMetrics, longLineLimit } from "./line-metrics";
+import { calibrationSamples, hasRightToLeft } from "./text-shaping";
 import type { VisualLayout, VisualRow } from "./visual-layout";
 
 interface RowGeometry {
@@ -24,6 +25,11 @@ export class TextGeometry {
 	private font = "16px monospace";
 	private widths = new Map<string, number>();
 	private metrics = new Map<number, LineMetrics>();
+	private probe: HTMLSpanElement | undefined;
+	private domMeasurement = false;
+	get measuresWithDom(): boolean {
+		return this.domMeasurement;
+	}
 	originY = 0;
 	originX = 0;
 	private lineMetrics(line: number): LineMetrics {
@@ -59,6 +65,36 @@ export class TextGeometry {
 		this.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
 		this.widths.clear();
 		this.metrics.clear();
+		this.domMeasurement = false;
+		if (!this.canvas) {
+			this.domMeasurement = true;
+			return;
+		}
+		for (const sample of calibrationSamples) {
+			const canvas = this.measureRun(sample),
+				dom = this.measureDom(sample);
+			if (Math.abs(canvas - dom) > Math.max(0.5, dom * 0.005)) {
+				this.domMeasurement = true;
+				break;
+			}
+		}
+		this.widths.clear();
+	}
+	private measureDom(text: string): number {
+		if (!this.probe) {
+			this.probe = this.viewport.ownerDocument.createElement("span");
+			this.probe.className = "editor-measure-probe";
+			this.probe.setAttribute("aria-hidden", "true");
+		}
+		if (!this.probe.isConnected) this.surface.append(this.probe);
+		this.probe.textContent = text;
+		return this.probe.getBoundingClientRect().width;
+	}
+	private measureRun(text: string): number {
+		if (!text) return 0;
+		if (this.domMeasurement || !this.canvas) return this.measureDom(text);
+		this.canvas.font = this.font;
+		return this.canvas.measureText(text).width;
 	}
 	lineHeight = 24;
 	constructor(
@@ -79,6 +115,8 @@ export class TextGeometry {
 		this.clear();
 		this.metrics.clear();
 		this.widths.clear();
+		this.probe?.remove();
+		this.probe = undefined;
 	}
 	hasLine(line: number): boolean {
 		return [...this.rows.values()].some((value) => value.row.line === line);
@@ -181,17 +219,24 @@ export class TextGeometry {
 	spaceWidth(): number {
 		return this.measure(" ");
 	}
+	private spaceAdvance(): number {
+		let width = this.widths.get(" ");
+		if (width === undefined) {
+			width = this.measureRun(" ") || 8;
+			this.widths.set(" ", width);
+		}
+		return width;
+	}
 	measure(text: string, initial = 0): number {
 		const cached = initial === 0 ? this.widths.get(text) : undefined;
 		if (cached !== undefined) return cached;
-		if (this.canvas) this.canvas.font = this.font;
-		const space = this.canvas?.measureText(" ").width ?? 8,
+		const space = this.spaceAdvance(),
 			tab = space * this.tabSize;
 		let width = initial;
 		const runs = text.split("\t");
 		for (let i = 0; i < runs.length; i++) {
 			const run = runs[i] ?? "";
-			width += this.canvas?.measureText(run).width ?? run.length * space;
+			width += this.measureRun(run);
 			if (i < runs.length - 1)
 				width = (Math.floor(width / tab) + 1) * tab;
 		}
@@ -262,11 +307,7 @@ export class TextGeometry {
 			);
 		};
 		let offset = segment.from;
-		if (
-			/[\u0590-\u08ff\ufb1d-\ufeff]/u.test(
-				text.slice(measured.from, measured.to),
-			)
-		) {
+		if (hasRightToLeft(text.slice(measured.from, measured.to))) {
 			let distance = Infinity;
 			for (const boundary of boundaries) {
 				const next = Math.abs(coordinate(boundary) - x);

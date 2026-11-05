@@ -4,29 +4,52 @@ import type { Disposable, Position, TextSelection } from "../api/types";
 import type { SyntaxPalette } from "../features/clipboard-payload";
 import type { VisibleDecoration } from "../features/decorations";
 import type { SearchMatch } from "../features/search";
-import { applyTheme } from "../features/themes";
+import {
+	applyTheme,
+	isTokenScope,
+	resolveThemeName,
+	resolveTokenStyle,
+	tokenStyleText,
+} from "../features/themes";
 import type { TextModel } from "../model/text-model";
 import "../styles/editor.css";
 import { LineNumberGutter } from "./line-number-gutter";
 import { paintOverview, paintStickyHeaders } from "./overview-painter";
+import { PlatformMedia } from "./platform-media";
 import { appendRow } from "./row-painter";
 import { ScrollAxis } from "./scroll-axis";
 import { paintSelectionLayers } from "./selection-painter";
 import { TextGeometry } from "./text-geometry";
-import { type FoldRegion, VisualLayout, type VisualRow } from "./visual-layout";
+import { ligatureStyle, snapToDevicePixels } from "./text-shaping";
+import {
+	type FoldRegion,
+	type LayoutZone,
+	VisualLayout,
+	type VisualRow,
+} from "./visual-layout";
+import {
+	type ContentWidgetOptions,
+	type OverlayWidgetOptions,
+	type WidgetFocusPolicy,
+	WidgetLayer,
+} from "./widget-layer";
 
 interface TextRendererOptions {
 	readonly input?: HTMLTextAreaElement;
 	readonly padding?: number;
 	readonly height?: string;
 	readonly onSelectLine?: (line: number) => void;
+	readonly onFocusEditor?: () => void;
+	readonly onFontZoom?: (level: number) => void;
 }
+export const minFontZoom = -5;
+export const maxFontZoom = 9;
 export interface ScrollAnchor {
 	readonly line: number;
 	readonly column: number;
 	readonly offset: number;
 	readonly left: number;
-	readonly zone?: boolean;
+	readonly rowDelta?: number;
 }
 export class TextRenderer implements Disposable {
 	private modelValue: TextModel | undefined;
@@ -57,6 +80,11 @@ export class TextRenderer implements Disposable {
 		tabFocusMode: false,
 		accessibilitySupport: "auto",
 	};
+	private requestedOptions: EditorOptions = this.options;
+	private fontZoom = 0;
+	private wheelZoom = 0;
+	private readonly media: PlatformMedia;
+	private readonly widgetLayer: WidgetLayer;
 	private accessible = false;
 	private disposed = false;
 	private readonly padding: number;
@@ -115,15 +143,6 @@ export class TextRenderer implements Disposable {
 	}
 	private dropOffset: number | undefined;
 	private paintedVersion = -1;
-	private readonly widgets = new Map<
-		string,
-		{
-			node: HTMLElement;
-			position: () => Position;
-			placement: "above" | "below" | "inline";
-			model: TextModel;
-		}
-	>();
 	get lineHeight(): number {
 		return this.options.lineHeight;
 	}
@@ -179,7 +198,20 @@ export class TextRenderer implements Disposable {
 		this.overview = doc.createElement("div");
 		this.overview.className = "editor-overview";
 		this.root.append(this.scroller, this.minimap, this.overview);
+		this.root.dir = "ltr";
 		container.append(this.root);
+		this.widgetLayer = new WidgetLayer(
+			this.surface,
+			this.scroller,
+			() => this.callbacks.onFocusEditor?.(),
+			() => {
+				this.revision++;
+				this.render();
+			},
+			() => {
+				if (!this.disposed) this.positionWidgets();
+			},
+		);
 		this.layout = new VisualLayout(
 			() => this.model,
 			(text) => this.geometry.measure(text),
@@ -209,6 +241,11 @@ export class TextRenderer implements Disposable {
 			"loadingdone",
 			this.fontsChanged,
 		);
+		this.media = new PlatformMedia(doc.defaultView, (kind) => {
+			if (this.disposed) return;
+			if (kind === "resolution" || this.requestedOptions.theme === "auto")
+				this.configure(this.requestedOptions);
+		});
 		this.configure(this.options);
 	}
 	private readonly fontsChanged = (): void => {
@@ -220,6 +257,23 @@ export class TextRenderer implements Disposable {
 		this.restoreAnchor(anchor);
 	};
 	private readonly wheel = (event: WheelEvent): void => {
+		if (
+			this.options.mouseWheelZoom &&
+			(event.ctrlKey || event.metaKey) &&
+			event.deltaY
+		) {
+			event.preventDefault();
+			this.wheelZoom +=
+				event.deltaY *
+				(event.deltaMode === 1 ? 33 : event.deltaMode ? 400 : 1);
+			if (Math.abs(this.wheelZoom) >= 50) {
+				const step = this.wheelZoom < 0 ? 1 : -1;
+				this.wheelZoom = 0;
+				if (this.setFontZoom(this.fontZoom + step))
+					this.callbacks.onFontZoom?.(this.fontZoom);
+			}
+			return;
+		}
 		if (
 			(!this.verticalScroll.compressed &&
 				!this.horizontalScroll.compressed) ||
@@ -244,9 +298,44 @@ export class TextRenderer implements Disposable {
 	private readonly inputScroll = (): void => {
 		if (this.accessible) this.render();
 	};
-	configure(options: EditorOptions): void {
+	get fontZoomLevel(): number {
+		return this.fontZoom;
+	}
+	setFontZoom(level: number): boolean {
+		if (!Number.isInteger(level))
+			throw new TypeError("Font zoom level must be an integer.");
+		const next = Math.max(minFontZoom, Math.min(maxFontZoom, level));
+		if (next === this.fontZoom) return false;
+		this.fontZoom = next;
+		this.configure(this.requestedOptions);
+		return true;
+	}
+	private effectiveOptions(options: EditorOptions): EditorOptions {
+		const factor = 1 + this.fontZoom / 10;
+		return {
+			...options,
+			fontSize: Math.round(options.fontSize * factor * 2) / 2,
+			lineHeight: snapToDevicePixels(
+				Math.round(options.lineHeight * factor),
+				this.media?.devicePixelRatio ?? 1,
+			),
+			theme: resolveThemeName(
+				options.theme,
+				this.root.ownerDocument.defaultView,
+			),
+		};
+	}
+	get resolvedTheme(): string {
+		return this.options.theme;
+	}
+	configure(requested: EditorOptions): void {
 		const anchor = this.captureAnchor();
+		this.requestedOptions = requested;
+		const options = this.effectiveOptions(requested);
 		this.options = options;
+		const ligatures = ligatureStyle(options.fontLigatures);
+		this.root.style.fontVariantLigatures = ligatures.variant;
+		this.root.style.fontFeatureSettings = ligatures.features;
 		this.root.style.fontFamily = options.fontFamily;
 		this.root.style.fontSize = `${options.fontSize}px`;
 		this.root.style.lineHeight = `${options.lineHeight}px`;
@@ -260,6 +349,7 @@ export class TextRenderer implements Disposable {
 			.closest<HTMLElement>(".editor-view-frame")
 			?.setAttribute("data-theme", options.theme);
 		const frame = this.root.closest<HTMLElement>(".editor-view-frame");
+		if (frame) frame.dataset.themeSetting = requested.theme;
 		frame?.style.setProperty("--editor-font-family", options.fontFamily);
 		frame?.style.setProperty("--editor-font-size", `${options.fontSize}px`);
 		frame?.style.setProperty(
@@ -304,10 +394,14 @@ export class TextRenderer implements Disposable {
 				Math.max(0, this.scrollTop - this.padding) / this.lineHeight,
 			),
 		);
+		const delta =
+			row.kind === "zone"
+				? row.index - this.layout.position(row.line, row.from + 1).index
+				: 0;
 		return {
 			line: row.line,
 			column: row.from + 1,
-			...(row.kind === "zone" ? { zone: true } : {}),
+			...(delta ? { rowDelta: delta } : {}),
 			offset:
 				this.scrollTop - (this.padding + row.index * this.lineHeight),
 			left: this.scrollLeft,
@@ -315,12 +409,15 @@ export class TextRenderer implements Disposable {
 	}
 	restoreAnchor(anchor: ScrollAnchor): void {
 		if (this.disposed) return;
-		let row = this.layout.position(anchor.line, anchor.column);
-		if (anchor.zone && this.layout.row(row.index - 1).kind === "zone")
-			row = this.layout.row(row.index - 1);
+		let index = this.layout.position(anchor.line, anchor.column).index;
+		if (anchor.rowDelta) {
+			const shifted = this.layout.row(index + anchor.rowDelta);
+			if (shifted.kind === "zone" && shifted.line === anchor.line)
+				index = shifted.index;
+		}
 		this.scrollTop = Math.max(
 			0,
-			this.padding + row.index * this.lineHeight + anchor.offset,
+			this.padding + index * this.lineHeight + anchor.offset,
 		);
 		this.scrollLeft = anchor.left;
 		this.render();
@@ -355,11 +452,13 @@ export class TextRenderer implements Disposable {
 		this.root.append(probe);
 		const colors = new Map<string, string>();
 		for (const { kind } of this.tokens)
-			if (!colors.has(kind) && /^[a-z0-9-]+$/.test(kind)) {
-				probe.className = `editor-token-${kind}`;
+			if (!colors.has(kind) && isTokenScope(kind)) {
+				probe.className = `editor-token-${kind.split(".", 1)[0]}`;
+				probe.style.cssText = this.tokenStyle(kind) ?? "";
 				colors.set(kind, view?.getComputedStyle(probe).color ?? "");
 			}
 		probe.className = "";
+		probe.style.cssText = "";
 		const plain = view?.getComputedStyle(probe).color;
 		probe.remove();
 		return {
@@ -454,8 +553,15 @@ export class TextRenderer implements Disposable {
 				affinity,
 			);
 		let row = this.layout.row(current.index + rows);
-		if (row.kind === "zone")
-			row = this.layout.row(row.index + (rows < 0 ? -1 : 1));
+		const step = rows < 0 ? -1 : 1;
+		while (row.kind === "zone") {
+			const next = this.layout.row(row.index + step);
+			if (next.index === row.index) {
+				row = current;
+				break;
+			}
+			row = next;
+		}
 		const target = this.geometry.offsetAtRowX(row.index, x);
 		return {
 			offset: target,
@@ -488,11 +594,7 @@ export class TextRenderer implements Disposable {
 			width,
 			this.folds,
 			this.accessible,
-			this.options.codeLens &&
-				!this.accessible &&
-				this.assistanceVersion === this.model.getVersionId()
-				? this.lenses.map((lens) => lens.line)
-				: [],
+			this.layoutZones(),
 			this.options.inlayHints &&
 				!this.accessible &&
 				this.assistanceVersion === this.model.getVersionId()
@@ -548,6 +650,11 @@ export class TextRenderer implements Disposable {
 			const fragment = this.root.ownerDocument.createDocumentFragment();
 			this.geometry.clear();
 			for (const fullRow of this.visible) {
+				if (
+					fullRow.kind === "zone" &&
+					!fullRow.zone?.startsWith("code-lens:")
+				)
+					continue;
 				const row = this.accessible
 					? fullRow
 					: this.geometry.window(
@@ -646,6 +753,54 @@ export class TextRenderer implements Disposable {
 		this.paintSticky();
 		this.positionWidgets();
 	};
+	private positionWidgets(): void {
+		const source = this.viewport;
+		this.widgetLayer.paint({
+			model: this.model,
+			visible: this.visible,
+			layout: this.layout,
+			lineHeight: this.lineHeight,
+			padding: this.padding,
+			originY: this.scrollOrigin,
+			zonesEnabled: !this.accessible,
+			view: this.accessible
+				? {
+						left: 0,
+						top: 0,
+						width: source.clientWidth,
+						height: source.clientHeight,
+					}
+				: {
+						left: this.scroller.scrollLeft,
+						top: this.scroller.scrollTop,
+						width: this.scroller.clientWidth,
+						height: this.scroller.clientHeight,
+					},
+			point: (position) => this.geometry.point(position),
+		});
+	}
+	private layoutZones(): LayoutZone[] {
+		const zones: LayoutZone[] = [];
+		if (
+			this.options.codeLens &&
+			!this.accessible &&
+			this.assistanceVersion === this.model.getVersionId()
+		)
+			for (const line of new Set(this.lenses.map((lens) => lens.line)))
+				zones.push({
+					id: `code-lens:${line}`,
+					line,
+					placement: "before",
+					rows: 1,
+				});
+		return zones.concat(
+			this.widgetLayer.layoutZones(this.model, !this.accessible),
+		);
+	}
+	private readonly tokenStyle = (scope: string): string | undefined => {
+		const style = resolveTokenStyle(this.options.theme, scope);
+		return style ? tokenStyleText(style) || undefined : undefined;
+	};
 	private appendText(element: HTMLElement, row: VisualRow): void {
 		appendRow(
 			{
@@ -660,6 +815,7 @@ export class TextRenderer implements Disposable {
 				assistanceVersion: this.assistanceVersion,
 				hints: this.hints,
 				folds: this.folds,
+				tokenStyle: this.tokenStyle,
 			},
 			element,
 			row,
@@ -749,39 +905,40 @@ export class TextRenderer implements Disposable {
 		id: string,
 		node: HTMLElement,
 		position: () => Position,
-		placement: "above" | "below" | "inline" = "below",
+		options: ContentWidgetOptions = {},
 	): Disposable {
-		if (this.widgets.has(id))
-			throw new Error(`Widget already registered: ${id}`);
-		node.dataset.editorWidget = id;
-		node.classList.add("editor-content-widget");
-		this.surface.append(node);
-		this.widgets.set(id, { node, position, placement, model: this.model });
+		const handle = this.widgetLayer.addContent(
+			id,
+			node,
+			position,
+			this.model,
+			options,
+		);
 		this.positionWidgets();
-		return {
-			dispose: () => {
-				if (this.widgets.get(id)?.node === node)
-					this.widgets.delete(id);
-				node.remove();
-			},
-		};
+		return handle;
 	}
-	private positionWidgets(): void {
-		for (const widget of this.widgets.values()) {
-			const position = widget.position(),
-				row = this.layout.position(position.line, position.column);
-			widget.node.hidden =
-				widget.model !== this.model ||
-				!this.visible.some((value) => value.index === row.index);
-			if (widget.node.hidden) continue;
-			const point = this.geometry.point(position);
-			widget.node.hidden =
-				point.x + widget.node.offsetWidth < this.viewport.scrollLeft ||
-				point.x > this.viewport.scrollLeft + this.viewport.clientWidth;
-			if (widget.node.hidden) continue;
-			widget.node.style.left = `${point.x + (widget.placement === "inline" ? -11 : 0)}px`;
-			widget.node.style.top = `${point.y + (widget.placement === "above" ? -widget.node.offsetHeight : widget.placement === "below" ? this.lineHeight : 5)}px`;
-		}
+	addOverlayWidget(
+		id: string,
+		node: HTMLElement,
+		options: OverlayWidgetOptions,
+	): Disposable {
+		return this.widgetLayer.addOverlay(id, node, options);
+	}
+	addZone(
+		id: string,
+		node: HTMLElement,
+		anchor: () => { line: number; placement: "before" | "after" },
+		rows: () => number,
+		focus?: WidgetFocusPolicy,
+	): { dispose(): void; refresh(): void } {
+		return this.widgetLayer.addZone(
+			id,
+			node,
+			anchor,
+			this.model,
+			rows,
+			focus,
+		);
 	}
 
 	setDropOffset(offset: number | undefined): void {
@@ -815,7 +972,7 @@ export class TextRenderer implements Disposable {
 			);
 	}
 	setTabSize(size: number): void {
-		this.configure({ ...this.options, tabSize: size });
+		this.configure({ ...this.requestedOptions, tabSize: size });
 	}
 	setModel(model: TextModel): void {
 		this.subscription?.dispose();
@@ -850,12 +1007,12 @@ export class TextRenderer implements Disposable {
 		this.input?.removeEventListener("scroll", this.inputScroll);
 		this.minimap.removeEventListener("pointerdown", this.mapClick);
 		this.minimap.removeEventListener("keydown", this.mapKey);
+		this.media.dispose();
 		this.subscription?.dispose();
 		this.geometry.dispose();
 		this.rows.replaceChildren();
 		this.gutter.dispose();
-		for (const widget of this.widgets.values()) widget.node.remove();
-		this.widgets.clear();
+		this.widgetLayer.dispose();
 		this.root.remove();
 		this.modelValue = undefined;
 		this.tokens = [];

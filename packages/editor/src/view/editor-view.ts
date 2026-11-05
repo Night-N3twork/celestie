@@ -71,6 +71,13 @@ import { TextRenderer } from "./text-renderer";
 import { ViewPresentation } from "./view-presentation";
 import { ViewServices } from "./view-services";
 import { ViewTransactions } from "./view-transactions";
+import type {
+	ContentWidgetOptions,
+	ContentWidgetPlacement,
+	OverlayWidgetOptions,
+	ViewZone,
+	ViewZoneOptions,
+} from "./widget-layer";
 
 export class EditorView implements Disposable {
 	get shortcuts() {
@@ -325,6 +332,10 @@ export class EditorView implements Disposable {
 			padding: 16,
 			height: "100%",
 			onSelectLine: this.selectLine,
+			onFocusEditor: () => {
+				if (!this.disposed) this.focus();
+			},
+			onFontZoom: (level) => this.fontZoomChanged(level),
 		});
 		this.presentation = new ViewPresentation(
 			{
@@ -504,7 +515,10 @@ export class EditorView implements Disposable {
 		id: string,
 		node: HTMLElement,
 		position: import("../api/types").Position,
-		placement: "above" | "below" | "inline" = "below",
+		placement:
+			| ContentWidgetPlacement
+			| readonly ContentWidgetPlacement[]
+			| ContentWidgetOptions = "below",
 	): Disposable {
 		return this.presentation.addContentWidget(
 			id,
@@ -512,6 +526,38 @@ export class EditorView implements Disposable {
 			position,
 			placement,
 		);
+	}
+
+	addOverlayWidget(
+		id: string,
+		node: HTMLElement,
+		options: OverlayWidgetOptions,
+	): Disposable {
+		return this.presentation.addOverlayWidget(id, node, options);
+	}
+
+	addViewZone(options: ViewZoneOptions): ViewZone {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		return this.presentation.addViewZone(options);
+	}
+
+	getFontZoom(): number {
+		return this.renderer.fontZoomLevel;
+	}
+
+	setFontZoom(level: number): void {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		if (this.renderer.setFontZoom(level))
+			this.fontZoomChanged(this.renderer.fontZoomLevel);
+	}
+
+	getResolvedTheme(): string {
+		return this.renderer.resolvedTheme;
+	}
+
+	private fontZoomChanged(level: number): void {
+		this.updateCursor();
+		this.announce(`Editor zoom ${100 + level * 10}%`);
 	}
 
 	private setLanguageAnalysis(value: Analysis): void {
@@ -1373,6 +1419,7 @@ export class EditorView implements Disposable {
 		}
 		this.selectionsValue[0] = selection;
 		this.snippets.selectionChanged();
+		this.languageFeatures?.selectionChanged();
 		this.renderer.setSelections(this.selectionsValue);
 		if (
 			this.nativeInput.typingGroup &&

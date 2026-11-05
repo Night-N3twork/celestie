@@ -3,6 +3,7 @@ import type { InlayHint, Token } from "../api/languages";
 import type { Position } from "../api/types";
 import type { VisibleDecoration } from "../features/decorations";
 import type { SearchMatch } from "../features/search";
+import { isTokenScope } from "../features/themes";
 import type { TextModel } from "../model/text-model";
 import { longLineLimit } from "./line-metrics";
 import type { FoldRegion, VisualRow } from "./visual-layout";
@@ -19,6 +20,7 @@ interface appendRowState {
 	readonly assistanceVersion: number;
 	readonly hints: readonly InlayHint[];
 	readonly folds: readonly FoldRegion[];
+	readonly tokenStyle: (scope: string) => string | undefined;
 }
 export function appendRow(
 	state: appendRowState,
@@ -32,6 +34,7 @@ export function appendRow(
 		from: number;
 		to: number;
 		className?: string;
+		style?: string;
 		background?: string;
 		underline?: string;
 		title?: string;
@@ -58,10 +61,13 @@ export function appendRow(
 	for (let index = low; index < state.tokens.length; index++) {
 		const token = state.tokens[index];
 		if (!token || token.from > start + row.to) break;
-		if (/^[a-z0-9-]+$/.test(token.kind))
+		if (isTokenScope(token.kind)) {
+			const style = state.tokenStyle(token.kind);
 			mark(token.from - start, token.to - start, {
-				className: `editor-token-${token.kind}`,
+				className: `editor-token-${token.kind.split(".", 1)[0]}`,
+				...(style ? { style } : {}),
 			});
+		}
 	}
 	for (let index = 0; index < state.search.length; index++) {
 		const match = state.search[index];
@@ -146,6 +152,7 @@ export function appendRow(
 		span.textContent = text.slice(from, to);
 		span.className = active.map((mark) => mark.className ?? "").join(" ");
 		for (const item of active) {
+			if (item.style) span.style.cssText += `;${item.style}`;
 			if (item.background) span.style.background = item.background;
 			if (item.underline) {
 				span.style.textDecorationLine = "underline";

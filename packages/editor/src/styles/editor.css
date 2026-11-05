@@ -9,8 +9,8 @@
 .editor-notice {
 	flex: none;
 	padding: 8px 12px;
-	background: #29384a;
-	color: #fff;
+	background: var(--editor-accent-background, #094771);
+	color: var(--editor-foreground, #fff);
 	font:
 		13px system-ui,
 		sans-serif;
@@ -31,11 +31,11 @@
 	width: 340px;
 	max-width: calc(100% - 16px);
 	max-height: min(380px, calc(100% - 16px));
-	border: 1px solid #666;
+	border: 1px solid var(--editor-border, #666);
 	border-radius: 5px;
 	padding: 6px;
-	background: #252526;
-	color: #ddd;
+	background: var(--editor-panel, #252526);
+	color: var(--editor-foreground, #ddd);
 	box-shadow: 0 6px 20px #0008;
 	font:
 		13px system-ui,
@@ -51,10 +51,10 @@
 	box-sizing: border-box;
 	width: 100%;
 	margin-bottom: 6px;
-	border: 1px solid #75beff;
+	border: 1px solid var(--editor-accent, #75beff);
 	padding: 8px;
-	background: #1e1e1e;
-	color: #fff;
+	background: var(--editor-input, #1e1e1e);
+	color: var(--editor-foreground, #fff);
 	font: inherit;
 }
 .editor-command-menu > div:first-of-type {
@@ -77,22 +77,22 @@
 }
 .editor-command-menu button.is-active,
 .editor-command-menu button:hover:not(:disabled) {
-	border-color: #75beff;
-	background: #094771;
+	border-color: var(--editor-accent, #75beff);
+	background: var(--editor-accent-background, #094771);
 }
 .editor-command-menu button:disabled {
 	opacity: 0.45;
 	cursor: default;
 }
 .editor-command-menu kbd {
-	color: #bbb;
+	color: var(--editor-muted, #bbb);
 	font: 11px monospace;
 	white-space: nowrap;
 }
 .editor-command-status {
 	flex: none;
 	padding: 6px 8px 0;
-	color: #aaa;
+	color: var(--editor-muted, #aaa);
 	font-size: 11px;
 }
 
@@ -100,6 +100,7 @@
 	display: flex;
 	min-height: 240px;
 	overflow: hidden;
+	direction: ltr;
 	background: #1e1e1e;
 	color: #d4d4d4;
 	font:
@@ -124,7 +125,8 @@
 	min-width: 0;
 	overflow: auto;
 	overflow-anchor: none;
-	scrollbar-color: #666 #1e1e1e;
+	scrollbar-color: var(--editor-scrollbar, #666)
+		var(--editor-background, #1e1e1e);
 }
 
 .editor-text-surface {
@@ -144,8 +146,8 @@
 	right: 0;
 	box-sizing: border-box;
 	height: 24px;
-	border-block: 1px solid rgb(255 255 255 / 5%);
-	background: rgb(255 255 255 / 3%);
+	border-block: 1px solid var(--editor-line-highlight, rgb(255 255 255 / 5%));
+	background: var(--editor-line-highlight, rgb(255 255 255 / 3%));
 	pointer-events: none;
 }
 
@@ -154,8 +156,8 @@
 }
 
 .editor-gutter [data-line].is-active {
-	color: #d4d4d4;
-	background: rgb(255 255 255 / 5%);
+	color: var(--editor-foreground, #d4d4d4);
+	background: var(--editor-line-highlight, rgb(255 255 255 / 5%));
 }
 
 .editor-renderer-with-input .editor-text-viewport {
@@ -183,19 +185,24 @@
 	overflow: auto;
 	background: transparent;
 	color: transparent;
-	caret-color: #fff;
+	caret-color: var(--editor-caret, #fff);
 	font: inherit;
 	tab-size: inherit;
-	scrollbar-color: #666 #1e1e1e;
+	scrollbar-color: var(--editor-scrollbar, #666)
+		var(--editor-background, #1e1e1e);
 	-webkit-text-fill-color: transparent;
 }
 
 .editor-native-input {
-	caret-color: var(--editor-foreground, #fff);
+	caret-color: var(--editor-caret, var(--editor-foreground, #fff));
 }
 
 .editor-native-input::selection {
-	background: rgb(57 115 185 / 50%);
+	background: color-mix(
+		in srgb,
+		var(--editor-selection, #264f78) 75%,
+		transparent
+	);
 	color: transparent;
 	-webkit-text-fill-color: transparent;
 }
@@ -204,26 +211,26 @@
 	visibility: hidden;
 }
 .editor-composition-pending .editor-native-input {
-	color: #d4d4d4;
-	-webkit-text-fill-color: #d4d4d4;
+	color: var(--editor-foreground, #d4d4d4);
+	-webkit-text-fill-color: var(--editor-foreground, #d4d4d4);
 }
 
 .editor-cursor-label {
 	flex: none;
-	border-top: 1px solid #3c3c3c;
+	border-top: 1px solid var(--editor-border, #3c3c3c);
 	padding: 8px 12px;
-	background: #252526;
-	color: #ccc;
+	background: var(--editor-panel, #252526);
+	color: var(--editor-foreground, #ccc);
 	font: 12px monospace;
 	text-align: right;
 }
 
 .editor-find-panel {
 	flex: none;
-	border-bottom: 1px solid #3c3c3c;
+	border-bottom: 1px solid var(--editor-border, #3c3c3c);
 	padding: 10px 12px;
-	background: #252526;
-	color: #d4d4d4;
+	background: var(--editor-panel, #252526);
+	color: var(--editor-foreground, #d4d4d4);
 	font:
 		13px system-ui,
 		sans-serif;
@@ -247,10 +254,10 @@
 .editor-find-panel input:not([type="checkbox"]) {
 	flex: 1;
 	min-width: 180px;
-	border: 1px solid #666;
+	border: 1px solid var(--editor-border, #666);
 	padding: 6px 8px;
-	background: #1e1e1e;
-	color: #ddd;
+	background: var(--editor-input, #1e1e1e);
+	color: var(--editor-foreground, #ddd);
 	font: inherit;
 }
 
@@ -262,19 +269,19 @@
 }
 
 .editor-find-options input {
-	accent-color: #75beff;
+	accent-color: var(--editor-accent, #75beff);
 }
 
 .editor-find-panel input[aria-invalid="true"] {
-	border-color: #f48771;
+	border-color: var(--editor-error, #f48771);
 }
 
 .editor-find-panel button {
-	border: 1px solid #555;
+	border: 1px solid var(--editor-border, #555);
 	border-radius: 3px;
 	padding: 6px 8px;
-	background: #333;
-	color: #ddd;
+	background: var(--editor-input, #333);
+	color: var(--editor-foreground, #ddd);
 	font: inherit;
 	cursor: pointer;
 }
@@ -285,26 +292,30 @@
 }
 
 .editor-find-match {
-	background: #513e16;
-	outline: 1px solid #9a7430;
+	background: var(--editor-find-match, #513e16);
+	outline: 1px solid var(--editor-find-match-border, #9a7430);
 }
 
 .editor-find-match-current {
-	background: #785020;
-	outline-color: #edb665;
+	background: var(--editor-find-current, #785020);
+	outline-color: var(--editor-find-current-border, #edb665);
 }
 
 .editor-find-empty-match {
 	display: inline-block;
 	width: 0;
 	height: 1em;
-	outline: 1px solid #9a7430;
+	outline: 1px solid var(--editor-find-match-border, #9a7430);
 	vertical-align: text-bottom;
 }
 
 .editor-matching-bracket {
-	background: rgb(117 190 255 / 18%);
-	outline: 1px solid #75beff;
+	background: color-mix(
+		in srgb,
+		var(--editor-accent, #75beff) 18%,
+		transparent
+	);
+	outline: 1px solid var(--editor-accent, #75beff);
 }
 
 @media (forced-colors: active) {
@@ -321,13 +332,65 @@
 		-webkit-text-fill-color: HighlightText;
 	}
 
-	.editor-renderer-with-input .editor-text-surface {
+	.editor-renderer-with-input:not(.editor-bounded-renderer)
+		.editor-text-surface {
 		visibility: hidden;
+	}
+
+	.editor-selection-layer,
+	.editor-gutter-glyph,
+	.editor-overview,
+	.editor-color-swatch {
+		forced-color-adjust: none;
+	}
+
+	.editor-custom-selection,
+	.editor-secondary-selection,
+	.editor-selection-newline::after {
+		background: Highlight;
+		outline: 1px solid Highlight;
+		opacity: 0.5;
+	}
+
+	.editor-custom-caret,
+	.editor-secondary-caret::after {
+		background: CanvasText;
+		border-color: CanvasText;
+	}
+
+	.editor-drop-caret {
+		background: Highlight;
+	}
+
+	.editor-find-match,
+	.editor-find-empty-match,
+	.editor-matching-bracket {
+		outline: 1px solid Highlight;
+	}
+
+	.editor-find-match-current {
+		outline: 2px solid Highlight;
+	}
+
+	.editor-indent-guide,
+	.editor-ruler {
+		background: GrayText;
+		border-color: GrayText;
+	}
+
+	.editor-content-widget,
+	.editor-overlay-widget,
+	.editor-view-zone {
+		border: 1px solid CanvasText;
 	}
 }
 
 .editor-secondary-selection {
-	background: rgb(57 115 185 / 50%);
+	background: color-mix(
+		in srgb,
+		var(--editor-selection, #264f78) 75%,
+		transparent
+	);
 }
 .editor-secondary-caret,
 .editor-selection-newline {
@@ -343,7 +406,7 @@
 	left: 0;
 	bottom: -4px;
 	height: 20px;
-	border-left: 2px solid #fff;
+	border-left: 2px solid var(--editor-caret, #fff);
 }
 .editor-selection-newline::after {
 	content: "";
@@ -352,7 +415,11 @@
 	bottom: -4px;
 	width: 1ch;
 	height: 24px;
-	background: rgb(57 115 185 / 50%);
+	background: color-mix(
+		in srgb,
+		var(--editor-selection, #264f78) 75%,
+		transparent
+	);
 }
 .editor-view-frame:not(:focus-within) .editor-secondary-caret {
 	visibility: hidden;
@@ -390,10 +457,14 @@
 	position: absolute;
 }
 .editor-custom-selection {
-	background: rgb(57 115 185 / 50%);
+	background: color-mix(
+		in srgb,
+		var(--editor-selection, #264f78) 75%,
+		transparent
+	);
 }
 .editor-custom-caret {
-	background: var(--editor-foreground);
+	background: var(--editor-caret, var(--editor-foreground));
 }
 .editor-view-frame:not(:focus-within) .editor-custom-caret {
 	visibility: hidden;
@@ -406,7 +477,7 @@
 }
 
 .editor-drop-caret {
-	background: #75beff;
+	background: var(--editor-accent, #75beff);
 }
 
 .editor-gutter {
@@ -441,6 +512,16 @@
 .editor-visual-row {
 	white-space: pre;
 	width: max-content;
+	direction: ltr;
+	unicode-bidi: isolate;
+}
+.editor-measure-probe {
+	position: absolute;
+	top: 0;
+	left: 0;
+	visibility: hidden;
+	white-space: pre;
+	pointer-events: none;
 }
 .editor-active-visual-line {
 	background: color-mix(in srgb, var(--editor-foreground) 4%, transparent);
@@ -461,17 +542,20 @@
 .editor-token-type {
 	color: var(--editor-type);
 }
+.editor-token-variable {
+	color: var(--editor-variable, inherit);
+}
 .editor-token-bracket0,
 .editor-token-bracket3 {
-	color: #e2c08d;
+	color: var(--editor-bracket0, #e2c08d);
 }
 .editor-token-bracket1,
 .editor-token-bracket4 {
-	color: #c586c0;
+	color: var(--editor-bracket1, #c586c0);
 }
 .editor-token-bracket2,
 .editor-token-bracket5 {
-	color: #4ec9b0;
+	color: var(--editor-bracket2, #4ec9b0);
 }
 .editor-visible-whitespace {
 	position: relative;
@@ -658,9 +742,9 @@
 
 .editor-settings button,
 .editor-settings input[type="number"] {
-	background: #333;
-	color: #ddd;
-	border: 1px solid #555;
+	background: var(--editor-input, #333);
+	color: var(--editor-foreground, #ddd);
+	border: 1px solid var(--editor-border, #555);
 	padding: 4px 7px;
 	font: 12px system-ui;
 }
@@ -668,6 +752,36 @@
 .editor-content-widget {
 	position: absolute;
 	z-index: 7;
+	pointer-events: auto;
+}
+.editor-content-widget[hidden],
+.editor-overlay-widget[hidden],
+.editor-view-zone[hidden] {
+	display: none;
+}
+.editor-view-zones {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+.editor-view-zone {
+	position: absolute;
+	z-index: 6;
+	box-sizing: border-box;
+	overflow: hidden;
+	pointer-events: auto;
+	cursor: default;
+	font: 13px / 1.4 system-ui;
+	white-space: normal;
+}
+.editor-overlay-widgets {
+	position: absolute;
+	z-index: 8;
+	overflow: hidden;
+	pointer-events: none;
+}
+.editor-overlay-widget {
+	position: absolute;
 	pointer-events: auto;
 }
 .editor-color-swatch {
@@ -679,6 +793,7 @@
 }
 
 .editor-inlay-hint {
+	unicode-bidi: isolate;
 	font-size: 0.8em;
 	padding: 0 3px;
 	border-radius: 3px;

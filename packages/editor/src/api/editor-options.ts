@@ -1,6 +1,7 @@
 import type { IndentationOptions } from "../features/indentation-options";
 import { hasTheme } from "../features/themes";
 import type { LanguageConfiguration } from "../languages/configuration";
+import { isFontFeatureSettings } from "../view/text-shaping";
 import type { TextSelection } from "./types";
 
 export interface EditorOptions extends IndentationOptions {
@@ -13,6 +14,8 @@ export interface EditorOptions extends IndentationOptions {
 	readonly fontFamily: string;
 	readonly fontSize: number;
 	readonly lineHeight: number;
+	readonly fontLigatures: boolean | string;
+	readonly mouseWheelZoom: boolean;
 	readonly theme: string;
 	readonly minimap: boolean;
 	readonly inlayHints: boolean;
@@ -52,6 +55,8 @@ export const defaultViewOptions = {
 	fontFamily: "monospace",
 	fontSize: 16,
 	lineHeight: 24,
+	fontLigatures: false,
+	mouseWheelZoom: false,
 	theme: "dark",
 	minimap: false,
 	inlayHints: false,
@@ -63,7 +68,7 @@ export const defaultViewOptions = {
 	rulers: [],
 } as const;
 export function validateViewOptions(options: EditorOptions): void {
-	if (!hasTheme(options.theme))
+	if (options.theme !== "auto" && !hasTheme(options.theme))
 		throw new Error(`Unknown editor theme: ${options.theme}`);
 	for (const flag of [
 		options.readOnly,
@@ -73,6 +78,7 @@ export function validateViewOptions(options: EditorOptions): void {
 		options.codeLens,
 		options.stickyScroll,
 		options.indentGuides,
+		options.mouseWheelZoom,
 	])
 		if (typeof flag !== "boolean")
 			throw new TypeError("Editor flags must be booleans.");
@@ -92,6 +98,14 @@ export function validateViewOptions(options: EditorOptions): void {
 	] as const)
 		if (!Number.isFinite(value) || value < min || value > max)
 			throw new RangeError(`${name} must be between ${min} and ${max}.`);
+	if (
+		typeof options.fontLigatures !== "boolean" &&
+		(typeof options.fontLigatures !== "string" ||
+			!isFontFeatureSettings(options.fontLigatures))
+	)
+		throw new TypeError(
+			'fontLigatures must be a boolean or a font-feature-settings list such as "calt" 1, "ss01".',
+		);
 	if (
 		options.lineHeight < options.fontSize ||
 		!options.fontFamily.trim() ||

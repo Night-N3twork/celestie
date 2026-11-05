@@ -63,6 +63,7 @@ export class LanguageFeatures implements Disposable {
 	};
 	private inline = "";
 	private inlineVersion = 0;
+	private inlineOffset = -1;
 	constructor(private readonly host: Host) {
 		this.popup = new LanguagePopup({
 			...host,
@@ -235,7 +236,11 @@ export class LanguageFeatures implements Disposable {
 						context,
 					),
 				);
-				if (!this.valid(context, version)) return;
+				if (
+					!this.valid(context, version) ||
+					!this.caretAt(context.offset)
+				)
+					return;
 				if (command === "inline") {
 					const suggestion = ordered.find(
 						(entry) =>
@@ -251,6 +256,7 @@ export class LanguageFeatures implements Disposable {
 					}
 					this.inline = suggestion.insertText.slice(prefix.length);
 					this.inlineVersion = version;
+					this.inlineOffset = context.offset;
 					this.popup.position(this.ghost, context.offset);
 					this.ghost.textContent = this.inline;
 					this.ghost.hidden = false;
@@ -721,6 +727,7 @@ export class LanguageFeatures implements Disposable {
 			}
 			this.inline = remaining;
 			this.inlineVersion = model?.getVersionId() ?? 0;
+			this.inlineOffset = this.host.selection().end;
 			this.ghost.textContent = remaining;
 			this.ghost.hidden = !remaining;
 			if (remaining)
@@ -794,6 +801,20 @@ export class LanguageFeatures implements Disposable {
 	};
 	close(clearInline = true): void {
 		this.popup.close(clearInline);
+	}
+	private caretAt(offset: number): boolean {
+		const selection = this.host.selection();
+		return selection.start === offset && selection.end === offset;
+	}
+	selectionChanged(): void {
+		const completion = this.completionContext?.context.offset;
+		if (
+			(completion !== undefined && !this.caretAt(completion)) ||
+			(this.inline && !this.caretAt(this.inlineOffset))
+		) {
+			this.abort.abort();
+			this.close();
+		}
 	}
 	dispose(): void {
 		this.disposed = true;

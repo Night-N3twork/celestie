@@ -1,5 +1,3 @@
-/// <reference types="vite/client" />
-
 import { createPlaygroundDocuments } from "./documents";
 
 const container = document.getElementById("editor");
@@ -79,8 +77,12 @@ const minimap = document.getElementById("minimap") as HTMLInputElement;
 const whitespace = document.getElementById("whitespace") as HTMLInputElement;
 const inlayHints = document.getElementById("inlay-hints") as HTMLInputElement;
 const codeLens = document.getElementById("code-lens") as HTMLInputElement;
+const ligatures = document.getElementById("ligatures") as HTMLInputElement;
+const wheelZoom = document.getElementById("wheel-zoom") as HTMLInputElement;
 const syncOptions = () => {
 	const options = documents.activeView.getOptions();
+	ligatures.checked = options.fontLigatures !== false;
+	wheelZoom.checked = options.mouseWheelZoom;
 	inlayHints.checked = options.inlayHints;
 	codeLens.checked = options.codeLens;
 	wrap.value = options.wordWrap;
@@ -98,6 +100,8 @@ const changeOptions = () => {
 	documents.activeView.updateOptions({
 		inlayHints: inlayHints.checked,
 		codeLens: codeLens.checked,
+		fontLigatures: ligatures.checked,
+		mouseWheelZoom: wheelZoom.checked,
 		wordWrap: wrap.value as "off" | "on" | "wordWrapColumn" | "bounded",
 		wordWrapColumn: Number(wrapColumn.value),
 		theme: theme.value,
@@ -130,7 +134,24 @@ const featureButtons: [string, () => void][] = [
 			documents.activeView.runLanguageCommand("complete");
 		},
 	],
+	["view-zone", () => addDemoZone()],
 ];
+function addDemoZone(): void {
+	const view = documents.activeView,
+		model = view.getModel();
+	if (!model) return;
+	const line = model.getPositionAtInputOffset(view.getSelection().start).line;
+	const node = document.createElement("div");
+	node.className = "playground-zone";
+	const label = document.createElement("span");
+	const close = document.createElement("button");
+	close.type = "button";
+	close.textContent = "Remove";
+	node.append(label, close);
+	const zone = view.addViewZone({ afterLine: line, heightInLines: 2, node });
+	label.textContent = `View zone after line ${zone.getAfterLine()} `;
+	close.addEventListener("click", () => zone.dispose());
+}
 for (const [id, run] of featureButtons)
 	document.getElementById(id)?.addEventListener("click", run);
 const openCommands = () => documents.activeView.openCommandPalette();
@@ -148,6 +169,8 @@ for (const control of [
 	whitespace,
 	inlayHints,
 	codeLens,
+	ligatures,
+	wheelZoom,
 ])
 	control.addEventListener("change", changeOptions);
 const optionsSubscription = documents.onDidChangeActiveView(syncOptions);
@@ -213,6 +236,8 @@ import.meta.hot?.dispose(() => {
 		whitespace,
 		inlayHints,
 		codeLens,
+		ligatures,
+		wheelZoom,
 	])
 		control.removeEventListener("change", changeOptions);
 	optionsSubscription.dispose();

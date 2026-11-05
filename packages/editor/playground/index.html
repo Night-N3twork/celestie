@@ -23,6 +23,14 @@
 			#editor {
 				min-width: 0;
 			}
+			.playground-zone {
+				box-sizing: border-box;
+				height: 100%;
+				padding: 8px 16px;
+				border-block: 1px solid var(--editor-border);
+				background: var(--editor-panel);
+				color: var(--editor-foreground);
+			}
 			.editor-panes {
 				display: grid;
 				grid-template-columns: minmax(0, 1fr);
@@ -217,10 +225,19 @@
 				<label
 					>Theme
 					<select id="theme" aria-label="Theme">
+						<option value="auto">Auto (system)</option>
 						<option value="dark">Dark</option>
 						<option value="light">Light</option>
 						<option value="contrast">High contrast</option>
+						<option value="contrast-light">
+							High contrast light
+						</option>
 					</select></label
+				>
+				<label><input type="checkbox" id="ligatures" />Ligatures</label>
+				<label
+					><input type="checkbox" id="wheel-zoom" />Ctrl+wheel
+					zoom</label
 				>
 				<label><input type="checkbox" id="minimap" />Minimap</label>
 				<label
@@ -233,7 +250,8 @@
 				<button type="button" id="fold">Fold</button
 				><button type="button" id="unfold">Unfold all</button
 				><button type="button" id="format-document">Format</button
-				><button type="button" id="suggest">Suggest</button>
+				><button type="button" id="suggest">Suggest</button
+				><button type="button" id="view-zone">Add view zone</button>
 			</fieldset>
 			<div class="editor-panes" id="editor-panes">
 				<div id="editor"></div>

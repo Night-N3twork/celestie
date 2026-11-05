@@ -46,7 +46,14 @@ export type { EditorCommand } from "./features/commands";
 export type { Decoration, VisibleDecoration } from "./features/decorations";
 export { DecorationCollection } from "./features/decorations";
 export type { IndentationOptions } from "./features/indentation-options";
-export { type EditorTheme, registerTheme } from "./features/themes";
+export {
+	type EditorTheme,
+	type ResolvedTokenStyle,
+	registerTheme,
+	resolveTokenStyle,
+	type ThemeKind,
+	type TokenStyle,
+} from "./features/themes";
 export { defaultModelRegistry, ModelRegistry } from "./model/model-registry";
 export {
 	type EndOfLine,
@@ -63,3 +70,12 @@ export type {
 	TrackedRange,
 	TrackedRangeOptions,
 } from "./model/tracked-ranges";
+export type {
+	ContentWidgetOptions,
+	ContentWidgetPlacement,
+	OverlayWidgetOptions,
+	OverlayWidgetPosition,
+	ViewZone,
+	ViewZoneOptions,
+	WidgetFocusPolicy,
+} from "./view/widget-layer";

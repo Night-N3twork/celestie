@@ -8,6 +8,14 @@ import { type FoldingRange, FoldingState } from "../features/folding";
 import { caret } from "../features/selections";
 import type { TextModel } from "../model/text-model";
 import type { TextRenderer } from "./text-renderer";
+import {
+	type ContentWidgetOptions,
+	type ContentWidgetPlacement,
+	type OverlayWidgetOptions,
+	type ViewZone,
+	type ViewZoneOptions,
+	zoneRows,
+} from "./widget-layer";
 
 interface Host {
 	readonly document: Document;
@@ -24,6 +32,7 @@ interface Host {
 export class ViewPresentation implements Disposable {
 	private colorWidgets: Disposable[] = [];
 	private readonly contentWidgets = new Set<Disposable>();
+	private zoneSequence = 0;
 	private readonly diagnosticOwners = new WeakMap<
 		TextModel,
 		Map<
@@ -55,8 +64,19 @@ export class ViewPresentation implements Disposable {
 		id: string,
 		node: HTMLElement,
 		position: import("../api/types").Position,
-		placement: "above" | "below" | "inline" = "below",
+		placement:
+			| ContentWidgetPlacement
+			| readonly ContentWidgetPlacement[]
+			| ContentWidgetOptions = "below",
 	): Disposable {
+		const options: ContentWidgetOptions =
+			typeof placement === "string" || Array.isArray(placement)
+				? {
+						placement: placement as
+							| ContentWidgetPlacement
+							| readonly ContentWidgetPlacement[],
+					}
+				: (placement as ContentWidgetOptions);
 		const model = this.model,
 			tracked = model.trackRange({
 				startLine: position.line,
@@ -75,7 +95,7 @@ export class ViewPresentation implements Disposable {
 						? { line: range.startLine, column: range.startColumn }
 						: position;
 				},
-				placement,
+				options,
 			);
 		} catch (error) {
 			tracked.dispose();
@@ -92,6 +112,117 @@ export class ViewPresentation implements Disposable {
 			this.contentWidgets.delete(handle);
 		};
 		const handle = { dispose: release };
+		this.contentWidgets.add(handle);
+		return handle;
+	}
+
+	addOverlayWidget(
+		id: string,
+		node: HTMLElement,
+		options: OverlayWidgetOptions,
+	): Disposable {
+		const widget = this.renderer.addOverlayWidget(id, node, options);
+		let active = true;
+		const handle = {
+			dispose: () => {
+				if (!active) return;
+				active = false;
+				widget.dispose();
+				this.contentWidgets.delete(handle);
+			},
+		};
+		this.contentWidgets.add(handle);
+		return handle;
+	}
+
+	addViewZone(options: ViewZoneOptions): ViewZone {
+		const model = this.model;
+		if (
+			!options ||
+			!Number.isInteger(options.afterLine) ||
+			options.afterLine < 0 ||
+			options.afterLine > model.getLineCount()
+		)
+			throw new RangeError(
+				"View zone afterLine is outside the document.",
+			);
+		if (options.node?.nodeType !== 1)
+			throw new TypeError("View zone node must be an element.");
+		let height: {
+			readonly heightInLines?: number;
+			readonly heightInPx?: number;
+		} = {
+			...(options.heightInLines !== undefined
+				? { heightInLines: options.heightInLines }
+				: {}),
+			...(options.heightInPx !== undefined
+				? { heightInPx: options.heightInPx }
+				: {}),
+		};
+		zoneRows(height, this.renderer.lineHeight);
+		const before = options.afterLine === 0,
+			line = before ? 1 : options.afterLine,
+			id = `view-zone-${++this.zoneSequence}`,
+			tracked = model.trackRange({
+				startLine: line,
+				startColumn: 1,
+				endLine: line,
+				endColumn: 1,
+			});
+		const anchor = () => ({
+			line: tracked.getRange()?.startLine ?? line,
+			placement: before ? ("before" as const) : ("after" as const),
+		});
+		const scroll = this.renderer.captureAnchor();
+		let zone: { dispose(): void; refresh(): void };
+		try {
+			zone = this.renderer.addZone(
+				id,
+				options.node,
+				anchor,
+				() => zoneRows(height, this.renderer.lineHeight),
+				options.focus,
+			);
+		} catch (error) {
+			tracked.dispose();
+			throw error;
+		}
+		let active = true;
+		this.renderer.restoreAnchor(scroll);
+		const subscription = model.onWillDispose(() => release());
+		const release = () => {
+			if (!active) return;
+			active = false;
+			const scroll = this.renderer.captureAnchor();
+			zone.dispose();
+			tracked.dispose();
+			subscription.dispose();
+			this.contentWidgets.delete(handle);
+			if (!this.disposed && this.host.hasModel())
+				this.renderer.restoreAnchor(scroll);
+		};
+		const handle: ViewZone = {
+			id,
+			getAfterLine: () =>
+				active ? (before ? 0 : anchor().line) : undefined,
+			setHeight: (next) => {
+				if (!active) throw new Error("View zone disposed.");
+				const value = {
+					...(next.heightInLines !== undefined
+						? { heightInLines: next.heightInLines }
+						: {}),
+					...(next.heightInPx !== undefined
+						? { heightInPx: next.heightInPx }
+						: {}),
+				};
+				zoneRows(value, this.renderer.lineHeight);
+				height = value;
+				const scroll = this.renderer.captureAnchor();
+				zone.refresh();
+				this.renderer.restoreAnchor(scroll);
+			},
+			dispose: release,
+		};
 		this.contentWidgets.add(handle);
 		return handle;
 	}
