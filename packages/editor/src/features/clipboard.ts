@@ -10,7 +10,9 @@ import {
 	wholeLineMime,
 } from "./clipboard-payload";
 import type { EditingPlan } from "./editing-plan";
+import type { IndentationOptions } from "./indentation-options";
 import { planLineCommand } from "./line-commands";
+import { indentPastedText } from "./paste-indentation";
 import {
 	combineLinePlans,
 	combinePlans,
@@ -44,6 +46,7 @@ interface ClipboardHost {
 	announce(message: string): void;
 	offsetAtPoint(x: number, y: number): number;
 	getTabSize(): number;
+	pasteIndentation(): IndentationOptions | undefined;
 	syntaxPalette(): SyntaxPalette | undefined;
 }
 
@@ -359,6 +362,12 @@ export class EditorClipboard implements Disposable {
 		)
 			return;
 		const selections = this.host.getSelections();
+		const indentation =
+			wholeLine || parts ? undefined : this.host.pasteIndentation();
+		const prepare = (selection: TextSelection, text: string) =>
+			indentation
+				? indentPastedText(original, selection, text, indentation)
+				: text;
 		if (selections.length > 1) {
 			const lines = value.split("\n");
 			const ordered = selections
@@ -385,7 +394,7 @@ export class EditorClipboard implements Disposable {
 						selection: makeCaret(selection.start + insert.length),
 					};
 				}
-				return replacementPlan(selection, insert);
+				return replacementPlan(selection, prepare(selection, insert));
 			});
 			this.host.apply(combinePlans(plans, original.length));
 			return;
@@ -400,12 +409,13 @@ export class EditorClipboard implements Disposable {
 			wholeLine && selection.start === selection.end
 				? from
 				: selection.end;
+		const inserted = prepare(selection, value);
 		const caret =
 			wholeLine && selection.start === selection.end
 				? selection.start + value.length
-				: from + value.length;
+				: from + inserted.length;
 		this.host.apply({
-			edits: [{ from, to, text: value }],
+			edits: [{ from, to, text: inserted }],
 			selection: { start: caret, end: caret, direction: "none" },
 		});
 	}

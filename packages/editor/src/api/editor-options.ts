@@ -5,6 +5,14 @@ import { isFontFeatureSettings } from "../view/text-shaping";
 import type { TextSelection } from "./types";
 
 export interface EditorOptions extends IndentationOptions {
+	readonly autoClosingBrackets: boolean;
+	readonly autoClosingQuotes: boolean;
+	readonly autoClosingComments: boolean;
+	readonly autoClosingDelete: boolean;
+	readonly autoClosingOvertype: boolean;
+	readonly autoSurround: boolean;
+	readonly autoIndentOnPaste: boolean;
+	readonly autoIndentOnMove: boolean;
 	readonly readOnly: boolean;
 	readonly tabFocusMode: boolean;
 	readonly accessibilitySupport: "auto" | "on" | "off";
@@ -22,8 +30,15 @@ export interface EditorOptions extends IndentationOptions {
 	readonly codeLens: boolean;
 	readonly stickyScroll: boolean;
 	readonly lineNumbers: "on" | "off" | "relative";
-	readonly renderWhitespace: "none" | "all";
+	readonly renderWhitespace:
+		| "none"
+		| "all"
+		| "boundary"
+		| "selection"
+		| "trailing";
 	readonly indentGuides: boolean;
+	readonly bracketGuides: "none" | "active" | "all";
+	readonly activeIndentGuide: boolean;
 	readonly rulers: readonly number[];
 }
 
@@ -49,6 +64,14 @@ export interface EditorViewState {
 }
 
 export const defaultViewOptions = {
+	autoClosingBrackets: true,
+	autoClosingQuotes: true,
+	autoClosingComments: true,
+	autoClosingDelete: true,
+	autoClosingOvertype: true,
+	autoSurround: true,
+	autoIndentOnPaste: true,
+	autoIndentOnMove: true,
 	wordWrap: "off",
 	wordWrapColumn: 80,
 	wrapIndent: "same",
@@ -65,12 +88,22 @@ export const defaultViewOptions = {
 	lineNumbers: "on",
 	renderWhitespace: "none",
 	indentGuides: true,
+	bracketGuides: "none",
+	activeIndentGuide: true,
 	rulers: [],
 } as const;
 export function validateViewOptions(options: EditorOptions): void {
 	if (options.theme !== "auto" && !hasTheme(options.theme))
 		throw new Error(`Unknown editor theme: ${options.theme}`);
 	for (const flag of [
+		options.autoClosingBrackets,
+		options.autoClosingQuotes,
+		options.autoClosingComments,
+		options.autoClosingDelete,
+		options.autoClosingOvertype,
+		options.autoSurround,
+		options.autoIndentOnPaste,
+		options.autoIndentOnMove,
 		options.readOnly,
 		options.tabFocusMode,
 		options.minimap,
@@ -78,6 +111,7 @@ export function validateViewOptions(options: EditorOptions): void {
 		options.codeLens,
 		options.stickyScroll,
 		options.indentGuides,
+		options.activeIndentGuide,
 		options.mouseWheelZoom,
 	])
 		if (typeof flag !== "boolean")
@@ -88,7 +122,10 @@ export function validateViewOptions(options: EditorOptions): void {
 		) ||
 		!["none", "same", "indent"].includes(options.wrapIndent) ||
 		!["on", "off", "relative"].includes(options.lineNumbers) ||
-		!["none", "all"].includes(options.renderWhitespace)
+		!["none", "all", "boundary", "selection", "trailing"].includes(
+			options.renderWhitespace,
+		) ||
+		!["none", "active", "all"].includes(options.bracketGuides)
 	)
 		throw new TypeError("Invalid layout option.");
 	for (const [name, value, min, max] of [

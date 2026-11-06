@@ -10,6 +10,7 @@ import type {
 	SymbolInformation,
 } from "../api/languages";
 import { getLanguage } from "../api/languages";
+import { onDidChangeTokenizers } from "../api/tokenization";
 import type { Disposable } from "../api/types";
 import { languageEngine } from "../languages/client";
 import { getLanguageConfiguration, isWord } from "../languages/configuration";
@@ -103,6 +104,7 @@ export class LanguageFeatures implements Disposable {
 		if (this.timer) clearTimeout(this.timer);
 		if (model) {
 			this.subscriptions.push(
+				onDidChangeTokenizers(() => this.changed()),
 				languageEngine.attach(model),
 				model.onDidChangeContent(() => this.changed()),
 				model.onDidChangeLanguage(() => this.changed()),

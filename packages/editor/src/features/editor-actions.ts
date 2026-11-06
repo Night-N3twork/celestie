@@ -64,6 +64,66 @@ export function registerEditorActions(view: EditorView): void {
 				wordWrap: view.getOptions().wordWrap === "off" ? "on" : "off",
 			}),
 	});
+	for (const [id, label, collapsed, recursive] of [
+		["fold", "Fold Current Region", true, false],
+		["unfold", "Unfold Current Region", false, false],
+		["foldRecursive", "Fold Current Region Recursively", true, true],
+		["unfoldRecursive", "Unfold Current Region Recursively", false, true],
+	] as const)
+		view.commands.register({
+			id: `view.${id}`,
+			label,
+			when: () => !view.isComposing,
+			run: () => {
+				const model = view.getModel();
+				if (!model) return;
+				const selection = view.getSelection(),
+					line = model.getPositionAtInputOffset(
+						selection.direction === "backward"
+							? selection.start
+							: selection.end,
+					).line;
+				const region = view
+					.getFoldingRanges()
+					.filter((range) => range.start <= line && range.end >= line)
+					.sort((a, b) => b.start - a.start)[0];
+				if (region) view.setFolded(region.start, collapsed, recursive);
+			},
+		});
+	view.commands.register({
+		id: "view.foldSelection",
+		label: "Fold Selection",
+		when: () => !view.isComposing,
+		run: () => {
+			const model = view.getModel();
+			if (!model) return;
+			const selection = view.getSelection(),
+				start = model.getPositionAtInputOffset(selection.start),
+				end = model.getPositionAtInputOffset(selection.end);
+			const last = end.line - (end.column === 1 ? 1 : 0);
+			if (last > start.line) view.createFold(start.line, last);
+		},
+	});
+	view.commands.register({
+		id: "view.removeFold",
+		label: "Remove Manual Fold",
+		when: () => !view.isComposing,
+		run: () => {
+			const model = view.getModel();
+			if (model)
+				view.removeFold(
+					model.getPositionAtInputOffset(view.getSelection().start)
+						.line,
+				);
+		},
+	});
+	for (let level = 1; level <= 7; level++)
+		view.commands.register({
+			id: `view.foldLevel.${level}`,
+			label: `Fold Level ${level}`,
+			when: () => !view.isComposing,
+			run: () => view.foldLevel(level),
+		});
 	const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 	const primary = mac ? "Cmd" : "Ctrl";
 	const edit = () =>

@@ -804,6 +804,26 @@
 .editor-code-lens {
 	pointer-events: auto;
 }
+.editor-bracket-guide {
+	position: absolute;
+	pointer-events: none;
+	opacity: 0.35;
+}
+.editor-bracket-guide-0 {
+	background: var(--editor-bracket0);
+}
+.editor-bracket-guide-1 {
+	background: var(--editor-bracket1);
+}
+.editor-bracket-guide-2 {
+	background: var(--editor-bracket2);
+}
+.editor-bracket-guide-active {
+	opacity: 1;
+}
+.editor-indent-guide-active {
+	background: var(--editor-accent);
+}
 .editor-code-lens button {
 	border: 0;
 	background: transparent;

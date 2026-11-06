@@ -60,12 +60,16 @@ export function createSelectionController(
 			),
 		toggleFold: (line) => host.toggleFold(line),
 		wordPattern: () => host.wordPattern(),
-		visualIndex: (offset) => {
+		visualIndex: (offset, affinity) => {
 			const position = host.model().getPositionAtInputOffset(offset);
-			return renderer.layout.position(position.line, position.column)
-				.index;
+			return renderer.layout.position(
+				position.line,
+				position.column,
+				affinity,
+			).index;
 		},
 		visualRowCount: () => renderer.layout.rowCount,
+		isTextRow: (row) => renderer.layout.row(row).kind !== "zone",
 		offsetAtVisualRowX: (row, x) =>
 			renderer.verticalOffset(
 				host.model().getInputOffsetAt({

@@ -6,6 +6,7 @@ import {
 } from "../features/decorations";
 import { type FoldingRange, FoldingState } from "../features/folding";
 import { caret } from "../features/selections";
+
 import type { TextModel } from "../model/text-model";
 import type { TextRenderer } from "./text-renderer";
 import {
@@ -23,6 +24,7 @@ interface Host {
 	hasModel(): boolean;
 	disposed(): boolean;
 	getSelection(): TextSelection;
+	getSelections(): readonly TextSelection[];
 	setSelections(values: readonly TextSelection[], reveal?: boolean): void;
 	updateCursor(): void;
 	executeCommand(id: string): unknown;
@@ -241,7 +243,7 @@ export class ViewPresentation implements Disposable {
 				},
 			})),
 		);
-		this.setSyntaxTokens(value.tokens);
+		this.renderer.setTokenLayers(value.tokens, value.semanticTokens ?? []);
 		this.setDiagnostics(value.diagnostics);
 		this.setFoldingRanges(value.folds);
 		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
@@ -384,6 +386,9 @@ export class ViewPresentation implements Disposable {
 	setSyntaxTokens(tokens: readonly Token[]): void {
 		this.renderer.setTokens(tokens);
 	}
+	setSemanticTokens(tokens: readonly Token[]): void {
+		this.renderer.setSemanticTokens(tokens);
+	}
 
 	setFoldingRanges(ranges: readonly FoldingRange[]): void {
 		const anchor = this.renderer.captureAnchor();
@@ -391,11 +396,58 @@ export class ViewPresentation implements Disposable {
 		this.renderer.setFolds(this.assets().folding.get());
 		this.renderer.restoreAnchor(anchor);
 	}
+	createFold(start: number, end: number): void {
+		this.assets().folding.add(start, end);
+		this.foldsChanged();
+	}
+	removeFold(line: number): void {
+		this.assets().folding.remove(line);
+		this.foldsChanged();
+	}
+	setFolded(line: number, collapsed: boolean, recursive = false): void {
+		this.assets().folding.setCollapsed(line, collapsed, recursive);
+		this.foldsChanged();
+	}
+	foldLevel(level: number): void {
+		this.assets().folding.level(level);
+		this.foldsChanged();
+	}
+	private foldsChanged(): void {
+		const anchor = this.renderer.captureAnchor(),
+			folds = this.assets().folding.get();
+		this.renderer.setFolds(folds);
+		const visibleOffset = (offset: number) => {
+			const position = this.model.getPositionAtInputOffset(offset);
+			const parent = folds.find(
+				(fold) =>
+					fold.collapsed &&
+					position.line > fold.start &&
+					position.line <= fold.end,
+			);
+			return parent
+				? this.model.getInputOffsetAt({
+						line: parent.start,
+						column: this.model.getLineMaxColumn(parent.start),
+					})
+				: offset;
+		};
+		const selections = this.host.getSelections().map((selection) => ({
+			...selection,
+			start: visibleOffset(selection.start),
+			end: visibleOffset(selection.end),
+		}));
+		this.host.setSelections(selections);
+		this.renderer.restoreAnchor(anchor);
+		this.host.updateCursor();
+	}
 
 	toggleFold(line?: number): void {
-		const folding = this.assets().folding,
+		const selection = this.host.getSelection(),
+			folding = this.assets().folding,
 			position = this.model.getPositionAtInputOffset(
-				this.host.getSelection().start,
+				selection.direction === "backward"
+					? selection.start
+					: selection.end,
 			);
 		const region =
 			line === undefined
@@ -410,56 +462,14 @@ export class ViewPresentation implements Disposable {
 				: folding.get().find((region) => region.start === line);
 		if (!region) return;
 		folding.toggle(region.start);
-		this.renderer.setFolds(folding.get());
-		if (
-			!region.collapsed &&
-			position.line > region.start &&
-			position.line <= region.end
-		)
-			this.host.setSelections(
-				[
-					caret(
-						this.model.getInputOffsetAt({
-							line: region.start,
-							column: this.model.getLineMaxColumn(region.start),
-						}),
-					),
-				],
-				true,
-			);
-		this.host.updateCursor();
+		this.foldsChanged();
 	}
 
 	foldAll(collapsed: boolean): void {
 		this.assets().folding.all(collapsed);
-		this.renderer.setFolds(this.assets().folding.get());
-		if (collapsed) {
-			const head = this.model.getPositionAtInputOffset(
-					this.host.getSelection().start,
-				),
-				parent = this.assets()
-					.folding.get()
-					.find(
-						(region) =>
-							region.collapsed &&
-							head.line > region.start &&
-							head.line <= region.end,
-					);
-			if (parent)
-				this.host.setSelections(
-					[
-						caret(
-							this.model.getInputOffsetAt({
-								line: parent.start,
-								column: 1,
-							}),
-						),
-					],
-					true,
-				);
-		}
-		this.host.updateCursor();
+		this.foldsChanged();
 	}
+
 	clearColors(): void {
 		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
 	}

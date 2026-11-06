@@ -1,6 +1,8 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { Position, TextSelection } from "../api/types";
 import type { TextModel } from "../model/text-model";
+import { type BracketGuide, paintBracketGuides } from "./bracket-guides";
+import { activeIndentationGuide } from "./indentation-guides";
 import type { TextGeometry, TextPoint } from "./text-geometry";
 import type { VisualLayout, VisualRow } from "./visual-layout";
 
@@ -9,6 +11,7 @@ interface paintSelectionLayersState {
 	readonly visible: readonly VisualRow[];
 	readonly accessible: boolean;
 	readonly selections: readonly TextSelection[];
+	readonly bracketGuides: readonly BracketGuide[];
 	readonly model: TextModel;
 	readonly geometry: TextGeometry;
 	readonly originY: number;
@@ -111,16 +114,40 @@ export function paintSelectionLayers(state: paintSelectionLayersState): void {
 			point.height,
 		);
 	}
+	const primary = state.selections[0];
+	const activeGuide =
+		state.options.indentGuides && state.options.activeIndentGuide && primary
+			? activeIndentationGuide(
+					state.model,
+					state.model.getPositionAtInputOffset(
+						primary.direction === "backward"
+							? primary.start
+							: primary.end,
+					).line,
+					state.options.tabSize,
+					{
+						first: state.visible[0]?.line ?? 1,
+						last: state.visible.at(-1)?.line ?? 1,
+					},
+				)
+			: undefined;
 	if (state.options.indentGuides)
 		for (const row of state.visible) {
-			if (row.from) continue;
+			if (row.from || row.kind) continue;
 			const text = state.model.getLineContent(row.line),
 				leading = text.match(/^[\t ]*/)?.[0] ?? "",
-				width = state.geometry.measure(leading),
+				width =
+					!text.trim() &&
+					activeGuide &&
+					row.line >= activeGuide.first &&
+					row.line <= activeGuide.last
+						? (activeGuide.column + state.options.tabSize) *
+							state.columnWidth
+						: state.geometry.measure(leading),
 				tab = state.columnWidth * state.options.tabSize;
 			for (
 				let x = Math.max(
-					tab,
+					0,
 					Math.floor(
 						(state.viewport.scrollLeft +
 							state.originX -
@@ -138,16 +165,28 @@ export function paintSelectionLayers(state: paintSelectionLayersState): void {
 				x += tab
 			)
 				rectangle(
-					"editor-indent-guide",
+					`editor-indent-guide${activeGuide && row.line >= activeGuide.first && row.line <= activeGuide.last && Math.abs(x - activeGuide.column * state.columnWidth) < 0.5 ? " editor-indent-guide-active" : ""}`,
 					state.padding + x - state.originX,
 					state.padding +
-						row.index * state.lineHeight -
+						state.layout.rowTop(row.index) -
 						state.originY -
 						(state.accessible ? state.viewport.scrollTop : 0),
 					1,
 					state.lineHeight,
 				);
 		}
+	paintBracketGuides(
+		{
+			...state,
+			pairs: state.bracketGuides,
+			offset: primary
+				? primary.direction === "backward"
+					? primary.start
+					: primary.end
+				: 0,
+		},
+		rectangle,
+	);
 	state.selectionLayer.replaceChildren(fragment);
 	const rulerFragment = state.root.ownerDocument.createDocumentFragment();
 	for (const column of state.options.rulers) {

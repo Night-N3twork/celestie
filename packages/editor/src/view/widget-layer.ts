@@ -106,7 +106,7 @@ export function zoneRows(
 			: (heightInLines ?? 1);
 	if (!Number.isFinite(value) || value <= 0 || value > 1000)
 		throw new RangeError("View zone height must be positive and finite.");
-	return Math.max(1, Math.ceil(value - 1e-9));
+	return value;
 }
 export class WidgetLayer implements Disposable {
 	private readonly content = new Map<string, ContentEntry>();
@@ -379,12 +379,12 @@ export class WidgetLayer implements Disposable {
 				visible =
 					start !== undefined &&
 					start <= last &&
-					start + rows - 1 >= first;
+					start + Math.ceil(rows) - 1 >= first;
 			zone.container.hidden =
 				start === undefined ||
 				(!visible && !zone.container.contains(active));
 			if (zone.container.hidden || start === undefined) continue;
-			zone.container.style.top = `${state.padding + start * state.lineHeight - state.originY}px`;
+			zone.container.style.top = `${state.padding + state.layout.rowTop(start) - state.originY}px`;
 			zone.container.style.left = `${state.view.left}px`;
 			zone.container.style.width = `${state.view.width}px`;
 			zone.container.style.height = `${rows * state.lineHeight}px`;

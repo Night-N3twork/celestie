@@ -4,6 +4,7 @@ import type {
 	HistoryViewState,
 	TextSelection,
 } from "../api/types";
+import { AutoClosedPairs } from "../features/auto-closed-pairs";
 import type { BracketAnalysis } from "../features/bracket-analysis";
 import { planBracketInput } from "../features/bracket-editing";
 import type { EditingPlan } from "../features/editing-plan";
@@ -54,6 +55,33 @@ interface Host {
 	writeSelections(values: readonly TextSelection[]): void;
 }
 export class NativeInputController {
+	private readonly autoClosedPairs = new AutoClosedPairs();
+	resetAutoClosing(): void {
+		this.autoClosedPairs.dispose();
+	}
+	private bracketPlan(
+		selection: TextSelection,
+		event: InputEvent,
+	): EditingPlan | undefined {
+		const owned = this.autoClosedPairs.owns(
+			this.model,
+			this.element.value,
+			selection.start,
+		);
+		return planBracketInput(
+			this.element.value,
+			selection,
+			event.inputType,
+			event.data,
+			this.language,
+			this.host.getAnalysis(),
+			{
+				...this.options,
+				autoClosingDelete: this.options.autoClosingDelete && owned,
+				autoClosingOvertype: this.options.autoClosingOvertype && owned,
+			},
+		);
+	}
 	composing = false;
 	deferredComposition:
 		| {
@@ -158,17 +186,15 @@ export class NativeInputController {
 				event.inputType === "deleteContentForward";
 			if (supported) {
 				event.preventDefault();
+				const pairs = new Map<number, readonly [string, string]>(),
+					version = this.model.getVersionId();
+				let index = 0;
 				this.host.applyPerSelection(
 					(selection) => {
-						const bracket = planBracketInput(
-							this.element.value,
-							selection,
-							event.inputType,
-							event.data,
-							this.language,
-							this.host.getAnalysis(),
-							this.options,
-						);
+						const slot = index++,
+							bracket = this.bracketPlan(selection, event);
+						if (bracket?.autoClosedPair)
+							pairs.set(slot, bracket.autoClosedPair);
 						if (bracket) return bracket;
 						if (event.inputType.startsWith("delete")) {
 							const backward =
@@ -206,21 +232,34 @@ export class NativeInputController {
 						? event.inputType
 						: undefined,
 				);
+				if (this.model.getVersionId() !== version)
+					for (const [index, pair] of pairs) {
+						const selection = this.selectionsValue[index];
+						if (selection)
+							this.autoClosedPairs.record(
+								this.model,
+								this.element.value,
+								selection.start,
+								pair,
+							);
+					}
 				return;
 			}
 		}
-		const plan = planBracketInput(
-			this.element.value,
+		const plan = this.bracketPlan(
 			this.host.captureState().selection,
-			event.inputType,
-			event.data,
-			this.language,
-			this.host.getAnalysis(),
-			this.options,
+			event,
 		);
 		if (plan) {
 			event.preventDefault();
 			this.host.applyEditingPlan(plan);
+			if (plan.autoClosedPair)
+				this.autoClosedPairs.record(
+					this.model,
+					this.element.value,
+					this.host.getSelection().start,
+					plan.autoClosedPair,
+				);
 		}
 	};
 	readonly handleInput = (event?: Event): void => {
@@ -382,6 +421,7 @@ export class NativeInputController {
 		if (lineBreak) this.host.revealCursor();
 	};
 	readonly handleCompositionStart = (): void => {
+		this.resetAutoClosing();
 		this.host.resetCursors();
 		if (this.selectionsValue.length > 1) {
 			this.host.writeSelections([this.host.getSelection()]);

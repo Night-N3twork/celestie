@@ -212,7 +212,7 @@ export class TextGeometry {
 							text.slice(segment.from, position.column - 1),
 						)) -
 				this.originX,
-			y: this.padding + segment.index * this.lineHeight - this.originY,
+			y: this.padding + this.layout.rowTop(segment.index) - this.originY,
 			height: this.lineHeight,
 		};
 	}
@@ -254,10 +254,9 @@ export class TextGeometry {
 		scrollLeft: number,
 	): number {
 		const bounds = this.viewport.getBoundingClientRect(),
-			index = Math.floor(
-				(y - bounds.top + scrollTop - this.padding) / this.lineHeight,
-			),
-			row = this.layout.row(index);
+			row = this.layout.rowAtHeight(
+				y - bounds.top + scrollTop - this.padding,
+			);
 		return this.offsetAtRowX(row.index, x - bounds.left + scrollLeft);
 	}
 	offsetAtRowX(index: number, x: number): number {

@@ -241,7 +241,22 @@
 				>
 				<label><input type="checkbox" id="minimap" />Minimap</label>
 				<label
-					><input type="checkbox" id="whitespace" />Whitespace</label
+					>Whitespace
+					<select id="whitespace" aria-label="Whitespace">
+						<option value="none">None</option>
+						<option value="all">All</option>
+						<option value="boundary">Boundary</option>
+						<option value="selection">Selection</option>
+						<option value="trailing">Trailing</option>
+					</select></label
+				>
+				<label
+					>Bracket guides
+					<select id="bracket-guides" aria-label="Bracket guides">
+						<option value="none">None</option>
+						<option value="active">Active</option>
+						<option value="all">All</option>
+					</select></label
 				>
 				<label
 					><input type="checkbox" id="inlay-hints" />Inlay

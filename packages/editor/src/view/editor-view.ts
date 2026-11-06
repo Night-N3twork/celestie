@@ -344,6 +344,7 @@ export class EditorView implements Disposable {
 				hasModel: () => !!this.attachedModel,
 				disposed: () => this.disposed,
 				getSelection: () => this.getSelection(),
+				getSelections: () => this.getSelections(),
 				setSelections: (v, r) => this.setSelections(v, r),
 				updateCursor: () => this.updateCursor(),
 				executeCommand: (id) => this.executeCommand(id),
@@ -669,6 +670,9 @@ export class EditorView implements Disposable {
 	setSyntaxTokens(tokens: readonly Token[]): void {
 		this.presentation.setSyntaxTokens(tokens);
 	}
+	setSemanticTokens(tokens: readonly Token[]): void {
+		this.presentation.setSemanticTokens(tokens);
+	}
 	setFoldingRanges(ranges: readonly FoldingRange[]): void {
 		this.presentation.setFoldingRanges(ranges);
 	}
@@ -677,6 +681,21 @@ export class EditorView implements Disposable {
 	}
 	foldAll(collapsed: boolean): void {
 		this.presentation.foldAll(collapsed);
+	}
+	createFold(start: number, end: number): void {
+		this.presentation.createFold(start, end);
+	}
+	getFoldingRanges(): readonly import("./visual-layout").FoldRegion[] {
+		return this.presentation.assets().folding.get();
+	}
+	removeFold(line: number): void {
+		this.presentation.removeFold(line);
+	}
+	setFolded(line: number, collapsed: boolean, recursive = false): void {
+		this.presentation.setFolded(line, collapsed, recursive);
+	}
+	foldLevel(level: number): void {
+		this.presentation.foldLevel(level);
 	}
 	getModel(): TextModel | null {
 		return this.attachedModel;
@@ -746,6 +765,7 @@ export class EditorView implements Disposable {
 		this.updateCursor();
 	}
 	private switchModel(model: TextModel | null, save: boolean): void {
+		this.nativeInput.resetAutoClosing();
 		this.languageEdits.cancel();
 		if (model === this.attachedModel) return;
 		this.cursors.reset();
@@ -1448,6 +1468,11 @@ export class EditorView implements Disposable {
 		this.renderer.setBracketMatches(
 			matches.map((match) => getInputPosition(this.element.value, match)),
 		);
+		this.renderer.setBracketGuides(
+			this.options.bracketGuides === "none"
+				? []
+				: this.getAnalysis().guidePairs(),
+		);
 	};
 
 	private readonly handleDocumentSelection = (): void => {
@@ -1649,6 +1674,7 @@ export class EditorView implements Disposable {
 		this.languageEdits.cancel();
 		if (this.disposed) return;
 		this.disposed = true;
+		this.nativeInput.resetAutoClosing();
 		this.nativeInput.deferredComposition = undefined;
 		this.analysis = undefined;
 		if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer);

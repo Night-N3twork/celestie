@@ -29,6 +29,13 @@ export {
 	registerLanguageProvider,
 } from "./api/languages";
 export type {
+	LineTokenizationResult,
+	TokenizationContext,
+	TokenizerRegistration,
+	WorkerTokenizer,
+} from "./api/tokenization";
+export { registerLanguageTokenizer } from "./api/tokenization";
+export type {
 	ContentChange,
 	Disposable,
 	EditHistoryOptions,

@@ -1,3 +1,7 @@
+import {
+	formatSnippetCaptures,
+	type SnippetFormatIndent,
+} from "./snippet-format";
 export interface SnippetTabstop {
 	readonly index: number;
 	readonly from: number;
@@ -6,14 +10,20 @@ export interface SnippetTabstop {
 	readonly parents: readonly number[];
 	readonly order: number;
 }
+export interface SnippetTransform extends SnippetTabstop {
+	readonly transform: string;
+	readonly formatIndent?: SnippetFormatIndent;
+}
 export interface ParsedSnippet {
 	readonly text: string;
 	readonly stops: readonly SnippetTabstop[];
-	readonly transforms: readonly (SnippetTabstop & {
-		readonly transform: string;
-	})[];
+	readonly transforms: readonly SnippetTransform[];
 }
-export function transformSnippet(value: string, body: string): string {
+export function transformSnippet(
+	value: string,
+	body: string,
+	indent?: SnippetFormatIndent,
+): string {
 	const sections: string[] = [];
 	let part = "",
 		depth = 0;
@@ -38,54 +48,11 @@ export function transformSnippet(value: string, body: string): string {
 				const format = sections[1] ?? "";
 				const captures =
 					args.length - (typeof args.at(-1) === "object" ? 3 : 2);
-				return format.replace(
-					/\$(\d+)|\$\{(\d+)(?::([^}]*))?\}/g,
-					(
-						_match,
-						plain: string | undefined,
-						nested: string | undefined,
-						operation: string | undefined,
-					) => {
-						const index = Number(plain ?? nested);
-						const capture =
-							index < captures ? String(args[index] ?? "") : "";
-						if (!operation) return capture;
-						if (operation === "/upcase")
-							return capture.toUpperCase();
-						if (operation === "/downcase")
-							return capture.toLowerCase();
-						if (operation === "/capitalize")
-							return (
-								capture.charAt(0).toUpperCase() +
-								capture.slice(1)
-							);
-						if (
-							operation === "/camelcase" ||
-							operation === "/pascalcase"
-						) {
-							const words = capture
-								.split(/[^\p{L}\p{N}]+/u)
-								.filter(Boolean);
-							return words
-								.map((word, index) =>
-									index === 0 && operation === "/camelcase"
-										? word.charAt(0).toLowerCase() +
-											word.slice(1)
-										: word.charAt(0).toUpperCase() +
-											word.slice(1),
-								)
-								.join("");
-						}
-						if (operation.startsWith("+"))
-							return capture ? operation.slice(1) : "";
-						if (operation.startsWith("-"))
-							return capture ? "" : operation.slice(1);
-						if (operation.startsWith("?")) {
-							const [yes, no] = operation.slice(1).split(":");
-							return capture ? (yes ?? "") : (no ?? "");
-						}
-						return capture || operation;
-					},
+				return formatSnippetCaptures(
+					format,
+					(index) =>
+						index < captures ? String(args[index] ?? "") : "",
+					indent,
 				);
 			},
 		);
@@ -108,7 +75,7 @@ function snippetNodes(input: string): (string | SnippetNode)[] {
 		literal = "";
 	};
 	for (let i = 0; i < input.length; ) {
-		if (input[i] === "\\" && i + 1 < input.length) {
+		if (input[i] === "\\" && /[$}\\]/.test(input[i + 1] ?? "")) {
 			literal += input[i + 1];
 			i += 2;
 			continue;
@@ -166,7 +133,7 @@ export function parseSnippet(
 	const nodes = snippetNodes(source),
 		definitions = new Map<string, SnippetNode>(),
 		stops: SnippetTabstop[] = [],
-		transforms: (SnippetTabstop & { transform: string })[] = [];
+		transforms: SnippetTransform[] = [];
 	const collect = (nodes: readonly (string | SnippetNode)[]) => {
 		for (const node of nodes) {
 			if (typeof node === "string") continue;
@@ -181,11 +148,25 @@ export function parseSnippet(
 		}
 	};
 	collect(nodes);
-	const choices = (node: SnippetNode) =>
-		node.body
-			.slice(1, -1)
-			.split(/(?<!\\),/)
-			.map((value) => value.replace(/\\([,|\\])/g, "$1"));
+	const choices = (node: SnippetNode): string[] => {
+		const values = [""];
+		const body = node.body.slice(1, -1);
+		for (let i = 0; i < body.length; i++) {
+			const char = body[i] ?? "";
+			if (char === ",") values.push("");
+			else
+				values[values.length - 1] =
+					(values[values.length - 1] ?? "") +
+					(char === "\\" && /[,|\\]/.test(body[i + 1] ?? "")
+						? (body[++i] ?? "")
+						: char);
+		}
+		return values;
+	};
+	let nextVariable = 1;
+	for (const key of definitions.keys())
+		nextVariable = Math.max(nextVariable, Number(key) + 1);
+	const unknownVariables = new Map<string, number>();
 	let order = 0;
 	const render = (
 		nodes: readonly (string | SnippetNode)[],
@@ -201,13 +182,27 @@ export function parseSnippet(
 				continue;
 			}
 			const numeric = /^\d+$/.test(node.key),
-				index = Number(node.key),
+				resolved = Object.hasOwn(variables, node.key)
+					? variables[node.key]
+					: undefined,
+				unknown = !numeric && resolved === undefined && !node.kind,
+				index = numeric
+					? Number(node.key)
+					: unknown
+						? (unknownVariables.get(node.key) ?? nextVariable++)
+						: -1,
 				definition = numeric ? definitions.get(node.key) : node;
+			if (unknown) unknownVariables.set(node.key, index);
 			let value = "";
 			const from = base + text.length,
 				ordinal = order++;
-			if (!numeric && variables[node.key] !== undefined)
-				value = variables[node.key] ?? "";
+			if (unknown) value = node.key;
+			else if (
+				!numeric &&
+				resolved !== undefined &&
+				(resolved !== "" || node.kind !== ":")
+			)
+				value = resolved;
 			else if (!visiting.has(node.key)) {
 				const next = new Set(visiting);
 				next.add(node.key);
@@ -224,7 +219,7 @@ export function parseSnippet(
 			}
 			if (node.kind === "/") value = transformSnippet(value, node.body);
 			text += value;
-			if (emit && numeric) {
+			if (emit && (numeric || unknown)) {
 				const stop = {
 					index,
 					from,

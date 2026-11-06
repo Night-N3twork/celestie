@@ -26,7 +26,7 @@ export function paintOverview(state: paintOverviewState): void {
 		node.type = "button";
 		node.className = "editor-overview-marker";
 		node.title = decoration.hover ?? "Decoration";
-		node.style.cssText = `top:${(state.layout.position(decoration.range.startLine, 1).index / Math.max(1, state.layout.rowCount)) * height}px;background:${decoration.overview}`;
+		node.style.cssText = `top:${(state.layout.rowTop(state.layout.position(decoration.range.startLine, 1).index) / Math.max(1, state.layout.height)) * height}px;background:${decoration.overview}`;
 		node.onclick = () =>
 			state.callbacks.onSelectLine?.(decoration.range.startLine);
 		fragment.append(node);
@@ -48,7 +48,8 @@ export function paintOverview(state: paintOverviewState): void {
 	const count = Math.min(2000, state.layout.rowCount);
 	for (let index = 0; index < count; index++) {
 		const row = state.layout.row(
-				Math.floor((index / count) * state.layout.rowCount),
+				state.layout.rowAtHeight((index / count) * state.layout.height)
+					.index,
 			),
 			text = state.model
 				.getLineContent(row.line)
@@ -63,7 +64,7 @@ export function paintOverview(state: paintOverviewState): void {
 	}
 	context.globalAlpha = 0.18;
 	context.fillStyle = style.getPropertyValue("--editor-accent");
-	const total = state.layout.rowCount * state.lineHeight;
+	const total = state.layout.height;
 	context.fillRect(
 		0,
 		(state.scrollTop / total) * height,
@@ -85,12 +86,14 @@ interface paintStickyHeadersState {
 	readonly model: TextModel;
 	readonly callbacks: { onSelectLine?: (line: number) => void };
 	readonly sticky: HTMLElement;
+	readonly layout: VisualLayout;
 }
 export function paintStickyHeaders(state: paintStickyHeadersState): void {
 	const first =
 		state.visible.find(
 			(row) =>
-				state.padding + row.index * state.lineHeight >= state.scrollTop,
+				state.padding + state.layout.rowTop(row.index) >=
+				state.scrollTop,
 		)?.line ?? 1;
 	const ancestors =
 		state.options.stickyScroll && !state.accessible

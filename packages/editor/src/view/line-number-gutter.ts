@@ -25,6 +25,7 @@ export class LineNumberGutter {
 			number,
 			{ label: string; title: string; color: string }
 		>,
+		rowTop: (index: number) => number = (index) => index * lineHeight,
 	): void {
 		this.element.style.width =
 			mode === "off"
@@ -36,7 +37,7 @@ export class LineNumberGutter {
 			const number = this.element.ownerDocument.createElement("div");
 			number.dataset.line = String(row.line);
 			number.classList.toggle("is-active", row.line === active);
-			number.style.cssText = `position:absolute;left:0;right:0;top:${padding + row.index * lineHeight - scrollTop}px;height:${lineHeight}px;line-height:${lineHeight}px`;
+			number.style.cssText = `position:absolute;left:0;right:0;top:${padding + rowTop(row.index) - scrollTop}px;height:${lineHeight}px;line-height:${lineHeight}px`;
 			const fold = folds.find((value) => value.start === row.line);
 			if (fold && row.from === 0 && row.kind !== "zone") {
 				const button = this.element.ownerDocument.createElement("span");

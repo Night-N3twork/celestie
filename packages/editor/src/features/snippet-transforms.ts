@@ -3,7 +3,11 @@ import { mapOffset } from "../model/change-mapping";
 import type { TrackedRange } from "../model/tracked-ranges";
 import { mapSelection } from "./editing-plan";
 import type { MultiEditingPlan } from "./selections";
-import { type SnippetTabstop, transformSnippet } from "./snippets";
+import {
+	type SnippetTabstop,
+	type SnippetTransform,
+	transformSnippet,
+} from "./snippets";
 
 export interface SnippetFrame {
 	stops: {
@@ -17,7 +21,7 @@ export interface SnippetFrame {
 	}[];
 	transforms: {
 		tracked: TrackedRange;
-		metadata: SnippetTabstop & { transform: string };
+		metadata: SnippetTransform;
 		instance: number;
 	}[];
 	index: number;
@@ -80,7 +84,11 @@ export function applySnippetTransforms(state: TransformState): void {
 					value.slice(0, update.from - owner.from) +
 					update.text +
 					value.slice(update.to - owner.from);
-		const text = transformSnippet(value, item.metadata.transform);
+		const text = transformSnippet(
+			value,
+			item.metadata.transform,
+			item.metadata.formatIndent,
+		);
 		if (state.text.slice(range.from, range.to) !== text)
 			updates.push({ ...range, text, item });
 	}

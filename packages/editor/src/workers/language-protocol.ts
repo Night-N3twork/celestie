@@ -4,7 +4,9 @@ export interface SerializedPattern {
 }
 
 export interface LanguageProfile {
+	tokenizer?: { moduleUrl: string; version: number };
 	grammar?: string;
+	fencedCode?: boolean;
 	lineComment?: string;
 	blockComment?: readonly [open: string, close: string];
 	quotes: readonly string[];
@@ -33,6 +35,7 @@ export interface LanguageDocument {
 }
 
 export interface LanguageRequest {
+	requestId?: number;
 	id: number;
 	method: string;
 	document?: LanguageDocument;

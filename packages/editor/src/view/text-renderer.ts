@@ -11,8 +11,10 @@ import {
 	resolveTokenStyle,
 	tokenStyleText,
 } from "../features/themes";
+import { mergeTokenLayers, validateTokens } from "../languages/token-spans";
 import type { TextModel } from "../model/text-model";
 import "../styles/editor.css";
+import type { BracketGuide } from "./bracket-guides";
 import { LineNumberGutter } from "./line-number-gutter";
 import { paintOverview, paintStickyHeaders } from "./overview-painter";
 import { PlatformMedia } from "./platform-media";
@@ -71,6 +73,7 @@ export class TextRenderer implements Disposable {
 	private readonly geometry: TextGeometry;
 	readonly layout: VisualLayout;
 	private readonly resizeObserver: ResizeObserver;
+	private resizeFrame = 0;
 	private subscription: Disposable | undefined;
 	private options: EditorOptions = {
 		...defaultViewOptions,
@@ -92,6 +95,9 @@ export class TextRenderer implements Disposable {
 	private selections: readonly TextSelection[] = [];
 	private folds: readonly FoldRegion[] = [];
 	private tokens: readonly Token[] = [];
+	private lexicalTokens: readonly Token[] = [];
+	private semanticTokens: readonly Token[] = [];
+	private tokenVersion = -1;
 	private hints: readonly InlayHint[] = [];
 	private lenses: readonly {
 		line: number;
@@ -103,6 +109,7 @@ export class TextRenderer implements Disposable {
 	private search: readonly SearchMatch[] = [];
 	private currentMatch = -1;
 	private brackets: readonly Position[] = [];
+	private bracketGuides: readonly BracketGuide[] = [];
 	private rowsKey = "";
 	private revision = 0;
 	private visible: VisualRow[] = [];
@@ -232,9 +239,14 @@ export class TextRenderer implements Disposable {
 			? undefined
 			: model.onDidChangeContent(this.render);
 		this.resizeObserver = new ResizeObserver(() => {
+			if (this.disposed || this.resizeFrame) return;
 			const anchor = this.captureAnchor();
-			this.render();
-			this.restoreAnchor(anchor);
+			this.resizeFrame = requestAnimationFrame(() => {
+				this.resizeFrame = 0;
+				if (this.disposed) return;
+				this.render();
+				this.restoreAnchor(anchor);
+			});
 		});
 		this.resizeObserver.observe(this.scroller);
 		this.root.ownerDocument.fonts?.addEventListener(
@@ -389,10 +401,8 @@ export class TextRenderer implements Disposable {
 				offset: 0,
 				left: this.viewport ? this.scrollLeft : 0,
 			};
-		const row = this.layout.row(
-			Math.floor(
-				Math.max(0, this.scrollTop - this.padding) / this.lineHeight,
-			),
+		const row = this.layout.rowAtHeight(
+			Math.max(0, this.scrollTop - this.padding),
 		);
 		const delta =
 			row.kind === "zone"
@@ -403,7 +413,7 @@ export class TextRenderer implements Disposable {
 			column: row.from + 1,
 			...(delta ? { rowDelta: delta } : {}),
 			offset:
-				this.scrollTop - (this.padding + row.index * this.lineHeight),
+				this.scrollTop - (this.padding + this.layout.rowTop(row.index)),
 			left: this.scrollLeft,
 		};
 	}
@@ -417,27 +427,59 @@ export class TextRenderer implements Disposable {
 		}
 		this.scrollTop = Math.max(
 			0,
-			this.padding + index * this.lineHeight + anchor.offset,
+			this.padding + this.layout.rowTop(index) + anchor.offset,
 		);
 		this.scrollLeft = anchor.left;
 		this.render();
 	}
 	lineTop(line: number): number {
 		return (
-			this.padding + this.layout.position(line, 1).index * this.lineHeight
+			this.padding +
+			this.layout.rowTop(this.layout.position(line, 1).index)
 		);
 	}
 	lineAtScrollOffset(top: number): number {
-		return this.layout.row(
-			Math.floor(Math.max(0, top - this.padding) / this.lineHeight),
-		).line;
+		return this.layout.rowAtHeight(Math.max(0, top - this.padding)).line;
 	}
 	setFolds(folds: readonly FoldRegion[]): void {
 		this.folds = folds;
 		this.render();
 	}
 	setTokens(tokens: readonly Token[]): void {
-		this.tokens = tokens;
+		if (this.tokenVersion !== this.model.getVersionId())
+			this.semanticTokens = [];
+		this.lexicalTokens = validateTokens(
+			tokens,
+			this.model.getValueLength({ eol: "\n" }),
+		);
+		this.tokenVersion = this.model.getVersionId();
+		this.tokens = mergeTokenLayers(this.lexicalTokens, this.semanticTokens);
+		this.revision++;
+		this.render();
+	}
+	setTokenLayers(
+		lexical: readonly Token[],
+		semantic: readonly Token[],
+	): void {
+		const length = this.model.getValueLength({ eol: "\n" });
+		const tokens = validateTokens(lexical, length),
+			overlays = validateTokens(semantic, length);
+		this.lexicalTokens = tokens;
+		this.semanticTokens = overlays;
+		this.tokens = mergeTokenLayers(tokens, overlays);
+		this.tokenVersion = this.model.getVersionId();
+		this.revision++;
+		this.render();
+	}
+	setSemanticTokens(tokens: readonly Token[]): void {
+		if (this.tokenVersion !== this.model.getVersionId())
+			this.lexicalTokens = [];
+		this.semanticTokens = validateTokens(
+			tokens,
+			this.model.getValueLength({ eol: "\n" }),
+		);
+		this.tokenVersion = this.model.getVersionId();
+		this.tokens = mergeTokenLayers(this.lexicalTokens, this.semanticTokens);
 		this.revision++;
 		this.render();
 	}
@@ -587,6 +629,13 @@ export class TextRenderer implements Disposable {
 	}
 	render = (): void => {
 		if (this.disposed) return;
+		if (this.tokenVersion !== this.model.getVersionId()) {
+			this.semanticTokens = [];
+			this.lexicalTokens = [];
+			this.tokens = [];
+			this.tokenVersion = this.model.getVersionId();
+			this.revision++;
+		}
 		const source = this.viewport,
 			width = Math.max(32, source.clientWidth - 2 * this.padding);
 		const changed = this.layout.update(
@@ -607,7 +656,7 @@ export class TextRenderer implements Disposable {
 		}
 		const top = this.scrollTop;
 		this.verticalScroll.configure(
-			this.layout.rowCount * this.lineHeight + 2 * this.padding,
+			this.layout.height + 2 * this.padding,
 			source.clientHeight,
 		);
 		this.surface.style.height = `${this.accessible ? source.clientHeight : this.verticalScroll.extent}px`;
@@ -616,14 +665,13 @@ export class TextRenderer implements Disposable {
 		this.geometry.originY = this.scrollOrigin;
 		const first = Math.max(
 				0,
-				Math.floor((scrollTop - this.padding) / this.lineHeight) - 4,
+				this.layout.rowAtHeight(scrollTop - this.padding).index - 4,
 			),
 			last = Math.min(
 				this.layout.rowCount - 1,
-				Math.ceil(
-					(scrollTop + source.clientHeight - this.padding) /
-						this.lineHeight,
-				) + 4,
+				this.layout.rowAtHeight(
+					scrollTop + source.clientHeight - this.padding,
+				).index + 5,
 			);
 		this.visible = [];
 		for (let index = first; index <= last; index++)
@@ -667,7 +715,7 @@ export class TextRenderer implements Disposable {
 				element.dataset.from = String(row.from);
 				element.className = "editor-visual-row";
 				element.style.minWidth = `${Math.max(0, source.clientWidth - 2 * this.padding - row.indent)}px`;
-				element.style.cssText = `position:absolute;top:${this.padding + row.index * this.lineHeight - this.scrollOrigin - (this.accessible ? source.scrollTop : 0)}px;left:${this.padding + row.indent - this.horizontalOrigin - (this.accessible ? source.scrollLeft : 0)}px;height:${this.lineHeight}px;line-height:${this.lineHeight}px`;
+				element.style.cssText = `position:absolute;top:${this.padding + this.layout.rowTop(row.index) - this.scrollOrigin - (this.accessible ? source.scrollTop : 0)}px;left:${this.padding + row.indent - this.horizontalOrigin - (this.accessible ? source.scrollLeft : 0)}px;height:${this.lineHeight}px;line-height:${this.lineHeight}px`;
 				element.classList.toggle(
 					"editor-active-visual-line",
 					row.line === this.activeLine,
@@ -746,6 +794,7 @@ export class TextRenderer implements Disposable {
 			this.options.lineNumbers,
 			this.accessible ? [] : this.folds,
 			glyphs,
+			(index) => this.layout.rowTop(index),
 		);
 		this.paintedVersion = this.model.getVersionId();
 		this.paintSelections();
@@ -806,6 +855,7 @@ export class TextRenderer implements Disposable {
 			{
 				model: this.model,
 				tokens: this.tokens,
+				selections: this.selections,
 				search: this.search,
 				currentMatch: this.currentMatch,
 				brackets: this.brackets,
@@ -827,6 +877,7 @@ export class TextRenderer implements Disposable {
 			return;
 		}
 		paintSelectionLayers({
+			bracketGuides: this.bracketGuides,
 			root: this.root,
 			visible: this.visible,
 			accessible: this.accessible,
@@ -877,14 +928,14 @@ export class TextRenderer implements Disposable {
 			model: this.model,
 			callbacks: this.callbacks,
 			sticky: this.sticky,
+			layout: this.layout,
 		});
 	}
 	private readonly mapClick = (event: PointerEvent): void => {
 		const rect = this.minimap.getBoundingClientRect();
 		this.scrollTop =
 			((event.clientY - rect.top) / Math.max(1, rect.height)) *
-				this.layout.rowCount *
-				this.lineHeight -
+				this.layout.height -
 			this.viewport.clientHeight / 2;
 		this.render();
 	};
@@ -948,6 +999,11 @@ export class TextRenderer implements Disposable {
 	}
 	setSelections(values: readonly TextSelection[]): void {
 		this.selections = values.map((value) => ({ ...value }));
+		if (this.options.renderWhitespace === "selection") {
+			this.revision++;
+			this.render();
+			return;
+		}
 		this.paintSelections();
 	}
 	setBracketMatches(values: readonly Position[]): void {
@@ -955,6 +1011,10 @@ export class TextRenderer implements Disposable {
 		this.brackets = values;
 		this.revision++;
 		this.render();
+	}
+	setBracketGuides(values: readonly BracketGuide[]): void {
+		this.bracketGuides = values;
+		this.paintSelections();
 	}
 	setSearchMatches(values: readonly SearchMatch[], current: number): void {
 		this.search = values;
@@ -983,11 +1043,15 @@ export class TextRenderer implements Disposable {
 			? undefined
 			: model.onDidChangeContent(this.render);
 		this.tokens = [];
+		this.lexicalTokens = [];
+		this.semanticTokens = [];
+		this.tokenVersion = -1;
 		this.decorations = [];
 		this.search = [];
 		this.hints = [];
 		this.lenses = [];
 		this.brackets = [];
+		this.bracketGuides = [];
 		this.selections = [];
 		this.folds = [];
 		this.rowsKey = "";
@@ -998,6 +1062,7 @@ export class TextRenderer implements Disposable {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.resizeObserver.disconnect();
+		cancelAnimationFrame(this.resizeFrame);
 		this.root.ownerDocument.fonts?.removeEventListener(
 			"loadingdone",
 			this.fontsChanged,
@@ -1016,6 +1081,9 @@ export class TextRenderer implements Disposable {
 		this.root.remove();
 		this.modelValue = undefined;
 		this.tokens = [];
+		this.lexicalTokens = [];
+		this.semanticTokens = [];
+		this.bracketGuides = [];
 		this.decorations = [];
 		this.selections = [];
 		this.hints = [];

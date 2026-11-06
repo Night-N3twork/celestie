@@ -1,6 +1,6 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { InlayHint, Token } from "../api/languages";
-import type { Position } from "../api/types";
+import type { Position, TextSelection } from "../api/types";
 import type { VisibleDecoration } from "../features/decorations";
 import type { SearchMatch } from "../features/search";
 import { isTokenScope } from "../features/themes";
@@ -11,6 +11,7 @@ import type { FoldRegion, VisualRow } from "./visual-layout";
 interface appendRowState {
 	readonly model: TextModel;
 	readonly tokens: readonly Token[];
+	readonly selections: readonly TextSelection[];
 	readonly search: readonly SearchMatch[];
 	readonly currentMatch: number;
 	readonly brackets: readonly Position[];
@@ -113,9 +114,38 @@ export function appendRow(
 				},
 			);
 	}
-	if (state.options.renderWhitespace === "all")
+	const trailingStart =
+		state.options.renderWhitespace === "trailing"
+			? text.search(/[\t ]*$/)
+			: text.length;
+	const whitespace = (column: number): boolean => {
+		if (!/[\t ]/.test(text[column] ?? "")) return false;
+		switch (state.options.renderWhitespace) {
+			case "all":
+				return true;
+			case "boundary":
+				return (
+					text[column] === "\t" ||
+					column === 0 ||
+					column === text.length - 1 ||
+					/[\t ]/.test(text[column - 1] ?? "") ||
+					/[\t ]/.test(text[column + 1] ?? "")
+				);
+			case "trailing":
+				return column >= trailingStart;
+			case "selection":
+				return state.selections.some(
+					(selection) =>
+						selection.start <= start + column &&
+						selection.end > start + column,
+				);
+			default:
+				return false;
+		}
+	};
+	if (state.options.renderWhitespace !== "none")
 		for (let column = row.from; column < row.to; column++)
-			if (/[\t ]/.test(text[column] ?? "")) {
+			if (whitespace(column)) {
 				boundaries.add(column);
 				boundaries.add(column + 1);
 			}
@@ -161,10 +191,7 @@ export function appendRow(
 			}
 			if (item.title) span.title = item.title;
 		}
-		if (
-			state.options.renderWhitespace === "all" &&
-			/^[\t ]$/.test(span.textContent)
-		) {
+		if (whitespace(from) && /^[\t ]$/.test(span.textContent)) {
 			span.classList.add("editor-visible-whitespace");
 			span.dataset.whitespace = span.textContent === "\t" ? "→" : "·";
 		}

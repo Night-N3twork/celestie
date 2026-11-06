@@ -98,7 +98,10 @@ function convert(
 	text: string,
 	grammar: string,
 	profile: LanguageProfile,
+	scanFences = true,
 ): Token[] {
+	if (scanFences && profile.fencedCode)
+		return fencedTokens(text, grammar, profile);
 	const opens = new Set(profile.colorizedBrackets.map(([open]) => open));
 	const closes = new Set(profile.colorizedBrackets.map(([, close]) => close));
 	const tokens: Token[] = [];
@@ -168,6 +171,87 @@ function convert(
 	if (offset !== text.length)
 		throw new Error("Syntax grammar changed source offsets.");
 	return tokens;
+}
+
+function fencedTokens(
+	text: string,
+	grammar: string,
+	profile: LanguageProfile,
+): Token[] {
+	const tokens: Token[] = [];
+	const lines = text.split("\n"),
+		starts: number[] = [];
+	let offset = 0,
+		plain = 0;
+	for (const line of lines) {
+		starts.push(offset);
+		offset += line.length + 1;
+	}
+	const append = (values: readonly Token[], base: number) => {
+		for (const token of values)
+			if (tokens.length < 150000)
+				tokens.push({
+					...token,
+					from: token.from + base,
+					to: token.to + base,
+				});
+	};
+	const prose = (from: number, to: number) => {
+		if (to <= from) return;
+		append(convert(text.slice(from, to), grammar, profile, false), from);
+	};
+	for (let index = 0; index < lines.length; index++) {
+		const opening = lines[index]?.match(/^[\t ]*(`{3,}|~{3,})(.*)$/);
+		if (
+			!opening?.[1] ||
+			(opening[1][0] === "`" && opening[2]?.includes("`"))
+		)
+			continue;
+		const from = starts[index] ?? 0,
+			body = Math.min(
+				text.length,
+				from + (lines[index]?.length ?? 0) + 1,
+			);
+		prose(plain, from);
+		const delimiter = opening[1],
+			closing = new RegExp(
+				`^[\\t ]*${delimiter[0]}{${delimiter.length},}[\\t ]*$`,
+			);
+		let end = index + 1;
+		while (end < lines.length && !closing.test(lines[end] ?? "")) end++;
+		const to = Math.min(text.length, starts[end] ?? text.length),
+			language = fenceGrammar(opening[2] ?? "");
+		if (language && language !== grammar)
+			append(
+				convert(text.slice(body, to), language, profile, false),
+				body,
+			);
+		else if (to > body)
+			tokens.push({ from: body, to, kind: "string.code" });
+		if (opening[2]?.trim()) {
+			const label =
+					from +
+					(lines[index]?.indexOf(delimiter) ?? 0) +
+					delimiter.length,
+				labelEnd = from + (lines[index]?.length ?? 0);
+			if (label < labelEnd)
+				tokens.push({
+					from: label,
+					to: labelEnd,
+					kind: "type.language",
+				});
+		}
+		plain =
+			end < lines.length
+				? Math.min(
+						text.length,
+						(starts[end] ?? 0) + (lines[end]?.length ?? 0) + 1,
+					)
+				: text.length;
+		index = end;
+	}
+	prose(plain, text.length);
+	return tokens.sort((a, b) => a.from - b.from).slice(0, 150000);
 }
 
 export function syntaxTokens(document: LanguageDocument): Token[] {

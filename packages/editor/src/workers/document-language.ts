@@ -1,4 +1,4 @@
-import type { Analysis, Completion } from "../api/languages";
+import type { Analysis, Completion, Token } from "../api/languages";
 import type { FoldingRules } from "../languages/configuration";
 import { indentationFolds } from "../languages/indentation-folds";
 import type { LanguageDocument, SerializedPattern } from "./language-protocol";
@@ -22,9 +22,12 @@ function foldingRules(document: LanguageDocument): FoldingRules {
 	};
 }
 
-export function analyzeDocument(document: LanguageDocument): Analysis {
+export function analyzeDocument(
+	document: LanguageDocument,
+	tokens: readonly Token[] = syntaxTokens(document),
+): Analysis {
 	return {
-		tokens: syntaxTokens(document),
+		tokens,
 		diagnostics: [],
 		folds: indentationFolds(document.text, foldingRules(document)),
 		symbols: [],

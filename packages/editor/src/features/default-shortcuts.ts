@@ -106,6 +106,20 @@ export function registerEverydayShortcuts(
 	bind("view.toggleFold", "[", { primary: true, shift: true });
 	bind("view.unfoldAll", "]", { primary: true, shift: true });
 	bind("view.toggleWrap", "z", { alt: true });
+	for (const [key, id] of [
+		["[", "view.foldRecursive"],
+		["]", "view.unfoldRecursive"],
+		[",", "view.foldSelection"],
+		[".", "view.removeFold"],
+		["0", "view.foldAll"],
+		["j", "view.unfoldAll"],
+	] as const)
+		bind(id, "k", { primary: true, chord: [{ key, primary: true }] });
+	for (let level = 1; level <= 7; level++)
+		bind(`view.foldLevel.${level}`, "k", {
+			primary: true,
+			chord: [{ key: String(level), primary: true }],
+		});
 	bind("view.toggleFold", "{", { primary: true, shift: true });
 	bind("view.unfoldAll", "}", { primary: true, shift: true });
 	bind("editor.action.quickCommand", "F1");

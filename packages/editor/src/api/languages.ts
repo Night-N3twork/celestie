@@ -81,6 +81,7 @@ export interface CodeLens {
 	readonly command: string;
 }
 export interface Analysis {
+	readonly semanticTokens?: readonly Token[];
 	readonly hints?: readonly InlayHint[];
 	readonly lenses?: readonly CodeLens[];
 	readonly colors?: readonly DocumentColor[];
@@ -137,6 +138,7 @@ export interface LanguageDefinition {
 	readonly name?: string;
 	readonly aliases?: readonly string[];
 	readonly grammar?: string;
+	readonly fencedCode?: boolean;
 	readonly extensions: readonly string[];
 	readonly filenames?: readonly string[];
 	readonly filenamePatterns?: readonly string[];

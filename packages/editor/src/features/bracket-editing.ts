@@ -1,3 +1,4 @@
+import type { EditorOptions } from "../api/editor-options";
 import type { TextSelection } from "../api/types";
 import type {
 	AutoClosingPair,
@@ -90,7 +91,18 @@ export function planBracketInput(
 	data: string | null,
 	configuration: LanguageConfiguration,
 	analysis: BracketAnalysis,
-	options: IndentationOptions = defaultIndentation,
+	options: IndentationOptions &
+		Partial<
+			Pick<
+				EditorOptions,
+				| "autoClosingBrackets"
+				| "autoClosingQuotes"
+				| "autoClosingComments"
+				| "autoClosingDelete"
+				| "autoClosingOvertype"
+				| "autoSurround"
+			>
+		> = defaultIndentation,
 ): EditingPlan | undefined {
 	const { start, end } = selection;
 	const collapsed = start === end;
@@ -107,6 +119,7 @@ export function planBracketInput(
 
 	if (inputType === "insertText" && data?.length === 1) {
 		if (
+			options.autoClosingOvertype !== false &&
 			block?.[1].length === 2 &&
 			collapsed &&
 			context === "block-comment" &&
@@ -129,6 +142,7 @@ export function planBracketInput(
 				};
 		}
 		if (
+			options.autoClosingOvertype !== false &&
 			collapsed &&
 			next === data &&
 			!escaped(text, start) &&
@@ -172,6 +186,7 @@ export function planBracketInput(
 			}
 		}
 		if (
+			options.autoClosingComments !== false &&
 			block &&
 			collapsed &&
 			data === block[0].at(-1) &&
@@ -180,9 +195,12 @@ export function planBracketInput(
 			analysis.contextAt(start - block[0].length + 1) === "code" &&
 			!text.startsWith(block[1], start)
 		) {
-			return replace(start, end, data + block[1], start + 1);
+			return {
+				...replace(start, end, data + block[1], start + 1),
+				autoClosedPair: block,
+			};
 		}
-		if (!collapsed) {
+		if (!collapsed && options.autoSurround !== false) {
 			const close = (
 				configuration.surroundingPairs ?? defaultPairs(configuration)
 			).find(([open]) => open === data)?.[1];
@@ -198,7 +216,7 @@ export function planBracketInput(
 						direction: selection.direction,
 					},
 				};
-		} else if (!escaped(text, start)) {
+		} else if (collapsed && !escaped(text, start)) {
 			const pair = autoClosingPair(
 				text,
 				start,
@@ -208,19 +226,26 @@ export function planBracketInput(
 			);
 			if (pair) {
 				const symmetric =
-					configuration.quotes.includes(pair.close) &&
-					pair.open.endsWith(pair.close);
+					configuration.quotes.some((quote) =>
+						[...pair.close].every((unit) => unit === quote),
+					) && pair.open.endsWith(pair.close);
 				const wordBefore = /[\p{ID_Continue}$]/u.test(
 					text[start - pair.open.length] ?? "",
 				);
+				const comment = block && pair.open.startsWith(block[0]);
+				const enabled = comment
+					? options.autoClosingComments !== false
+					: symmetric
+						? options.autoClosingQuotes !== false
+						: options.autoClosingBrackets !== false;
 				const closable =
 					!next ||
 					(configuration.autoCloseBefore === undefined
 						? /[\s\])};,:]/u.test(next)
 						: configuration.autoCloseBefore.includes(next));
-				if ((!symmetric || !wordBefore) && closable)
-					return (
-						(context === "code" &&
+				if (enabled && (!symmetric || !wordBefore) && closable)
+					return {
+						...((context === "code" &&
 							planTypedOutdent(
 								text,
 								selection,
@@ -229,13 +254,14 @@ export function planBracketInput(
 								options,
 								data.length,
 							)) ||
-						replace(
-							start,
-							end,
-							data + pair.close,
-							start + data.length,
-						)
-					);
+							replace(
+								start,
+								end,
+								data + pair.close,
+								start + data.length,
+							)),
+						autoClosedPair: [pair.open, pair.close],
+					};
 			}
 		}
 		if (context === "code") {
@@ -256,6 +282,8 @@ export function planBracketInput(
 			inputType === "deleteContentForward")
 	) {
 		if (
+			inputType === "deleteContentBackward" &&
+			options.autoClosingDelete !== false &&
 			block &&
 			text.slice(start - block[0].length, start) === block[0] &&
 			text.startsWith(block[1], start) &&
@@ -275,7 +303,12 @@ export function planBracketInput(
 			previous === next &&
 			analysis.isQuoteEnd(start) &&
 			!escaped(text, start - 1);
-		if (bracketPair || quotePair) return replace(start - 1, end + 1, "");
+		if (
+			inputType === "deleteContentBackward" &&
+			options.autoClosingDelete !== false &&
+			(bracketPair || quotePair)
+		)
+			return replace(start - 1, end + 1, "");
 		if (
 			inputType === "deleteContentBackward" &&
 			prefix &&

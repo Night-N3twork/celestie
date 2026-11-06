@@ -65,8 +65,8 @@ export function wrapLine(
 	const advances = units.map((unit) =>
 		unit.segment === "\t" ? 0 : measure(unit.segment),
 	);
-	if (needsShapedMeasurement(text, ligatures))
-		shapeAdvances(text, units, advances, measure);
+	const shaped = needsShapedMeasurement(text, ligatures);
+	if (shaped) shapeAdvances(text, units, advances, measure);
 	const rows: Segment[] = [];
 	let first = 0;
 	while (first < units.length) {
@@ -89,6 +89,36 @@ export function wrapLine(
 		}
 		if (next < units.length && lastBreak > first) next = lastBreak;
 		next = Math.max(first + 1, next);
+		if (shaped && next > first + 1) {
+			const fits = (end: number): boolean => {
+				let added = 0;
+				for (let index = first; index < end; index++)
+					added += extra(units[index]?.index ?? 0);
+				return (
+					indent +
+						added +
+						measure(
+							text.slice(from, units[end]?.index ?? text.length),
+						) <=
+					width
+				);
+			};
+			if (!fits(next)) {
+				let low = first + 1,
+					high = next - 1;
+				while (low < high) {
+					const mid = Math.ceil((low + high) / 2);
+					if (fits(mid)) low = mid;
+					else high = mid - 1;
+				}
+				next = low;
+				for (let index = next - 1; index >= first; index--)
+					if (/\s/u.test(units[index]?.segment ?? "")) {
+						next = index + 1;
+						break;
+					}
+			}
+		}
 		const to = units[next]?.index ?? text.length;
 		rows.push({ from, to, indent });
 		first = next;
@@ -136,6 +166,14 @@ export class VisualLayout {
 	private segments = new Map<number, Segment[]>();
 	private key = "";
 	private total = 0;
+	private lineHeight = 24;
+	private zoneAdjustments: {
+		index: number;
+		end: number;
+		height: number;
+		delta: number;
+		before: number;
+	}[] = [];
 	private uniform = false;
 	private zones = new Map<number, LineZones>();
 	private zoneLines = new Map<string, number>();
@@ -171,20 +209,22 @@ export class VisualLayout {
 								options.wordWrapColumn * this.measure(" "),
 							)
 						: viewportWidth;
-		const key = `${model.id}:${model.getVersionId()}:${width}:${options.tabSize}:${options.wrapIndent}:${options.fontFamily}:${options.fontSize}:${options.fontLigatures}:${accessible}:${JSON.stringify(folds)}:${zones.map((zone) => `${zone.id}@${zone.line}${zone.placement}${zone.rows}`).join(",")}:${JSON.stringify(hints)}`;
+		const key = `${model.id}:${model.getVersionId()}:${width}:${options.lineHeight}:${options.tabSize}:${options.wrapIndent}:${options.fontFamily}:${options.fontSize}:${options.fontLigatures}:${accessible}:${JSON.stringify(folds)}:${zones.map((zone) => `${zone.id}@${zone.line}${zone.placement}${zone.rows}`).join(",")}:${JSON.stringify(hints)}`;
 		if (key === this.key) return false;
 		this.key = key;
+		this.lineHeight = options.lineHeight;
+		this.zoneAdjustments = [];
 		this.zones = new Map();
 		this.zoneLines = new Map();
 		for (const zone of zones) {
 			this.zoneLines.set(zone.id, zone.line);
-			const rows = Math.max(1, Math.floor(zone.rows));
+			const rows = Math.max(1, Math.ceil(zone.rows));
 			let entry = this.zones.get(zone.line);
 			if (!entry) {
 				entry = { before: [], after: [], beforeRows: 0, afterRows: 0 };
 				this.zones.set(zone.line, entry);
 			}
-			entry[zone.placement].push({ ...zone, rows });
+			entry[zone.placement].push(zone);
 			if (zone.placement === "before") entry.beforeRows += rows;
 			else entry.afterRows += rows;
 		}
@@ -238,7 +278,62 @@ export class VisualLayout {
 			this.counts.push(rows);
 			this.total += rows;
 		}
+		let delta = 0;
+		for (const [line, entry] of [...this.zones].sort(([a], [b]) => a - b)) {
+			if (!this.counts[line - 1]) continue;
+			let index = this.starts[line - 1] ?? 0;
+			for (const placement of ["before", "after"] as const) {
+				if (placement === "after")
+					index += this.getSegments(line).length;
+				for (const zone of entry[placement]) {
+					const count = Math.ceil(zone.rows),
+						height = zone.rows * this.lineHeight;
+					this.zoneAdjustments.push({
+						index,
+						end: index + count,
+						height,
+						delta: height - count * this.lineHeight,
+						before: delta,
+					});
+					delta += height - count * this.lineHeight;
+					index += count;
+				}
+			}
+		}
 		return true;
+	}
+	rowTop(index: number): number {
+		index = Math.max(0, Math.min(this.total, index));
+		let low = 0,
+			high = this.zoneAdjustments.length;
+		while (low < high) {
+			const mid = (low + high) >>> 1;
+			if ((this.zoneAdjustments[mid]?.index ?? Infinity) < index)
+				low = mid + 1;
+			else high = mid;
+		}
+		const zone = this.zoneAdjustments[low - 1];
+		if (!zone) return index * this.lineHeight;
+		if (index < zone.end)
+			return (
+				zone.index * this.lineHeight +
+				zone.before +
+				Math.min(zone.height, (index - zone.index) * this.lineHeight)
+			);
+		return index * this.lineHeight + zone.before + zone.delta;
+	}
+	get height(): number {
+		return this.rowTop(this.total);
+	}
+	rowAtHeight(top: number): VisualRow {
+		let low = 0,
+			high = Math.max(0, this.total - 1);
+		while (low < high) {
+			const mid = Math.ceil((low + high) / 2);
+			if (this.rowTop(mid) <= top) low = mid;
+			else high = mid - 1;
+		}
+		return this.row(low);
 	}
 	zoneStart(id: string): number | undefined {
 		const line = this.zoneLines.get(id),
@@ -248,12 +343,12 @@ export class VisualLayout {
 		let start = this.starts[line - 1] ?? 0;
 		for (const zone of entry.before) {
 			if (zone.id === id) return start;
-			start += zone.rows;
+			start += Math.ceil(zone.rows);
 		}
 		start += this.getSegments(line).length;
 		for (const zone of entry.after) {
 			if (zone.id === id) return start;
-			start += zone.rows;
+			start += Math.ceil(zone.rows);
 		}
 		return undefined;
 	}
@@ -379,7 +474,7 @@ function zoneRow(
 ): VisualRow {
 	let start = 0;
 	for (const zone of zones) {
-		if (local < start + zone.rows)
+		if (local < start + Math.ceil(zone.rows))
 			return {
 				index,
 				line,
@@ -390,7 +485,7 @@ function zoneRow(
 				zone: zone.id,
 				zoneRow: local - start,
 			};
-		start += zone.rows;
+		start += Math.ceil(zone.rows);
 	}
 	return { index, line, from: 0, to: 0, indent: 0, kind: "zone" };
 }

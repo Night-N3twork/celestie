@@ -7,6 +7,7 @@ export interface InputEdit {
 }
 
 export interface EditingPlan {
+	readonly autoClosedPair?: readonly [open: string, close: string];
 	readonly edits: readonly InputEdit[];
 	readonly selection: TextSelection;
 	readonly selections?: readonly TextSelection[];

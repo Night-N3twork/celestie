@@ -46,8 +46,9 @@ interface SelectionHost {
 	): number;
 	pageRows(): number;
 	toggleFold(line: number): void;
-	visualIndex(offset: number): number;
+	visualIndex(offset: number, affinity?: TextSelection["affinity"]): number;
 	visualRowCount(): number;
+	isTextRow(row: number): boolean;
 	offsetAtVisualRowX(row: number, x: number): number;
 	previewDrop(offset: number | undefined): void;
 	moveSelection(
@@ -191,8 +192,13 @@ export class SelectionController implements Disposable {
 	column(direction: "Up" | "Down" | "Left" | "Right"): void {
 		const source = this.host.getSelections()[0] ?? caret(0);
 		if (!this.rectangle) {
-			const position = { line: this.host.visualIndex(head(source)) };
-			const column = this.host.pointAtOffset(head(source));
+			const position = {
+				line: this.host.visualIndex(head(source), source.affinity),
+			};
+			const column = this.host.pointAtOffset(
+				head(source),
+				source.affinity,
+			);
 			this.rectangle = {
 				line: position.line,
 				column,
@@ -202,14 +208,13 @@ export class SelectionController implements Disposable {
 		}
 		const rect = this.rectangle,
 			count = this.host.visualRowCount();
-		rect.endLine = Math.max(
-			0,
-			Math.min(
-				count - 1,
-				rect.endLine +
-					(direction === "Up" ? -1 : direction === "Down" ? 1 : 0),
-			),
-		);
+		const vertical = direction === "Up" ? -1 : direction === "Down" ? 1 : 0;
+		if (vertical) {
+			let row = rect.endLine + vertical;
+			while (row >= 0 && row < count && !this.host.isTextRow(row))
+				row += vertical;
+			if (row >= 0 && row < count) rect.endLine = row;
+		}
 		rect.endColumn = Math.max(
 			0,
 			rect.endColumn +
@@ -223,16 +228,17 @@ export class SelectionController implements Disposable {
 			values.length < selectionLimit;
 			line += step
 		) {
-			values.push(
-				directed(
-					this.host.offsetAtVisualRowX(line, rect.column),
-					this.host.offsetAtVisualRowX(line, rect.endColumn),
-					this.host.visualAffinity(
-						line,
+			if (this.host.isTextRow(line))
+				values.push(
+					directed(
+						this.host.offsetAtVisualRowX(line, rect.column),
 						this.host.offsetAtVisualRowX(line, rect.endColumn),
+						this.host.visualAffinity(
+							line,
+							this.host.offsetAtVisualRowX(line, rect.endColumn),
+						),
 					),
-				),
-			);
+				);
 			if (line === rect.line) break;
 		}
 		this.host.setSelections(values, true);
@@ -518,16 +524,17 @@ export class SelectionController implements Disposable {
 			values.length < selectionLimit;
 			line -= direction
 		) {
-			values.push(
-				directed(
-					this.host.offsetAtVisualRowX(line, a),
-					this.host.offsetAtVisualRowX(line, b),
-					this.host.visualAffinity(
-						line,
+			if (this.host.isTextRow(line))
+				values.push(
+					directed(
+						this.host.offsetAtVisualRowX(line, a),
 						this.host.offsetAtVisualRowX(line, b),
+						this.host.visualAffinity(
+							line,
+							this.host.offsetAtVisualRowX(line, b),
+						),
 					),
-				),
-			);
+				);
 			if (line === firstRow) break;
 		}
 		this.host.setSelections(normalizeSelections(values, text.length));

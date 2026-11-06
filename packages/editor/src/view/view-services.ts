@@ -166,6 +166,8 @@ export class ViewServices implements Disposable {
 				announce: (message) => this.host.announce(message),
 				offsetAtPoint: (x, y) => this.host.offsetAtPoint(x, y),
 				getTabSize: () => this.options.tabSize,
+				pasteIndentation: () =>
+					this.options.autoIndentOnPaste ? this.options : undefined,
 				syntaxPalette: () => this.renderer.syntaxPalette(),
 			},
 			this.renderer.interactionElement,

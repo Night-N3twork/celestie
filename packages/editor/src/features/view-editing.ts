@@ -14,6 +14,7 @@ import {
 } from "./editing-commands";
 import type { EditingPlan } from "./editing-plan";
 import { type LineCommand, planLineCommand } from "./line-commands";
+import { reindentMovedLines } from "./move-indentation";
 import {
 	combineLinePlans,
 	combinePlans,
@@ -180,6 +181,7 @@ export class ViewEditing {
 			);
 			return;
 		}
+		const moving = command === "moveUp" || command === "moveDown";
 		this.applyPerLine(
 			(selection, includeEndLine) =>
 				planLineCommand(
@@ -192,6 +194,7 @@ export class ViewEditing {
 			command.startsWith("move") || command.startsWith("duplicate")
 				? "shift"
 				: "collapse",
+			moving && this.host.options().autoIndentOnMove,
 		);
 	}
 	toggleLineComment(mode?: "add" | "remove"): void {
@@ -217,16 +220,25 @@ export class ViewEditing {
 			includeEndLine: boolean,
 		) => EditingPlan | undefined,
 		transform: "map" | "shift" | "collapse" = "map",
+		reindent = false,
 	): void {
 		if (this.host.isComposing()) return;
 		try {
+			const plan = combineLinePlans(
+				this.host.text(),
+				this.host.getSelections(),
+				planner,
+				transform,
+			);
 			this.host.applyMultiPlan(
-				combineLinePlans(
-					this.host.text(),
-					this.host.getSelections(),
-					planner,
-					transform,
-				),
+				reindent
+					? reindentMovedLines(
+							this.host.text(),
+							plan,
+							this.host.language(),
+							this.host.options(),
+						)
+					: plan,
 			);
 		} catch (error) {
 			this.host.announce(

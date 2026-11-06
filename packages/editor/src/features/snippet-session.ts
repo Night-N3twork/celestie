@@ -1,26 +1,26 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { LanguageEdit } from "../api/languages";
 import type { Disposable, TextSelection } from "../api/types";
-import {
-	getLanguageConfiguration,
-	wordExpression,
-} from "../languages/configuration";
 import { mapOffset } from "../model/change-mapping";
 import type { TextModel } from "../model/text-model";
 import type { TrackedRange } from "../model/tracked-ranges";
 import { getLineIndent } from "../view/input";
-import { wordRange } from "./editing-commands";
-import { indentationUnit } from "./indentation-options";
 import {
 	combinePlans,
 	type MultiEditingPlan,
 	replacementPlan,
 } from "./selections";
+import { indentSnippet } from "./snippet-indentation";
 import {
 	applySnippetTransforms,
 	type SnippetFrame,
 } from "./snippet-transforms";
-import { parseSnippet, type SnippetTabstop } from "./snippets";
+import { snippetVariables } from "./snippet-variables";
+import {
+	parseSnippet,
+	type SnippetTabstop,
+	type SnippetTransform,
+} from "./snippets";
 
 interface Host {
 	model(): TextModel;
@@ -243,50 +243,30 @@ export class SnippetSession implements Disposable {
 				}),
 			);
 		if (!nested) this.clear();
-		const selected = this.host.getSelection(),
-			indent = getLineIndent(this.host.text(), selected.start),
-			source = body
-				.replace(/\t/g, indentationUnit(this.host.options()))
-				.replace(/\n/g, `\n${indent}`);
-		const position = this.model.getPositionAtInputOffset(selected.start),
-			filename = this.model.uri.path.split("/").at(-1) ?? "",
-			word = wordRange(
-				this.host.text(),
-				selected.start,
-				wordExpression(
-					getLanguageConfiguration(this.model.getLanguageId()),
-				),
-			),
+		const selections = targets ?? this.host.getSelections(),
 			date = new Date();
-		let parsed = parseSnippet(source, {
-			TM_SELECTED_TEXT: this.host
-				.text()
-				.slice(selected.start, selected.end),
-			TM_FILENAME: filename,
-			TM_FILENAME_BASE: filename.replace(/\.[^.]+$/, ""),
-			TM_DIRECTORY: this.model.uri.path.slice(
-				0,
-				this.model.uri.path.lastIndexOf("/"),
-			),
-			TM_FILEPATH: this.model.uri.path,
-			TM_CURRENT_LINE: this.model.getLineContent(position.line),
-			TM_CURRENT_WORD: this.host.text().slice(word.from, word.to),
-			TM_LINE_INDEX: String(position.line - 1),
-			TM_LINE_NUMBER: String(position.line),
-			CURRENT_YEAR: String(date.getFullYear()),
-			CURRENT_MONTH: String(date.getMonth() + 1).padStart(2, "0"),
-			CURRENT_DATE: String(date.getDate()).padStart(2, "0"),
-			CURRENT_HOUR: String(date.getHours()).padStart(2, "0"),
-			CURRENT_MINUTE: String(date.getMinutes()).padStart(2, "0"),
-			CURRENT_SECOND: String(date.getSeconds()).padStart(2, "0"),
-			UUID: crypto.randomUUID(),
-			...variables,
+		const instances = selections.map((selection, cursor) => {
+			let parsed = indentSnippet(
+				parseSnippet(body, {
+					...snippetVariables(
+						this.model,
+						this.host.text(),
+						selection,
+						cursor,
+						date,
+					),
+					...variables,
+				}),
+				getLineIndent(this.host.text(), selection.start),
+				this.host.options(),
+			);
+			if (commitCharacter && !parsed.text.endsWith(commitCharacter))
+				parsed = { ...parsed, text: parsed.text + commitCharacter };
+			return parsed;
 		});
-		if (commitCharacter && !parsed.text.endsWith(commitCharacter))
-			parsed = { ...parsed, text: parsed.text + commitCharacter };
 		const basePlan = combinePlans(
-			(targets ?? this.host.getSelections()).map((selection) =>
-				replacementPlan(selection, parsed.text),
+			selections.map((selection, index) =>
+				replacementPlan(selection, instances[index]?.text ?? ""),
 			),
 			this.host.text().length,
 		);
@@ -312,10 +292,12 @@ export class SnippetSession implements Disposable {
 			>(),
 			transforms: {
 				tracked: TrackedRange;
-				metadata: SnippetTabstop & { transform: string };
+				metadata: SnippetTransform;
 				instance: number;
 			}[] = [];
-		for (const selection of plan.selections) {
+		for (const [index, selection] of plan.selections.entries()) {
+			const parsed = instances[index];
+			if (!parsed) continue;
 			const base = selection.end - parsed.text.length;
 			for (const stop of parsed.stops) {
 				const ranges = groups.get(stop.index) ?? [];
@@ -344,16 +326,17 @@ export class SnippetSession implements Disposable {
 		if (!groups.has(0))
 			groups.set(
 				0,
-				plan.selections.map((selection) => ({
+				plan.selections.map((selection, index) => ({
 					tracked: this.track(selection.end, selection.end, "never"),
 					metadata: {
 						index: 0,
-						from: parsed.text.length,
-						to: parsed.text.length,
+						from: instances[index]?.text.length ?? 0,
+						to: instances[index]?.text.length ?? 0,
 						parents: [],
 						order: Number.MAX_SAFE_INTEGER,
 					},
-					instance: selection.end - parsed.text.length,
+					instance:
+						selection.end - (instances[index]?.text.length ?? 0),
 				})),
 			);
 		this.frames.push({

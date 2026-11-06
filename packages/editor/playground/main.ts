@@ -1,3 +1,4 @@
+import type { EditorOptions } from "../src/api/editor-options";
 import { createPlaygroundDocuments } from "./documents";
 
 const container = document.getElementById("editor");
@@ -74,7 +75,10 @@ const wrap = document.getElementById("word-wrap") as HTMLSelectElement;
 const wrapColumn = document.getElementById("wrap-column") as HTMLInputElement;
 const theme = document.getElementById("theme") as HTMLSelectElement;
 const minimap = document.getElementById("minimap") as HTMLInputElement;
-const whitespace = document.getElementById("whitespace") as HTMLInputElement;
+const whitespace = document.getElementById("whitespace") as HTMLSelectElement;
+const bracketGuides = document.getElementById(
+	"bracket-guides",
+) as HTMLSelectElement;
 const inlayHints = document.getElementById("inlay-hints") as HTMLInputElement;
 const codeLens = document.getElementById("code-lens") as HTMLInputElement;
 const ligatures = document.getElementById("ligatures") as HTMLInputElement;
@@ -89,7 +93,8 @@ const syncOptions = () => {
 	wrapColumn.value = String(options.wordWrapColumn);
 	theme.value = options.theme;
 	minimap.checked = options.minimap;
-	whitespace.checked = options.renderWhitespace === "all";
+	whitespace.value = options.renderWhitespace;
+	bracketGuides.value = options.bracketGuides;
 	tabSize.value = String(options.tabSize);
 	insertSpaces.checked = options.insertSpaces;
 	readOnly.checked = options.readOnly;
@@ -106,7 +111,8 @@ const changeOptions = () => {
 		wordWrapColumn: Number(wrapColumn.value),
 		theme: theme.value,
 		minimap: minimap.checked,
-		renderWhitespace: whitespace.checked ? "all" : "none",
+		renderWhitespace: whitespace.value as EditorOptions["renderWhitespace"],
+		bracketGuides: bracketGuides.value as EditorOptions["bracketGuides"],
 		tabSize: Number(tabSize.value),
 		insertSpaces: insertSpaces.checked,
 		readOnly: readOnly.checked,
@@ -148,7 +154,7 @@ function addDemoZone(): void {
 	close.type = "button";
 	close.textContent = "Remove";
 	node.append(label, close);
-	const zone = view.addViewZone({ afterLine: line, heightInLines: 2, node });
+	const zone = view.addViewZone({ afterLine: line, heightInPx: 61.5, node });
 	label.textContent = `View zone after line ${zone.getAfterLine()} `;
 	close.addEventListener("click", () => zone.dispose());
 }
@@ -167,6 +173,7 @@ for (const control of [
 	theme,
 	minimap,
 	whitespace,
+	bracketGuides,
 	inlayHints,
 	codeLens,
 	ligatures,
@@ -234,6 +241,7 @@ import.meta.hot?.dispose(() => {
 		theme,
 		minimap,
 		whitespace,
+		bracketGuides,
 		inlayHints,
 		codeLens,
 		ligatures,

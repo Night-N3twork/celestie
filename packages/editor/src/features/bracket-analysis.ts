@@ -20,6 +20,9 @@ export class BracketAnalysis {
 	private readonly brackets = new Set<number>();
 	private readonly quoteEnds = new Set<number>();
 	private readonly openings: { offset: number; close: string }[] = [];
+	private guideCache:
+		| readonly { from: number; to: number; depth: number }[]
+		| undefined;
 
 	constructor(
 		readonly text: string,
@@ -263,6 +266,19 @@ export class BracketAnalysis {
 			if (partner !== undefined) return [candidate, partner];
 		}
 		return [];
+	}
+	guidePairs(): readonly { from: number; to: number; depth: number }[] {
+		if (this.guideCache) return this.guideCache;
+		const stack: number[] = [];
+		this.guideCache = this.openings.flatMap(({ offset }) => {
+			const to = this.partner(offset);
+			if (to === undefined) return [];
+			while (stack.length && (stack.at(-1) ?? 0) < offset) stack.pop();
+			const depth = stack.length;
+			stack.push(to);
+			return [{ from: offset, to, depth }];
+		});
+		return this.guideCache;
 	}
 
 	enclosingRanges(
