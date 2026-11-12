@@ -13,6 +13,7 @@ import {
 } from "../features/themes";
 import { mergeTokenLayers, validateTokens } from "../languages/token-spans";
 import type { TextModel } from "../model/text-model";
+import { injectedText } from "./injected-text";
 import "../styles/editor.css";
 import type { BracketGuide } from "./bracket-guides";
 import { LineNumberGutter } from "./line-number-gutter";
@@ -43,6 +44,7 @@ interface TextRendererOptions {
 	readonly onSelectLine?: (line: number) => void;
 	readonly onFocusEditor?: () => void;
 	readonly onFontZoom?: (level: number) => void;
+	readonly onInlayHint?: (hint: InlayHint, part?: number) => void;
 }
 export const minFontZoom = -5;
 export const maxFontZoom = 9;
@@ -90,6 +92,8 @@ export class TextRenderer implements Disposable {
 	private readonly widgetLayer: WidgetLayer;
 	private accessible = false;
 	private disposed = false;
+	private batchDepth = 0;
+	private renderPending = false;
 	private readonly padding: number;
 	private activeLine = 1;
 	private selections: readonly TextSelection[] = [];
@@ -432,6 +436,9 @@ export class TextRenderer implements Disposable {
 		this.scrollLeft = anchor.left;
 		this.render();
 	}
+	get documentBottom(): number {
+		return this.padding + this.layout.height;
+	}
 	lineTop(line: number): number {
 		return (
 			this.padding +
@@ -627,7 +634,23 @@ export class TextRenderer implements Disposable {
 			column: (end ? row.to : row.from) + 1,
 		});
 	}
+	batchPresentation(update: () => void): void {
+		this.batchDepth++;
+		try {
+			update();
+		} finally {
+			this.batchDepth--;
+			if (!this.batchDepth && this.renderPending) {
+				this.renderPending = false;
+				this.render();
+			}
+		}
+	}
 	render = (): void => {
+		if (this.batchDepth) {
+			this.renderPending = true;
+			return;
+		}
 		if (this.disposed) return;
 		if (this.tokenVersion !== this.model.getVersionId()) {
 			this.semanticTokens = [];
@@ -644,11 +667,26 @@ export class TextRenderer implements Disposable {
 			this.folds,
 			this.accessible,
 			this.layoutZones(),
-			this.options.inlayHints &&
+			[
+				...(this.options.inlayHints &&
 				!this.accessible &&
 				this.assistanceVersion === this.model.getVersionId()
-				? this.hints
-				: [],
+					? this.hints.map((hint) => ({
+							offset: hint.offset,
+							text:
+								hint.label?.map((part) => part.text).join("") ??
+								hint.text,
+						}))
+					: []),
+				...(!this.accessible
+					? injectedText(this.model, this.decorations).map(
+							(item) => ({
+								...item,
+								width: this.geometry.measure(item.text),
+							}),
+						)
+					: []),
+			],
 		);
 		if (changed) {
 			this.rowsKey = "";
@@ -714,8 +752,8 @@ export class TextRenderer implements Disposable {
 				element.dataset.line = String(row.line);
 				element.dataset.from = String(row.from);
 				element.className = "editor-visual-row";
-				element.style.minWidth = `${Math.max(0, source.clientWidth - 2 * this.padding - row.indent)}px`;
 				element.style.cssText = `position:absolute;top:${this.padding + this.layout.rowTop(row.index) - this.scrollOrigin - (this.accessible ? source.scrollTop : 0)}px;left:${this.padding + row.indent - this.horizontalOrigin - (this.accessible ? source.scrollLeft : 0)}px;height:${this.lineHeight}px;line-height:${this.lineHeight}px`;
+				element.style.minWidth = `${Math.max(0, source.clientWidth - 2 * this.padding - row.indent)}px`;
 				element.classList.toggle(
 					"editor-active-visual-line",
 					row.line === this.activeLine,
@@ -776,13 +814,30 @@ export class TextRenderer implements Disposable {
 			number,
 			{ label: string; title: string; color: string }
 		>();
-		for (const decoration of this.decorations)
-			if (decoration.gutter)
-				glyphs.set(decoration.range.startLine, {
+		for (const decoration of this.decorations) {
+			if (!decoration.gutter) continue;
+			const lines = decoration.wholeLine
+				? [
+						...new Set(
+							this.visible
+								.filter(
+									(row) =>
+										row.kind !== "zone" &&
+										row.line >=
+											decoration.range.startLine &&
+										row.line <= decoration.range.endLine,
+								)
+								.map((row) => row.line),
+						),
+					]
+				: [decoration.range.startLine];
+			for (const line of lines)
+				glyphs.set(line, {
 					label: decoration.gutter,
 					title: decoration.hover ?? "",
 					color: decoration.overview ?? "var(--editor-accent)",
 				});
+		}
 		this.gutter.renderRows(
 			this.visible,
 			scrollTop,
@@ -864,6 +919,8 @@ export class TextRenderer implements Disposable {
 				accessible: this.accessible,
 				assistanceVersion: this.assistanceVersion,
 				hints: this.hints,
+				activateHint: (hint, part) =>
+					this.callbacks.onInlayHint?.(hint, part),
 				folds: this.folds,
 				tokenStyle: this.tokenStyle,
 			},

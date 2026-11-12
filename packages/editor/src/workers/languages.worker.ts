@@ -5,6 +5,7 @@ import type {
 } from "./language-protocol";
 import { disposeSyntaxTokens, setEmbeddedLanguages } from "./syntax-tokens";
 import { analyzeWithTokenizer, disposeTokenizer } from "./tokenizer-extensions";
+import { unicodeHighlights } from "./unicode-highlights";
 
 const documents = new Map<string, LanguageDocument>();
 const requests = new Map<
@@ -43,6 +44,8 @@ function run(request: Request, signal: AbortSignal): unknown {
 	}
 	const document = documents.get(request.documentId ?? "");
 	if (!document) throw new Error("Document is no longer available.");
+	if (request.method === "unicodeHighlights")
+		return unicodeHighlights(document.text);
 	if (request.method === "analyze")
 		return analyzeWithTokenizer(document, signal);
 	if (document.text.length > 600000)

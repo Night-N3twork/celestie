@@ -1,4 +1,8 @@
 import type {
+	ColorPresentation,
+	RenamePreparation,
+} from "../api/language-contributions";
+import type {
 	Analysis,
 	LanguageContext,
 	LanguageEdit,
@@ -9,9 +13,11 @@ import {
 	isWord,
 	wordExpression,
 } from "../languages/configuration";
+import { validOffsetRange } from "./document-contributions";
 import { wordRange } from "./editing-commands";
 import type { LanguageFeatureHost } from "./language-host";
 import type { LanguagePopup } from "./language-popup";
+import { hasLanguageProvider } from "./language-request";
 
 interface DialogHost {
 	editor: LanguageFeatureHost;
@@ -24,11 +30,30 @@ interface DialogHost {
 	): Promise<T>;
 	valid(context: LanguageContext, version: number): boolean;
 }
-export function showRename(
+export async function showRename(
 	dialog: DialogHost,
 	context: LanguageContext,
 	version: number,
-): void {
+): Promise<void> {
+	const prepared = hasLanguageProvider(context.model, "prepareRename");
+	const preparation = prepared
+		? await dialog.request<RenamePreparation | null>(
+				"prepareRename",
+				context,
+			)
+		: undefined;
+	if (!dialog.valid(context, version)) return;
+	if (
+		prepared &&
+		(!preparation ||
+			preparation.reason ||
+			!validOffsetRange(preparation, context.text.length))
+	) {
+		dialog.editor.announce(
+			preparation?.reason ?? "This symbol cannot be renamed.",
+		);
+		return;
+	}
 	dialog.popup.close();
 	const form = dialog.popup.widget.ownerDocument.createElement("form"),
 		label = dialog.popup.widget.ownerDocument.createElement("label"),
@@ -43,12 +68,20 @@ export function showRename(
 		context.offset,
 		wordExpression(configuration),
 	);
-	field.value = context.text.slice(word.from, word.to);
+	field.value =
+		preparation?.placeholder ??
+		context.text.slice(
+			preparation?.from ?? word.from,
+			preparation?.to ?? word.to,
+		);
 	label.append(field);
 	form.append(label);
 	form.onsubmit = (event) => {
 		event.preventDefault();
-		if (!isWord(configuration, field.value)) {
+		if (
+			!field.value.trim() ||
+			(!prepared && !isWord(configuration, field.value))
+		) {
 			dialog.editor.announce("Enter a single word.");
 			return;
 		}
@@ -61,7 +94,11 @@ export function showRename(
 				},
 			)
 			.then(async (edits) => {
-				if (dialog.valid(context, version) && dialog.editor.canEdit()) {
+				if (
+					form.isConnected &&
+					dialog.valid(context, version) &&
+					dialog.editor.canEdit()
+				) {
 					dialog.popup.close();
 					await dialog.editor.apply(edits);
 					dialog.editor.input.focus({ preventScroll: true });
@@ -69,13 +106,14 @@ export function showRename(
 			})
 			.catch((error) => dialog.editor.announce(String(error)));
 	};
-	dialog.popup.widget.replaceChildren(form);
-	dialog.popup.widget.hidden = false;
-	dialog.popup.position(dialog.popup.widget, context.offset);
+	dialog.popup.showContent("Rename symbol", form, context.offset, "rename");
 	field.focus();
 	field.select();
 }
-export function showColorPicker(dialog: DialogHost): void {
+export function showColorPicker(
+	dialog: DialogHost,
+	context: LanguageContext,
+): void {
 	const model = dialog.editor.model(),
 		offset = dialog.editor.selection().end,
 		color = dialog.analysis.colors?.find(
@@ -93,7 +131,7 @@ export function showColorPicker(dialog: DialogHost): void {
 	field.setAttribute("aria-label", "Color value");
 	button.type = "button";
 	button.textContent = "Apply color";
-	button.onclick = () => {
+	button.onclick = async () => {
 		if (
 			dialog.editor.model() === model &&
 			model.getVersionId() === version &&
@@ -104,21 +142,61 @@ export function showColorPicker(dialog: DialogHost): void {
 					.slice(color.from, color.to),
 				hex = field.value + color.color.slice(7),
 				text = original.startsWith('"') ? JSON.stringify(hex) : hex;
-			dialog.editor.apply([
-				{
-					uri: model.uri.toString(),
-					from: color.from,
-					to: color.to,
-					text,
-					version,
-				},
-			]);
+
+			try {
+				if (hasLanguageProvider(model, "colorPresentations")) {
+					const presentations = await dialog.request<
+						readonly ColorPresentation[]
+					>("colorPresentations", context, {
+						item: color,
+						color: hex,
+					});
+					if (
+						!button.isConnected ||
+						!dialog.valid(context, version) ||
+						!dialog.editor.canEdit()
+					)
+						return;
+					dialog.popup.showChoices(
+						"color-presentations",
+						presentations.map((presentation) => ({
+							label: presentation.label,
+							run: () => {
+								if (
+									dialog.valid(context, version) &&
+									dialog.editor.canEdit()
+								)
+									void Promise.resolve(
+										dialog.editor.apply(presentation.edits),
+									).catch((error) =>
+										dialog.editor.announce(String(error)),
+									);
+							},
+						})),
+						offset,
+					);
+					return;
+				}
+				await dialog.editor.apply([
+					{
+						uri: model.uri.toString(),
+						from: color.from,
+						to: color.to,
+						text,
+						version,
+					},
+				]);
+			} catch (error) {
+				dialog.editor.announce(String(error));
+				return;
+			}
+
 			dialog.popup.close();
 			dialog.editor.input.focus({ preventScroll: true });
 		}
 	};
-	dialog.popup.widget.replaceChildren(field, button);
-	dialog.popup.widget.hidden = false;
-	dialog.popup.position(dialog.popup.widget, color.from);
+	const content = dialog.popup.widget.ownerDocument.createElement("div");
+	content.append(field, button);
+	dialog.popup.showContent("Document color", content, color.from, "color");
 	field.focus();
 }

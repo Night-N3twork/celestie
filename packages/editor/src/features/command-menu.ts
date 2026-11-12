@@ -179,7 +179,7 @@ export class CommandMenu implements Disposable {
 			);
 		else this.input.removeAttribute("aria-activedescendant");
 		this.status.textContent = this.items.length
-			? `${this.items.length} commands · Escape to close`
+			? `${this.items.length} commands - Escape to close`
 			: "No matching commands";
 	}
 

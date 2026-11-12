@@ -5,6 +5,11 @@ import type { TrackedRange } from "../model/tracked-ranges";
 import type { InputSurface } from "./input-surface";
 import type { TextRenderer } from "./text-renderer";
 export class SavedViewStates implements Disposable {
+	getModel(uri: string): TextModel | undefined {
+		return [...this.savedModels.keys()].find(
+			(model) => !model.isDisposed() && model.uri.toString() === uri,
+		);
+	}
 	private readonly savedModels = new Map<
 		TextModel,
 		{

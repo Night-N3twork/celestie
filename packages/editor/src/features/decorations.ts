@@ -3,6 +3,11 @@ import type { Disposable, Range } from "../api/types";
 import type { TextModel } from "../model/text-model";
 import type { TrackedRange } from "../model/tracked-ranges";
 export interface Decoration {
+	readonly wholeLine?: boolean;
+	readonly before?: { readonly text: string; readonly tooltip?: string };
+	readonly after?: { readonly text: string; readonly tooltip?: string };
+	readonly opacity?: number;
+	readonly strikethrough?: boolean;
 	readonly range: Range;
 	readonly className?: string;
 	readonly background?: string;
@@ -25,6 +30,26 @@ export class DecorationCollection implements Disposable {
 	set(decorations: readonly Decoration[]): void {
 		if (this.disposed) throw new Error("Decoration collection disposed.");
 		const prepared = decorations.map((value) => {
+			for (const side of ["before", "after"] as const) {
+				const text = value[side]?.text;
+				if (
+					text !== undefined &&
+					(typeof text !== "string" ||
+						/[\r\n\t\u2028\u2029]/u.test(text))
+				)
+					throw new TypeError(
+						"Injected text must be a single line without tabs.",
+					);
+			}
+			if (
+				value.opacity !== undefined &&
+				(!Number.isFinite(value.opacity) ||
+					value.opacity < 0 ||
+					value.opacity > 1)
+			)
+				throw new RangeError(
+					"Decoration opacity must be between zero and one.",
+				);
 			if (value.className && !/^[a-zA-Z][\w-]*$/.test(value.className))
 				throw new TypeError("Invalid decoration class.");
 			return value;
@@ -86,6 +111,12 @@ export function diagnosticDecorations(
 						? "var(--editor-warning)"
 						: "var(--editor-accent)";
 			return {
+				...(item.tags?.includes("unnecessary")
+					? { opacity: 0.55 }
+					: {}),
+				...(item.tags?.includes("deprecated")
+					? { strikethrough: true }
+					: {}),
 				range: {
 					startLine: start.line,
 					startColumn: start.column,

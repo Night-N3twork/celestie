@@ -1,4 +1,4 @@
-import type { Analysis, Diagnostic, Token } from "../api/languages";
+import type { Analysis, CodeLens, Diagnostic, Token } from "../api/languages";
 import type { Disposable, TextSelection } from "../api/types";
 import {
 	DecorationCollection,
@@ -28,6 +28,7 @@ interface Host {
 	setSelections(values: readonly TextSelection[], reveal?: boolean): void;
 	updateCursor(): void;
 	executeCommand(id: string): unknown;
+	activateLens(lens: CodeLens): void;
 	runLanguageCommand(id: string): void;
 	diagnosticsChanged(values: readonly Diagnostic[]): void;
 }
@@ -239,12 +240,20 @@ export class ViewPresentation implements Disposable {
 				label: lens.label,
 				run: () => {
 					this.host.setSelections([caret(lens.offset)], true);
-					void this.host.executeCommand(lens.command);
+					this.host.activateLens(lens);
 				},
 			})),
 		);
 		this.renderer.setTokenLayers(value.tokens, value.semanticTokens ?? []);
 		this.setDiagnostics(value.diagnostics);
+		this.setDiagnostics(
+			(value.unicodeHighlights ?? []).map((range) => ({
+				...range,
+				severity: "warning",
+				source: "Unicode",
+			})),
+			"editor-unicode",
+		);
 		this.setFoldingRanges(value.folds);
 		for (const widget of this.colorWidgets.splice(0)) widget.dispose();
 		this.renderer.restoreAnchor(anchor);

@@ -129,7 +129,7 @@ export function createPlaygroundDocuments(
 						? "CR"
 						: "LF";
 			language.value = model.getLanguageId();
-			status.textContent = `${clean.get(model) !== model.getAlternativeVersionId() ? "Modified" : "Unmodified"}${model.getBOM() ? " · BOM" : ""}`;
+			status.textContent = `${clean.get(model) !== model.getAlternativeVersionId() ? "Modified" : "Unmodified"}${model.getBOM() ? " - BOM" : ""}`;
 		} else status.textContent = "No document attached";
 	};
 	const primaryFocus = () => {

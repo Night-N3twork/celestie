@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Editor diff playground</title>
+		<style>
+			body {
+				margin: 0;
+				background: #181818;
+				color: #ddd;
+				font-family: system-ui, sans-serif;
+			}
+			header {
+				padding: 12px 20px;
+			}
+			a {
+				color: #75beff;
+			}
+			#diff {
+				height: calc(100vh - 65px);
+				min-height: 350px;
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<a href="./index.html">Editor playground</a>
+			- Standalone diff - Alt+F5 / Shift+Alt+F5 to navigate
+		</header>
+		<main id="diff"></main>
+		<script type="module" src="./diff.ts"></script>
+	</body>
+</html>

@@ -14,7 +14,7 @@ interface Host {
 	text(): string;
 	canEdit(): boolean;
 	getSelections(): readonly TextSelection[];
-	applyMultiPlan(plan: MultiEditingPlan): void;
+	applyMultiPlan(plan: MultiEditingPlan, group?: string): void;
 	applyWorkspace(
 		batches: readonly WorkspaceTextEdit[],
 		selections: readonly TextSelection[],
@@ -79,6 +79,7 @@ export class LanguageEdits {
 	apply(
 		edits: readonly LanguageEdit[],
 		desired?: readonly TextSelection[],
+		group?: string,
 	): void {
 		if (!edits.length || !this.host.canEdit()) return;
 		const groups = new Map<TextModel, LanguageEdit[]>();
@@ -116,17 +117,24 @@ export class LanguageEdits {
 					throw new Error("Language edits overlap.");
 		}
 		const local = groups.get(this.model) ?? [];
+		if (group && (groups.size !== 1 || !groups.has(this.model)))
+			throw new Error(
+				"On-type formatting must edit only the current model.",
+			);
 		const selections =
 			desired ??
 			this.host
 				.getSelections()
 				.map((selection) => mapSelection(selection, local));
 		if (groups.size === 1 && groups.has(this.model)) {
-			this.host.applyMultiPlan({
-				edits: local,
-				selection: selections[0] ?? caret(0),
-				selections,
-			});
+			this.host.applyMultiPlan(
+				{
+					edits: local,
+					selection: selections[0] ?? caret(0),
+					selections,
+				},
+				group,
+			);
 			return;
 		}
 		this.host.applyWorkspace(

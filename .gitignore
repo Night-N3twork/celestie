@@ -4,3 +4,10 @@ tsconfig.tsbuildinfo
 node_modules
 .env
 .vscode/settings.json
+
+packages/editor/compatibility-target.json
+packages/editor/TODO.md
+packages/editor/compatibility/
+packages/editor/tools/inventory-monaco.mjs
+*.md
+packages/editor/language-inventory.json

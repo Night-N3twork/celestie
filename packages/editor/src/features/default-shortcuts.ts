@@ -96,6 +96,15 @@ export function registerEverydayShortcuts(
 	});
 	bind("language.signature", " ", { primary: true, shift: true });
 	bind("language.definitions", "F12");
+	bind("language.implementations", "F12", { primary: true });
+	bind("language.peekDefinitions", "F12", { alt: true });
+	bind("language.nextLocation", "F4");
+	bind("language.previousLocation", "F4", { shift: true });
+	bind("language.nextDiagnostic", "F8");
+	bind("language.previousDiagnostic", "F8", { shift: true });
+	bind("language.refactor", "r", { primary: true, shift: true });
+	bind("language.inlineNext", "]", { alt: true });
+	bind("language.inlinePrevious", "[", { alt: true });
 	bind("language.references", "F12", { shift: true });
 	bind("language.rename", "F2");
 	bind("language.symbols", "o", { primary: true, shift: true });
@@ -244,6 +253,32 @@ export function registerCommentShortcuts(
 	];
 	return {
 		dispose: () => {
+			for (const subscription of subscriptions) subscription.dispose();
+		},
+	};
+}
+
+export function registerDiffShortcuts(
+	shortcuts: KeyboardShortcuts,
+	run: (id: string) => void,
+): Disposable {
+	const subscriptions = [
+		shortcuts.register({
+			id: "diff.next",
+			key: "F5",
+			alt: true,
+			run: () => run("diff.next"),
+		}),
+		shortcuts.register({
+			id: "diff.previous",
+			key: "F5",
+			alt: true,
+			shift: true,
+			run: () => run("diff.previous"),
+		}),
+	];
+	return {
+		dispose() {
 			for (const subscription of subscriptions) subscription.dispose();
 		},
 	};

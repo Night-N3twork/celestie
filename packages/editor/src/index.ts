@@ -1,8 +1,43 @@
 export type {
+	DiffChange,
+	DiffCharacterChange,
+	DiffComputationOptions,
+	DiffEditorOptions,
+	DiffModels,
+	DiffRange,
+	DiffResult,
+	DiffSnapshot,
+	DiffState,
+} from "./api/diff";
+export type {
 	EditorOptions,
 	EditorViewOptions,
+	EditorViewport,
 	EditorViewState,
 } from "./api/editor-options";
+export type {
+	ColorPresentation,
+	CompletionList,
+	ContributionProvider,
+	Documentation,
+	DocumentHighlight,
+	DocumentLink,
+	InlayHintPart,
+	InlineCompletion,
+	InlineCompletionList,
+	LanguageTrigger,
+	LinkedEditingRanges,
+	OffsetRange,
+	ParameterInformation,
+	ProviderModel,
+	ProviderWorkspace,
+	RenamePreparation,
+	SelectionRange,
+	SemanticTokenDelta,
+	SemanticTokenSnapshot,
+	SignatureHelp,
+	SignatureInformation,
+} from "./api/language-contributions";
 export type {
 	Analysis,
 	CodeAction,
@@ -48,6 +83,7 @@ export type {
 	TextSelection,
 } from "./api/types";
 export { Uri, type UriComponents } from "./api/uri";
+export { computeDiff } from "./diff/client";
 export type { TransferContext, TransferProvider } from "./features/clipboard";
 export type { EditorCommand } from "./features/commands";
 export type { Decoration, VisibleDecoration } from "./features/decorations";
@@ -77,6 +113,8 @@ export type {
 	TrackedRange,
 	TrackedRangeOptions,
 } from "./model/tracked-ranges";
+export { DiffEditorView } from "./view/diff-editor-view";
+export { EditorView } from "./view/editor-view";
 export type {
 	ContentWidgetOptions,
 	ContentWidgetPlacement,

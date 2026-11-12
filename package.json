@@ -13,7 +13,7 @@
 	},
 	"private": true,
 	"scripts": {
-		"dev": "vite",
+		"dev": "vite --config packages/editor/vite.config.ts",
 		"preview": "vite preview",
 		"build": "tsc -b && vite build",
 		"lint": "biome lint .",

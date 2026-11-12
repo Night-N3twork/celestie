@@ -726,6 +726,16 @@ export class DocumentModel implements Disposable {
 			this.history.undoable()
 		);
 	}
+	getUndoGroup(version: number, owner: string): string | undefined {
+		this.assertLive();
+		const entry = this.history.peekUndo();
+		return version === this.version &&
+			entry?.afterVersion === version &&
+			entry.afterState?.owner === owner &&
+			!entry.workspace
+			? entry.group
+			: undefined;
+	}
 	canRedo(): boolean {
 		this.assertLive();
 		return (

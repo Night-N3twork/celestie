@@ -793,6 +793,7 @@
 }
 
 .editor-inlay-hint {
+	pointer-events: auto;
 	unicode-bidi: isolate;
 	font-size: 0.8em;
 	padding: 0 3px;
@@ -800,6 +801,37 @@
 	background: var(--editor-panel);
 	color: color-mix(in srgb, var(--editor-foreground) 65%, transparent);
 	user-select: none;
+}
+.editor-inlay-hint button {
+	border: 0;
+	padding: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+.editor-injected-text {
+	unicode-bidi: isolate;
+	color: color-mix(in srgb, var(--editor-foreground) 65%, transparent);
+}
+.editor-document-link {
+	text-decoration: underline;
+	text-decoration-color: var(--editor-accent);
+	cursor: pointer;
+}
+.editor-document-highlight-text,
+.editor-document-highlight-read {
+	background: var(--editor-selection);
+}
+.editor-document-highlight-write {
+	background: var(--editor-selection);
+	outline: 1px solid var(--editor-accent);
+}
+.editor-language-list button[aria-disabled="true"] {
+	opacity: 0.55;
+}
+.editor-documentation a {
+	color: var(--editor-accent);
 }
 .editor-code-lens {
 	pointer-events: auto;
@@ -834,4 +866,160 @@
 }
 .editor-token-function {
 	color: var(--editor-function, #dcdcaa);
+}
+
+.editor-diff {
+	--editor-diff-removed-line: color-mix(in srgb, #e5534b 12%, transparent);
+	--editor-diff-added-line: color-mix(in srgb, #2da44e 12%, transparent);
+	--editor-diff-removed-text: color-mix(in srgb, #e5534b 28%, transparent);
+	--editor-diff-added-text: color-mix(in srgb, #2da44e 28%, transparent);
+	--editor-diff-removed-marker: #e5534b;
+	--editor-diff-added-marker: #2da44e;
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 300px;
+	min-width: 0;
+	border: 1px solid #666;
+	font:
+		13px system-ui,
+		sans-serif;
+}
+.editor-diff-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	padding: 6px;
+	border-bottom: 1px solid #666;
+}
+.editor-diff-toolbar output {
+	margin-left: auto;
+}
+.editor-diff-toolbar button,
+.editor-diff-change-bar button {
+	font: inherit;
+	color: inherit;
+	background: transparent;
+	border: 1px solid currentColor;
+	border-radius: 3px;
+	cursor: pointer;
+}
+.editor-diff button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+.editor-diff button[aria-pressed="true"] {
+	outline: 2px solid Highlight;
+	outline-offset: -2px;
+}
+.editor-diff-panes {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	flex: 1;
+	min-height: 0;
+}
+.editor-diff-pane {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	min-width: 0;
+}
+.editor-diff-original {
+	border-right: 1px solid #666;
+}
+.editor-diff-label {
+	padding: 6px 12px;
+	border-bottom: 1px solid #666;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.editor-diff-editor {
+	flex: 1;
+	min-height: 0;
+}
+.editor-diff-editor > .editor-view-frame {
+	height: 100%;
+	min-height: 0;
+}
+.editor-diff[data-mode="inline"] > .editor-diff-panes {
+	grid-template-columns: minmax(0, 1fr);
+}
+.editor-diff[data-mode="inline"] .editor-diff-original {
+	display: none;
+}
+.editor-diff-change-bar {
+	box-sizing: border-box;
+	height: 100%;
+	padding: 0 12px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font:
+		12px system-ui,
+		sans-serif;
+	background: var(--editor-panel);
+	color: var(--editor-foreground);
+	border-block: 1px solid var(--editor-border);
+}
+.editor-diff-spacer {
+	height: 100%;
+	background: repeating-linear-gradient(
+		135deg,
+		transparent,
+		transparent 4px,
+		#8881 4px,
+		#8881 5px
+	);
+}
+.editor-diff-deleted-block {
+	position: relative;
+	height: 100%;
+	overflow: hidden;
+	background: var(--editor-diff-removed-line);
+	color: var(--editor-foreground);
+	font:
+		var(--editor-font-size, 16px) / var(--editor-line-height, 24px)
+		var(--editor-font-family, monospace);
+	tab-size: var(--editor-tab-size, 4);
+	user-select: text;
+}
+.editor-diff-deleted-row {
+	position: absolute;
+	left: 0;
+	right: 0;
+	white-space: pre;
+	unicode-bidi: isolate;
+}
+.editor-diff-old-number {
+	display: inline-block;
+	min-width: 7ch;
+	margin-right: 12px;
+	padding-left: 4px;
+	opacity: 0.75;
+	text-align: right;
+}
+@media (forced-colors: active) {
+	.editor-diff {
+		--editor-diff-removed-line: transparent;
+		--editor-diff-added-line: transparent;
+		--editor-diff-removed-text: Mark;
+		--editor-diff-added-text: Mark;
+		--editor-diff-removed-marker: CanvasText;
+		--editor-diff-added-marker: CanvasText;
+	}
+	.editor-diff-deleted-block {
+		border-inline-start: 2px dashed CanvasText;
+	}
+}
+
+.editor-diff-preview-limit {
+	width: 100%;
+	height: 100%;
+	color: inherit;
+	background: var(--editor-panel);
+	border: 1px solid currentColor;
+	text-align: left;
+	cursor: pointer;
 }

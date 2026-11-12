@@ -5,6 +5,7 @@ import type { VisibleDecoration } from "../features/decorations";
 import type { SearchMatch } from "../features/search";
 import { isTokenScope } from "../features/themes";
 import type { TextModel } from "../model/text-model";
+import { injectedText } from "./injected-text";
 import { longLineLimit } from "./line-metrics";
 import type { FoldRegion, VisualRow } from "./visual-layout";
 
@@ -20,6 +21,7 @@ interface appendRowState {
 	readonly accessible: boolean;
 	readonly assistanceVersion: number;
 	readonly hints: readonly InlayHint[];
+	readonly activateHint: (hint: InlayHint, part?: number) => void;
 	readonly folds: readonly FoldRegion[];
 	readonly tokenStyle: (scope: string) => string | undefined;
 }
@@ -30,6 +32,15 @@ export function appendRow(
 ): void {
 	const text = state.model.getLineContent(row.line),
 		start = state.model.getInputOffsetAt({ line: row.line, column: 1 });
+	element.style.background = "";
+	for (const decoration of state.decorations)
+		if (
+			decoration.wholeLine &&
+			row.line >= decoration.range.startLine &&
+			row.line <= decoration.range.endLine &&
+			decoration.background
+		)
+			element.style.background = decoration.background;
 	const boundaries = new Set<number>([row.from, row.to]);
 	const marks: {
 		from: number;
@@ -38,6 +49,8 @@ export function appendRow(
 		style?: string;
 		background?: string;
 		underline?: string;
+		opacity?: number;
+		strikethrough?: boolean;
 		title?: string;
 	}[] = [];
 	const mark = (
@@ -101,6 +114,12 @@ export function appendRow(
 				row.line === range.startLine ? range.startColumn - 1 : 0,
 				row.line === range.endLine ? range.endColumn - 1 : text.length,
 				{
+					...(decoration.opacity !== undefined
+						? { opacity: decoration.opacity }
+						: {}),
+					...(decoration.strikethrough
+						? { strikethrough: true }
+						: {}),
 					...(decoration.className
 						? { className: decoration.className }
 						: {}),
@@ -160,17 +179,58 @@ export function appendRow(
 						hint.offset <= start + row.to,
 				)
 			: [];
+	const injections = state.accessible
+		? []
+		: injectedText(state.model, state.decorations).filter(
+				(item) =>
+					item.offset >= start + row.from &&
+					item.offset <= start + row.to,
+			);
+	for (const item of injections) boundaries.add(item.offset - start);
 	for (const hint of hints) boundaries.add(hint.offset - start);
 	const appendHints = (column: number) => {
+		const hasExtras =
+			injections.some((item) => item.offset - start === column) ||
+			hints.some((hint) => hint.offset - start === column);
+		if (hasExtras) element.append(element.ownerDocument.createTextNode(""));
+		for (const item of injections.filter(
+			(item) => item.offset - start === column,
+		)) {
+			const node = element.ownerDocument.createElement("span");
+			node.className = "editor-injected-text";
+			node.textContent = item.text;
+			node.title = item.tooltip ?? "";
+			node.setAttribute("aria-hidden", "true");
+			node.style.userSelect = "none";
+			element.append(node);
+		}
 		for (const hint of hints.filter(
 			(hint) => hint.offset - start === column,
 		)) {
 			const node = element.ownerDocument.createElement("span");
 			node.className = "editor-inlay-hint";
-			node.textContent = hint.text;
+			node.dataset.editorWidget = "inlay-hint";
+			if (hint.label)
+				for (const [index, part] of hint.label.entries()) {
+					const child = element.ownerDocument.createElement(
+						part.command || part.location ? "button" : "span",
+					);
+					child.textContent = part.text;
+					child.title = part.tooltip ?? "";
+					if (child instanceof HTMLButtonElement) {
+						child.type = "button";
+						child.onclick = () => state.activateHint(hint, index);
+					}
+					node.append(child);
+				}
+			else {
+				node.textContent = hint.text;
+				node.onclick = () => state.activateHint(hint);
+			}
 			node.title = hint.tooltip ?? hint.text;
 			element.append(node);
 		}
+		if (hasExtras) element.append(element.ownerDocument.createTextNode(""));
 	};
 	const sorted = [...boundaries].sort((a, b) => a - b);
 	for (let i = 0; i < sorted.length - 1; i++) {
@@ -178,14 +238,21 @@ export function appendRow(
 			to = sorted[i + 1] ?? 0,
 			active = marks.filter((mark) => mark.from < to && mark.to > from);
 		appendHints(from);
+		const strike = active.some((item) => item.strikethrough);
 		const span = element.ownerDocument.createElement("span");
 		span.textContent = text.slice(from, to);
 		span.className = active.map((mark) => mark.className ?? "").join(" ");
 		for (const item of active) {
 			if (item.style) span.style.cssText += `;${item.style}`;
 			if (item.background) span.style.background = item.background;
+			if (item.opacity !== undefined)
+				span.style.opacity = String(item.opacity);
+			if (item.strikethrough)
+				span.style.textDecorationLine = "line-through";
 			if (item.underline) {
-				span.style.textDecorationLine = "underline";
+				span.style.textDecorationLine = strike
+					? "underline line-through"
+					: "underline";
 				span.style.textDecorationStyle = "wavy";
 				span.style.textDecorationColor = item.underline;
 			}

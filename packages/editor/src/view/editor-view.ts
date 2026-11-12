@@ -1,6 +1,7 @@
 import type {
 	EditorOptions,
 	EditorViewOptions,
+	EditorViewport,
 	EditorViewState,
 } from "../api/editor-options";
 import { defaultViewOptions, validateViewOptions } from "../api/editor-options";
@@ -17,11 +18,13 @@ import type {
 	Disposable,
 	HistoryViewState,
 	ModelChangeEvent,
+	TextEdit,
 } from "../api/types";
 import { BracketAnalysis } from "../features/bracket-analysis";
 import type { TransferProvider } from "../features/clipboard";
 import { CommandRegistry } from "../features/commands";
 import type { DecorationCollection } from "../features/decorations";
+import { safeLink } from "../features/documentation";
 import { type TextCommand, wordRange } from "../features/editing-commands";
 import type { EditingPlan } from "../features/editing-plan";
 import { registerEditorActions } from "../features/editor-actions";
@@ -37,6 +40,7 @@ import {
 import { LanguageEdits } from "../features/language-edits";
 import { LanguageFeatures } from "../features/language-features";
 import type { LineCommand } from "../features/line-commands";
+import { providerWorkspace } from "../features/provider-workspace";
 import {
 	caret,
 	combinePlans,
@@ -95,6 +99,22 @@ export class EditorView implements Disposable {
 	private readonly modelListeners = new Set<
 		(model: TextModel | null) => void
 	>();
+	private readonly fontZoomListeners = new Set<(level: number) => void>();
+	private readonly foldingListeners = new Set<() => void>();
+	private readonly scrollListeners = new Set<
+		(viewport: EditorViewport) => void
+	>();
+	private readonly handleScroll = (): void => {
+		if (this.disposed) return;
+		const viewport = this.getViewport();
+		for (const listener of this.scrollListeners) {
+			try {
+				listener(viewport);
+			} catch (error) {
+				console.error("Editor scroll listener failed", error);
+			}
+		}
+	};
 	private readonly optionListeners = new Set<
 		(options: EditorOptions) => void
 	>();
@@ -193,7 +213,10 @@ export class EditorView implements Disposable {
 		text: () => this.element.value,
 		canEdit: () => this.canEdit(),
 		getSelections: () => this.getSelections(),
-		applyMultiPlan: (p) => this.applyMultiPlan(p),
+		applyMultiPlan: (p, group) =>
+			group
+				? this.transactions.applyMultiPlan(p, undefined, group)
+				: this.applyMultiPlan(p),
 		applyWorkspace: (b, s) => this.transactions.applyWorkspace(b, s),
 		workspaceHandler: () => this.workspaceHandler,
 	});
@@ -314,7 +337,7 @@ export class EditorView implements Disposable {
 			"Tab indents; Shift+Tab outdents. Control or Command Z undoes. Add Shift to redo. Alt Up or Down moves lines; add Shift to duplicate. Control or Command Shift K deletes lines. Control or Command Enter inserts a line below; add Shift for above. Control or Command slash toggles line comments; Shift Alt A toggles block comments. Press Escape, then Tab to move focus.",
 		);
 		this.element.title =
-			"Tab: indent · Shift+Tab: outdent · Escape, then Tab: move focus";
+			"Tab: indent - Shift+Tab: outdent - Escape, then Tab: move focus";
 		this.element.setAttribute("autocapitalize", "off");
 		this.element.setAttribute("autocorrect", "off");
 		this.element.spellcheck = false;
@@ -336,6 +359,9 @@ export class EditorView implements Disposable {
 				if (!this.disposed) this.focus();
 			},
 			onFontZoom: (level) => this.fontZoomChanged(level),
+			onInlayHint: (hint, part) => {
+				void this.languageFeatures.activateHint(hint, part);
+			},
 		});
 		this.presentation = new ViewPresentation(
 			{
@@ -348,6 +374,9 @@ export class EditorView implements Disposable {
 				setSelections: (v, r) => this.setSelections(v, r),
 				updateCursor: () => this.updateCursor(),
 				executeCommand: (id) => this.executeCommand(id),
+				activateLens: (lens) => {
+					void this.languageFeatures.activateLens(lens);
+				},
 				runLanguageCommand: (id) => this.runLanguageCommand(id),
 				diagnosticsChanged: (values) =>
 					this.languageFeatures?.updateStatus(values),
@@ -366,6 +395,7 @@ export class EditorView implements Disposable {
 			},
 		});
 		this.renderer.setAccessible(this.options.accessibilitySupport === "on");
+		this.frame.addEventListener("scroll", this.handleScroll, true);
 		this.element.attachViewport(this.renderer.viewport, {
 			get: () => this.renderer.scrollTop,
 			getLeft: () => this.renderer.scrollLeft,
@@ -465,8 +495,36 @@ export class EditorView implements Disposable {
 			viewport: this.renderer.interactionElement,
 			model: () => this.attachedModel,
 			selection: () => this.getSelection(),
+			selections: () => this.getSelections(),
+			select: (values) => this.setSelections(values, true),
+			options: () => this.options,
+			workspace: () =>
+				options.languageWorkspace ??
+				providerWorkspace(() => this.attachedModel),
+			decorations: () => this.createDecorations(),
+			execute: (id) => this.executeCommand(id),
+			openLink: (target) => {
+				if (/^(javascript|data|vbscript):/i.test(target)) {
+					this.announce("Unsupported link target.");
+					return;
+				}
+				if (options.onOpenLink) options.onOpenLink(target);
+				else if (safeLink(target))
+					this.frame.ownerDocument.defaultView?.open(
+						target,
+						"_blank",
+						"noopener,noreferrer",
+					);
+				else this.openLocation({ uri: target, from: 0, to: 0 });
+			},
+			applyTyping: (edits, version) => {
+				const group = this.model.getUndoGroup(version, this.owner);
+				if (group && this.canEdit() && !this.snippets.active)
+					this.languageEdits.apply(edits, undefined, group);
+			},
 			diagnostics: () => this.getDiagnostics(),
 			analysisOptions: () => ({
+				unicodeHighlight: this.options.unicodeHighlight,
 				inlayHints: this.options.inlayHints,
 				codeLens: this.options.codeLens,
 			}),
@@ -500,6 +558,91 @@ export class EditorView implements Disposable {
 		this.render();
 	}
 
+	getViewport(): EditorViewport {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		return {
+			scrollTop: this.renderer.scrollTop,
+			scrollLeft: this.renderer.scrollLeft,
+			height: this.renderer.viewport.clientHeight,
+			width: this.renderer.viewport.clientWidth,
+			lineHeight: this.renderer.lineHeight,
+		};
+	}
+	setScrollPosition(position: {
+		readonly scrollTop?: number;
+		readonly scrollLeft?: number;
+	}): void {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		for (const value of [position.scrollTop, position.scrollLeft])
+			if (value !== undefined && !Number.isFinite(value))
+				throw new TypeError("Scroll positions must be finite.");
+		if (position.scrollTop !== undefined)
+			this.renderer.scrollTop = Math.max(0, position.scrollTop);
+		if (position.scrollLeft !== undefined)
+			this.renderer.scrollLeft = Math.max(0, position.scrollLeft);
+		this.renderer.render();
+	}
+	onDidScroll(listener: (viewport: EditorViewport) => void): Disposable {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		this.scrollListeners.add(listener);
+		return { dispose: () => this.scrollListeners.delete(listener) };
+	}
+	getLineTop(line: number): number {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		if (
+			!Number.isInteger(line) ||
+			line < 1 ||
+			line > this.model.getLineCount() + 1
+		)
+			throw new RangeError("Invalid line number.");
+		return line === this.model.getLineCount() + 1
+			? this.renderer.documentBottom
+			: this.renderer.lineTop(line);
+	}
+	getLineAtScrollOffset(top: number): number {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		if (!Number.isFinite(top))
+			throw new TypeError("Scroll offset must be finite.");
+		return this.renderer.lineAtScrollOffset(top);
+	}
+	batchPresentation(update: () => void): void {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		this.renderer.batchPresentation(update);
+	}
+	applyEdits(edits: readonly TextEdit[], expectedVersion?: number): boolean {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		if (!this.canEdit() || this.isComposing) return false;
+		if (
+			expectedVersion !== undefined &&
+			this.model.getVersionId() !== expectedVersion
+		)
+			throw new Error("Document changed before applying edits.");
+		const values = edits.map((edit) => {
+			const range = this.model.validateRange(edit.range);
+			if (
+				range.startLine !== edit.range.startLine ||
+				range.startColumn !== edit.range.startColumn ||
+				range.endLine !== edit.range.endLine ||
+				range.endColumn !== edit.range.endColumn
+			)
+				throw new RangeError("Invalid edit range.");
+			return {
+				uri: this.model.uri.toString(),
+				from: this.model.getInputOffsetAt({
+					line: range.startLine,
+					column: range.startColumn,
+				}),
+				to: this.model.getInputOffsetAt({
+					line: range.endLine,
+					column: range.endColumn,
+				}),
+				text: normalizeInputText(edit.text),
+				version: this.model.getVersionId(),
+			};
+		});
+		this.languageEdits.apply(values);
+		return true;
+	}
 	focus(): void {
 		this.element.focus();
 	}
@@ -542,6 +685,25 @@ export class EditorView implements Disposable {
 		return this.presentation.addViewZone(options);
 	}
 
+	onDidChangeFontZoom(listener: (level: number) => void): Disposable {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		this.fontZoomListeners.add(listener);
+		return { dispose: () => this.fontZoomListeners.delete(listener) };
+	}
+	onDidChangeFolding(listener: () => void): Disposable {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		this.foldingListeners.add(listener);
+		return { dispose: () => this.foldingListeners.delete(listener) };
+	}
+	private foldingChanged(): void {
+		for (const listener of this.foldingListeners) {
+			try {
+				listener();
+			} catch (error) {
+				console.error("Editor folding listener failed", error);
+			}
+		}
+	}
 	getFontZoom(): number {
 		return this.renderer.fontZoomLevel;
 	}
@@ -559,6 +721,13 @@ export class EditorView implements Disposable {
 	private fontZoomChanged(level: number): void {
 		this.updateCursor();
 		this.announce(`Editor zoom ${100 + level * 10}%`);
+		for (const listener of this.fontZoomListeners) {
+			try {
+				listener(level);
+			} catch (error) {
+				console.error("Editor font zoom listener failed", error);
+			}
+		}
 	}
 
 	private setLanguageAnalysis(value: Analysis): void {
@@ -582,6 +751,11 @@ export class EditorView implements Disposable {
 	}
 	private acceptCompletion(item: Completion, commitCharacter?: string): void {
 		if (!this.canEdit()) return;
+		if (
+			this.options.completionInsertMode === "replace" &&
+			item.replaceTo !== undefined
+		)
+			item = { ...item, to: item.replaceTo };
 		if (
 			commitCharacter &&
 			!item.snippet &&
@@ -636,9 +810,11 @@ export class EditorView implements Disposable {
 			this.locationHandler(location);
 			return;
 		}
-		const model = languageEngine
-			.getModels()
-			.find((model) => model.uri.toString() === location.uri);
+		const model =
+			languageEngine
+				.getModels()
+				.find((model) => model.uri.toString() === location.uri) ??
+			this.savedViews.getModel(location.uri);
 		if (!model) {
 			this.languageFeatures.peek(location);
 			return;
@@ -675,27 +851,34 @@ export class EditorView implements Disposable {
 	}
 	setFoldingRanges(ranges: readonly FoldingRange[]): void {
 		this.presentation.setFoldingRanges(ranges);
+		this.foldingChanged();
 	}
 	toggleFold(line?: number): void {
 		this.presentation.toggleFold(line);
+		this.foldingChanged();
 	}
 	foldAll(collapsed: boolean): void {
 		this.presentation.foldAll(collapsed);
+		this.foldingChanged();
 	}
 	createFold(start: number, end: number): void {
 		this.presentation.createFold(start, end);
+		this.foldingChanged();
 	}
 	getFoldingRanges(): readonly import("./visual-layout").FoldRegion[] {
 		return this.presentation.assets().folding.get();
 	}
 	removeFold(line: number): void {
 		this.presentation.removeFold(line);
+		this.foldingChanged();
 	}
 	setFolded(line: number, collapsed: boolean, recursive = false): void {
 		this.presentation.setFolded(line, collapsed, recursive);
+		this.foldingChanged();
 	}
 	foldLevel(level: number): void {
 		this.presentation.foldLevel(level);
+		this.foldingChanged();
 	}
 	getModel(): TextModel | null {
 		return this.attachedModel;
@@ -1079,7 +1262,17 @@ export class EditorView implements Disposable {
 			throw new TypeError("readOnly and tabFocusMode must be booleans.");
 		if (JSON.stringify(next) === JSON.stringify(this.options)) return;
 		const anchor = this.renderer.captureAnchor();
+		const cancelAssistance =
+			next.readOnly ||
+			next.linkedEditing !== this.options.linkedEditing ||
+			next.onTypeFormatting !== this.options.onTypeFormatting ||
+			next.accessibilitySupport !== this.options.accessibilitySupport;
 		const refreshAssistance =
+			next.readOnly !== this.options.readOnly ||
+			next.onTypeFormatting !== this.options.onTypeFormatting ||
+			next.accessibilitySupport !== this.options.accessibilitySupport ||
+			next.unicodeHighlight !== this.options.unicodeHighlight ||
+			next.linkedEditing !== this.options.linkedEditing ||
 			next.inlayHints !== this.options.inlayHints ||
 			next.codeLens !== this.options.codeLens;
 		this.options = next;
@@ -1104,7 +1297,7 @@ export class EditorView implements Disposable {
 		this.breakHistoryGroup();
 		this.element.readOnly = next.readOnly || !this.attachedModel;
 		if (next.readOnly) this.clearSnippet();
-		if (next.readOnly) this.languageFeatures.cancelRequests();
+		if (cancelAssistance) this.languageFeatures.cancelRequests();
 		if (next.readOnly) this.languageEdits.cancel();
 		this.element.setAttribute(
 			"aria-readonly",
@@ -1232,7 +1425,8 @@ export class EditorView implements Disposable {
 		this.editing.jumpToBracket(select);
 	}
 	expandSelection(shrink = false): void {
-		this.editing.expandSelection(shrink);
+		if (!this.languageFeatures.expandSelection(shrink))
+			this.editing.expandSelection(shrink);
 	}
 
 	private canEdit(): boolean {
@@ -1458,7 +1652,7 @@ export class EditorView implements Disposable {
 			? getInputPosition(this.element.value, offset)
 			: this.model.getPositionAtInputOffset(offset);
 		this.cursorLabel.textContent = this.attachedModel
-			? `Ln ${position.line}, Col ${position.column}${this.selectionsValue.length > 1 ? ` · ${this.selectionsValue.length} cursors` : ""} · ${this.options.insertSpaces ? "Spaces" : "Tabs"}: ${this.options.tabSize}${this.options.readOnly ? " · Read-only" : ""}${this.options.tabFocusMode ? " · Tab moves focus" : ""}`
+			? `Ln ${position.line}, Col ${position.column}${this.selectionsValue.length > 1 ? ` - ${this.selectionsValue.length} cursors` : ""} - ${this.options.insertSpaces ? "Spaces" : "Tabs"}: ${this.options.tabSize}${this.options.readOnly ? " - Read-only" : ""}${this.options.tabFocusMode ? " - Tab moves focus" : ""}`
 			: "No document attached";
 		this.renderer.setActiveLine(position.line);
 		const matches =
@@ -1679,6 +1873,10 @@ export class EditorView implements Disposable {
 		this.analysis = undefined;
 		if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer);
 		this.optionListeners.clear();
+		this.scrollListeners.clear();
+		this.fontZoomListeners.clear();
+		this.foldingListeners.clear();
+		this.frame.removeEventListener("scroll", this.handleScroll, true);
 		this.modelListeners.clear();
 		this.editing.resetSingle();
 		this.editing.resetMulti();

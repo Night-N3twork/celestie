@@ -5,6 +5,10 @@ import { isFontFeatureSettings } from "../view/text-shaping";
 import type { TextSelection } from "./types";
 
 export interface EditorOptions extends IndentationOptions {
+	readonly completionInsertMode: "insert" | "replace";
+	readonly linkedEditing: boolean;
+	readonly onTypeFormatting: boolean;
+	readonly unicodeHighlight: boolean;
 	readonly autoClosingBrackets: boolean;
 	readonly autoClosingQuotes: boolean;
 	readonly autoClosingComments: boolean;
@@ -43,6 +47,8 @@ export interface EditorOptions extends IndentationOptions {
 }
 
 export interface EditorViewOptions extends Partial<EditorOptions> {
+	readonly languageWorkspace?: import("./language-contributions").ProviderWorkspace;
+	readonly onOpenLink?: (uri: string) => void;
 	readonly onWorkspaceEdit?: (
 		edit: import("./languages").WorkspaceEdit,
 		signal: AbortSignal,
@@ -64,6 +70,10 @@ export interface EditorViewState {
 }
 
 export const defaultViewOptions = {
+	completionInsertMode: "insert",
+	linkedEditing: false,
+	onTypeFormatting: false,
+	unicodeHighlight: true,
 	autoClosingBrackets: true,
 	autoClosingQuotes: true,
 	autoClosingComments: true,
@@ -96,6 +106,9 @@ export function validateViewOptions(options: EditorOptions): void {
 	if (options.theme !== "auto" && !hasTheme(options.theme))
 		throw new Error(`Unknown editor theme: ${options.theme}`);
 	for (const flag of [
+		options.linkedEditing,
+		options.onTypeFormatting,
+		options.unicodeHighlight,
 		options.autoClosingBrackets,
 		options.autoClosingQuotes,
 		options.autoClosingComments,
@@ -117,6 +130,7 @@ export function validateViewOptions(options: EditorOptions): void {
 		if (typeof flag !== "boolean")
 			throw new TypeError("Editor flags must be booleans.");
 	if (
+		!["insert", "replace"].includes(options.completionInsertMode) ||
 		!["off", "on", "wordWrapColumn", "bounded"].includes(
 			options.wordWrap,
 		) ||
@@ -153,4 +167,12 @@ export function validateViewOptions(options: EditorOptions): void {
 		throw new TypeError(
 			"Invalid font, line height, or ruler configuration.",
 		);
+}
+
+export interface EditorViewport {
+	readonly scrollTop: number;
+	readonly scrollLeft: number;
+	readonly height: number;
+	readonly width: number;
+	readonly lineHeight: number;
 }

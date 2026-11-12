@@ -114,7 +114,7 @@ export class ViewTransactions {
 						JSON.stringify(this.host.getSelections())
 					? previous.id
 					: this.nextGroup()
-				: undefined);
+				: this.nextGroup());
 		this.pendingSelections = plan.selections;
 		try {
 			this.replaceSearch(

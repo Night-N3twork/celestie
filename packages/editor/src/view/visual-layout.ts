@@ -195,7 +195,7 @@ export class VisualLayout {
 		folds: readonly FoldRegion[],
 		accessible: boolean,
 		zones: readonly LayoutZone[] = [],
-		hints: readonly { offset: number; text: string }[] = [],
+		hints: readonly { offset: number; text: string; width?: number }[] = [],
 	): boolean {
 		const model = this.model();
 		const width =
@@ -228,12 +228,13 @@ export class VisualLayout {
 			if (zone.placement === "before") entry.beforeRows += rows;
 			else entry.afterRows += rows;
 		}
-		this.hintWidths = new Map(
-			hints.map((hint) => [
+		this.hintWidths = new Map();
+		for (const hint of hints)
+			this.hintWidths.set(
 				hint.offset,
-				this.measure(hint.text) * 0.8 + 6,
-			]),
-		);
+				(this.hintWidths.get(hint.offset) ?? 0) +
+					(hint.width ?? this.measure(hint.text) * 0.8 + 6),
+			);
 		this.width = width;
 		this.options = options;
 		this.starts = [];

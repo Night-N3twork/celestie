@@ -1,15 +1,28 @@
 import type {
+	CompletionList,
+	Documentation,
+	InlineCompletion,
+	InlineCompletionList,
+	LanguageTrigger,
+	SignatureHelp,
+} from "../api/language-contributions";
+import type {
 	Analysis,
-	CodeAction,
+	CodeLens,
 	Completion,
 	Diagnostic,
 	Hover,
+	InlayHint,
 	LanguageContext,
 	LanguageEdit,
 	Location,
 	SymbolInformation,
 } from "../api/languages";
-import { getLanguage } from "../api/languages";
+import {
+	getLanguage,
+	languageProviders,
+	onDidChangeLanguageProviders,
+} from "../api/languages";
 import { onDidChangeTokenizers } from "../api/tokenization";
 import type { Disposable } from "../api/types";
 import { languageEngine } from "../languages/client";
@@ -17,18 +30,25 @@ import { getLanguageConfiguration, isWord } from "../languages/configuration";
 import type { TextModel } from "../model/text-model";
 import type { TrackedRange } from "../model/tracked-ranges";
 import { prepareCompletions } from "./completion-items";
+import { DocumentContributions } from "./document-contributions";
+import { renderDocumentation } from "./documentation";
+import { InlineSuggestions } from "./inline-suggestions";
 import { showColorPicker, showRename } from "./language-dialogs";
 import type { LanguageFeatureHost as Host } from "./language-host";
+import { LanguageNavigation } from "./language-navigation";
 import { LanguagePopup } from "./language-popup";
-import { requestLanguage } from "./language-request";
+import {
+	hasLanguageProvider,
+	requestAnalysis,
+	requestLanguage,
+} from "./language-request";
+import { SemanticContributions } from "./semantic-contributions";
+import { showSignatures } from "./signature-help";
 
 export class LanguageFeatures implements Disposable {
 	private readonly popup: LanguagePopup;
 	private get widget() {
 		return this.popup.widget;
-	}
-	private get ghost() {
-		return this.popup.ghost;
 	}
 	private get choices() {
 		return this.popup.choices;
@@ -45,14 +65,23 @@ export class LanguageFeatures implements Disposable {
 	private analysisAbort = new AbortController();
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private hoverTimer: ReturnType<typeof setTimeout> | undefined;
+	private triggerTimer: ReturnType<typeof setTimeout> | undefined;
 	private completions: readonly Completion[] = [];
 	private completionContext:
 		| { context: LanguageContext; version: number }
 		| undefined;
 	private readonly commitAnchors = new Set<TrackedRange>();
-	private readonly resolved = new WeakMap<
+	private resolved = new WeakMap<
 		Completion,
-		{ detail: string; edits: readonly LanguageEdit[] }
+		{
+			model: TextModel;
+			version: number;
+			result: {
+				detail: string;
+				edits: readonly LanguageEdit[];
+				documentation?: Documentation;
+			};
+		}
 	>();
 
 	private disposed = false;
@@ -62,18 +91,24 @@ export class LanguageFeatures implements Disposable {
 		folds: [],
 		symbols: [],
 	};
-	private inline = "";
-	private inlineVersion = 0;
-	private inlineOffset = -1;
+	private readonly inlineSuggestions: InlineSuggestions;
+	private readonly contributions: DocumentContributions;
+	private readonly navigation: LanguageNavigation;
+	private completionIncomplete = false;
+	private readonly semantic = new SemanticContributions();
 	constructor(private readonly host: Host) {
 		this.popup = new LanguagePopup({
 			...host,
 			onClose: (clearInline) => {
 				this.completions = [];
 				this.completionContext = undefined;
-				if (clearInline) this.inline = "";
+				this.completionIncomplete = false;
+				if (clearInline) this.inlineSuggestions?.clear();
 			},
 		});
+		this.inlineSuggestions = new InlineSuggestions(host, this.popup);
+		this.contributions = new DocumentContributions(host);
+		this.navigation = new LanguageNavigation(host, this.popup);
 		const doc = host.frame.ownerDocument;
 		this.status = doc.createElement("button");
 		this.status.type = "button";
@@ -84,13 +119,23 @@ export class LanguageFeatures implements Disposable {
 		this.status.onclick = () => void this.run("problems");
 		host.frame.append(this.status);
 		host.input.addEventListener("keydown", this.keydown, true);
-		host.input.addEventListener("beforeinput", this.beforeInput);
+		host.input.addEventListener("beforeinput", this.beforeInput, true);
+		host.input.addEventListener(
+			"compositionstart",
+			this.compositionStart,
+			true,
+		);
+		host.input.addEventListener("compositionend", this.compositionEnd);
 		host.viewport.addEventListener("pointermove", this.pointerMove);
 		host.viewport.addEventListener("pointerleave", this.pointerLeave);
 		this.widget.addEventListener("keydown", this.keydown);
 	}
 	setModel(model: TextModel | null): void {
 		this.cancelRequests();
+		this.resolved = new WeakMap();
+		this.contributions.setModel(model);
+		this.navigation.cancel();
+		this.semantic.clear();
 		for (const sub of this.subscriptions.splice(0)) sub.dispose();
 		this.abort.abort();
 		this.analysisAbort.abort();
@@ -105,9 +150,24 @@ export class LanguageFeatures implements Disposable {
 		if (model) {
 			this.subscriptions.push(
 				onDidChangeTokenizers(() => this.changed()),
+				onDidChangeLanguageProviders(() => {
+					this.resolved = new WeakMap();
+					this.cancelRequests();
+					this.navigation.clear();
+					this.semantic.clear();
+					this.changed();
+				}),
 				languageEngine.attach(model),
-				model.onDidChangeContent(() => this.changed()),
-				model.onDidChangeLanguage(() => this.changed()),
+				model.onDidChangeContent(() => {
+					this.navigation.clear();
+					this.changed();
+				}),
+				model.onDidChangeLanguage(() => {
+					this.cancelRequests();
+					this.semantic.clear();
+					this.navigation.clear();
+					this.changed();
+				}),
 			);
 			this.changed();
 		} else this.status.textContent = "No document";
@@ -115,7 +175,50 @@ export class LanguageFeatures implements Disposable {
 	refresh(): void {
 		this.changed();
 	}
+	async activateLens(lens: CodeLens): Promise<void> {
+		try {
+			const context = this.context(this.analysisAbort.signal),
+				version = context.model.getVersionId(),
+				resolved =
+					(await this.request<CodeLens | null>(
+						"resolveCodeLens",
+						context,
+						{ item: lens },
+					)) ?? lens;
+			if (this.valid(context, version) && resolved.command)
+				await this.host.execute(resolved.command);
+		} catch (error) {
+			if (!this.disposed) this.host.announce(String(error));
+		}
+	}
+	async activateHint(hint: InlayHint, index?: number): Promise<void> {
+		try {
+			const context = this.context(this.analysisAbort.signal),
+				version = context.model.getVersionId(),
+				resolved =
+					(await this.request<InlayHint | null>(
+						"resolveInlayHint",
+						context,
+						{ item: hint },
+					)) ?? hint;
+			if (!this.valid(context, version)) return;
+			const part = resolved.label?.[index ?? 0];
+			if (part?.command) await this.host.execute(part.command);
+			else if (part?.location) this.host.open(part.location);
+			else
+				this.popup.showText(
+					"Inlay hint",
+					part?.tooltip ?? resolved.tooltip ?? resolved.text,
+					hint.offset,
+				);
+		} catch (error) {
+			if (!this.disposed) this.host.announce(String(error));
+		}
+	}
 	cancelRequests(): void {
+		if (this.triggerTimer) clearTimeout(this.triggerTimer);
+		this.contributions.cancel();
+		this.navigation.cancel();
 		this.abort.abort();
 		for (const anchor of this.commitAnchors) anchor.dispose();
 		this.commitAnchors.clear();
@@ -134,13 +237,14 @@ export class LanguageFeatures implements Disposable {
 		this.status.textContent = paused
 			? "Syntax only"
 			: errors || warnings
-				? `${errors} errors · ${warnings} warnings`
+				? `${errors} errors - ${warnings} warnings`
 				: "No problems";
 		this.status.title = paused?.message ?? "Show problems";
 	}
 
 	private changed(): void {
 		this.close();
+		this.contributions.changed();
 		this.analysisAbort.abort();
 		this.analysisAbort = new AbortController();
 		if (this.timer) clearTimeout(this.timer);
@@ -159,6 +263,7 @@ export class LanguageFeatures implements Disposable {
 					? selection.start
 					: selection.end,
 			signal,
+			workspace: this.host.workspace(),
 		};
 	}
 	private async request<T>(
@@ -181,14 +286,15 @@ export class LanguageFeatures implements Disposable {
 		try {
 			const context = this.context(this.analysisAbort.signal),
 				version = context.model.getVersionId(),
-				result = await this.request<Analysis>(
-					"analyze",
+				result = await requestAnalysis(
 					context,
 					this.host.analysisOptions(),
+					this.semantic,
 				);
 			if (!this.valid(context, version)) return;
 			this.lastAnalysis = result;
 			this.host.analysis(result);
+			void this.contributions.refreshLinks().catch(() => {});
 			this.updateStatus(this.host.diagnostics());
 		} catch (error) {
 			if (error instanceof DOMException && error.name === "AbortError")
@@ -199,7 +305,8 @@ export class LanguageFeatures implements Disposable {
 			}
 		}
 	}
-	async run(command: string): Promise<void> {
+	async run(command: string, trigger?: LanguageTrigger): Promise<void> {
+		if (this.disposed) return;
 		if (this.hoverTimer) clearTimeout(this.hoverTimer);
 		if (command === "close") {
 			this.close();
@@ -221,19 +328,79 @@ export class LanguageFeatures implements Disposable {
 			this.symbols();
 			return;
 		}
+		if (command === "nextLocation" || command === "previousLocation") {
+			this.navigation.next(command === "nextLocation" ? 1 : -1);
+			return;
+		}
+		if (command === "nextDiagnostic" || command === "previousDiagnostic") {
+			this.navigation.diagnostic(command === "nextDiagnostic" ? 1 : -1);
+			return;
+		}
+		if (command === "inlineNext" || command === "inlinePrevious") {
+			this.inlineSuggestions.cycle(command === "inlineNext" ? 1 : -1);
+			return;
+		}
+		if (command === "acceptInline" || command === "acceptInlineWord") {
+			this.inlineSuggestions.accept(command === "acceptInlineWord");
+			return;
+		}
+		if (command === "linkedEditing") {
+			try {
+				await this.contributions.startLinked();
+			} catch (error) {
+				this.host.announce(String(error));
+			}
+			return;
+		}
+		this.inlineSuggestions.clear();
 		this.abort.abort();
 		this.abort = new AbortController();
 		try {
-			const context = this.context(this.abort.signal),
+			const context = {
+					...this.context(this.abort.signal),
+					trigger: trigger ?? { kind: "invoke" as const },
+				},
 				version = context.model.getVersionId();
 			if (command === "rename") {
 				this.rename(context, version);
 				return;
 			}
-			if (command === "complete" || command === "inline") {
-				const { prefix, ordered } = prepareCompletions(
+			if (command === "inline") {
+				let result = await this.request<
+					readonly InlineCompletion[] | InlineCompletionList
+				>("inlineCompletions", context);
+				if (
+					!hasLanguageProvider(context.model, "inlineCompletions") &&
+					!("items" in result) &&
+					!result.length
+				) {
+					const { prefix, ordered } = prepareCompletions(
+						context,
+						await this.request<
+							readonly Completion[] | CompletionList
+						>("complete", context),
+					);
+					result = ordered
+						.filter(
+							(item) =>
+								!item.snippet &&
+								!item.source &&
+								!item.additionalEdits?.length &&
+								item.insertText.startsWith(prefix),
+						)
+						.map((item) => ({
+							from: item.from,
+							to: item.to,
+							insertText: item.insertText,
+						}));
+				}
+				this.inlineSuggestions.show(context, version, result);
+				return;
+			}
+			if (command === "complete") {
+				const { ordered, incomplete } = prepareCompletions(
 					context,
-					await this.request<readonly Completion[]>(
+					await this.request<readonly Completion[] | CompletionList>(
 						"complete",
 						context,
 					),
@@ -243,27 +410,7 @@ export class LanguageFeatures implements Disposable {
 					!this.caretAt(context.offset)
 				)
 					return;
-				if (command === "inline") {
-					const suggestion = ordered.find(
-						(entry) =>
-							!entry.snippet &&
-							!entry.source &&
-							!entry.additionalEdits?.length &&
-							entry.insertText.startsWith(prefix) &&
-							entry.insertText.length > prefix.length,
-					);
-					if (!suggestion) {
-						this.host.announce("No inline suggestion.");
-						return;
-					}
-					this.inline = suggestion.insertText.slice(prefix.length);
-					this.inlineVersion = version;
-					this.inlineOffset = context.offset;
-					this.popup.position(this.ghost, context.offset);
-					this.ghost.textContent = this.inline;
-					this.ghost.hidden = false;
-					return;
-				}
+				this.completionIncomplete = incomplete;
 				this.completions = ordered.slice(0, 100);
 				this.popup.showChoices(
 					"complete",
@@ -279,6 +426,7 @@ export class LanguageFeatures implements Disposable {
 				this.completions = ordered.slice(0, 100);
 				this.resolveActive();
 				this.completionContext = { context, version };
+				this.completionIncomplete = incomplete;
 				return;
 			}
 			if (command === "hover") {
@@ -291,42 +439,37 @@ export class LanguageFeatures implements Disposable {
 				return;
 			}
 			if (command === "signature") {
-				const result = await this.request<string | null>(
-					"signature",
-					context,
-				);
-				if (this.valid(context, version) && result)
-					this.popup.showText(
-						"Signature help",
-						result,
-						context.offset,
-					);
+				const result = await this.request<
+					string | SignatureHelp | null
+				>("signature", context);
+				if (
+					this.valid(context, version) &&
+					this.caretAt(context.offset) &&
+					result
+				)
+					showSignatures(this.popup, result, context.offset);
 				return;
 			}
-			if (command === "definitions" || command === "references") {
-				const result = await this.request<readonly Location[]>(
-					command,
+			const method = command.startsWith("peek")
+				? command.slice(4, 5).toLowerCase() + command.slice(5)
+				: command;
+			if (
+				[
+					"definitions",
+					"references",
+					"declarations",
+					"typeDefinitions",
+					"implementations",
+				].includes(method)
+			) {
+				await this.navigation.show(
 					context,
-				);
-				if (!this.valid(context, version)) return;
-				if (command === "definitions" && result.length === 1) {
-					const location = result[0];
-					if (location) this.host.open(location);
-					return;
-				}
-				this.popup.showChoices(
-					command,
-					result.map((location) => ({
-						label:
-							location.label ?? location.preview ?? location.uri,
-						detail: location.uri,
-						run: () => this.host.open(location),
-					})),
-					context.offset,
-					true,
+					method,
+					command.startsWith("peek"),
 				);
 				return;
 			}
+
 			if (command === "format" || command === "formatSelection") {
 				if (!this.host.canEdit()) return;
 				const selection = this.host.selection(),
@@ -345,38 +488,15 @@ export class LanguageFeatures implements Disposable {
 				if (this.valid(context, version)) await this.host.apply(result);
 				return;
 			}
-			if (command === "actions") {
-				const result = await this.request<readonly CodeAction[]>(
-					"actions",
+			if (["actions", "refactor", "organizeImports"].includes(command))
+				await this.navigation.actions(
 					context,
+					command === "refactor"
+						? "refactor"
+						: command === "organizeImports"
+							? "source.organizeImports"
+							: undefined,
 				);
-				if (!this.valid(context, version)) return;
-				this.popup.showChoices(
-					"actions",
-					result.map((action) => ({
-						label: action.title,
-						run: () => {
-							if (
-								this.valid(context, version) &&
-								this.host.canEdit()
-							)
-								void Promise.resolve()
-									.then(() => {
-										if (
-											this.valid(context, version) &&
-											this.host.canEdit()
-										)
-											return this.host.apply(action);
-									})
-									.catch((error) =>
-										this.host.announce(String(error)),
-									);
-						},
-					})),
-					context.offset,
-					true,
-				);
-			}
 		} catch (error) {
 			if (!(error instanceof DOMException && error.name === "AbortError"))
 				this.host.announce(
@@ -387,19 +507,34 @@ export class LanguageFeatures implements Disposable {
 	private async resolveItem(
 		item: Completion,
 		context: LanguageContext,
-	): Promise<{ detail: string; edits: readonly LanguageEdit[] } | null> {
+	): Promise<{
+		detail: string;
+		edits: readonly LanguageEdit[];
+		documentation?: Documentation;
+	} | null> {
 		const old = this.resolved.get(item);
-		if (old) return old;
+		if (
+			old?.model === context.model &&
+			old.version === context.model.getVersionId()
+		)
+			return old.result;
+		const version = context.model.getVersionId();
 		const result = await this.request<{
 			detail: string;
 			edits: readonly LanguageEdit[];
+			documentation?: Documentation;
 		} | null>("resolveCompletion", context, {
 			name: item.label,
 			source: item.source,
 			data: item.data,
 			item,
 		});
-		if (result) this.resolved.set(item, result);
+		if (
+			result &&
+			!context.signal.aborted &&
+			context.model.getVersionId() === version
+		)
+			this.resolved.set(item, { model: context.model, version, result });
 		return result;
 	}
 	private async acceptResolved(
@@ -485,36 +620,62 @@ export class LanguageFeatures implements Disposable {
 		void this.resolveItem(item, context)
 			.then((result) => {
 				if (
-					!result ||
 					!this.valid(context, version) ||
 					this.widget.hidden ||
 					this.completions[this.index] !== item
 				)
 					return;
-				let detail = this.widget.querySelector<HTMLPreElement>(
+				let detail = this.widget.querySelector<HTMLDivElement>(
 					".editor-completion-detail",
 				);
 				if (!detail) {
-					detail = this.widget.ownerDocument.createElement("pre");
+					detail = this.widget.ownerDocument.createElement("div");
 					detail.className = "editor-completion-detail";
 					this.widget.append(detail);
 				}
-				detail.textContent = result.detail;
+				detail.replaceChildren(
+					renderDocumentation(
+						detail.ownerDocument,
+						result?.documentation ??
+							item.documentation ??
+							result?.detail ??
+							item.detail ??
+							"",
+						(target) => this.host.openLink(target),
+					),
+				);
 			})
 			.catch(() => {});
 	}
 
 	private showHover(offset: number, result: Hover | null): void {
-		const diagnostics = this.lastAnalysis.diagnostics
+		const diagnostics = this.host
+			.diagnostics()
 			.filter((item) => offset >= item.from && offset <= item.to)
 			.map((item) => item.message);
 		const text = [...diagnostics, result?.text]
 			.filter(Boolean)
 			.join("\n\n");
-		if (text) this.popup.showText("Hover", text, offset);
+		if (text || result?.documentation) {
+			const doc = this.widget.ownerDocument,
+				content = doc.createElement("div");
+			if (diagnostics.length)
+				content.append(
+					renderDocumentation(doc, diagnostics.join("\n\n")),
+				);
+			if (result?.documentation ?? result?.text)
+				content.append(
+					renderDocumentation(
+						doc,
+						result?.documentation ?? result?.text ?? "",
+						(target) => this.host.openLink(target),
+					),
+				);
+			this.popup.showContent("Hover", content, offset);
+		}
 	}
 	private rename(context: LanguageContext, version: number): void {
-		showRename(
+		void showRename(
 			{
 				editor: this.host,
 				popup: this.popup,
@@ -528,20 +689,26 @@ export class LanguageFeatures implements Disposable {
 			},
 			context,
 			version,
-		);
+		).catch((error) => this.host.announce(String(error)));
 	}
 	private colorPicker(): void {
-		showColorPicker({
-			editor: this.host,
-			popup: this.popup,
-			analysis: this.lastAnalysis,
-			request: <T>(
-				m: string,
-				c: LanguageContext,
-				e?: Record<string, unknown>,
-			) => this.request<T>(m, c, e),
-			valid: (c, v) => this.valid(c, v),
-		});
+		this.abort.abort();
+		this.abort = new AbortController();
+		if (!this.host.model()) return;
+		showColorPicker(
+			{
+				editor: this.host,
+				popup: this.popup,
+				analysis: this.lastAnalysis,
+				request: <T>(
+					m: string,
+					c: LanguageContext,
+					e?: Record<string, unknown>,
+				) => this.request<T>(m, c, e),
+				valid: (c, v) => this.valid(c, v),
+			},
+			this.context(this.abort.signal),
+		);
 	}
 
 	offerSnippetChoices(choices: readonly string[]): void {
@@ -588,7 +755,7 @@ export class LanguageFeatures implements Disposable {
 			"problems",
 			this.host.diagnostics().map((item) => ({
 				label: item.message,
-				detail: `${item.severity} · ${item.source ?? model.getLanguageId()}`,
+				detail: `${item.severity} - ${item.source ?? model.getLanguageId()}`,
 				run: () =>
 					this.host.open({
 						uri: model.uri.toString(),
@@ -627,6 +794,18 @@ export class LanguageFeatures implements Disposable {
 	}
 	private readonly keydown = (event: KeyboardEvent): void => {
 		if (event.isComposing) return;
+		if (
+			this.popup.mode === "signature" &&
+			event.altKey &&
+			["ArrowUp", "ArrowDown"].includes(event.key)
+		) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			this.widget
+				.querySelectorAll<HTMLButtonElement>("button")
+				[event.key === "ArrowDown" ? 1 : 0]?.click();
+			return;
+		}
 		if (event.key === "Escape" && this.commitAnchors.size) {
 			event.preventDefault();
 			event.stopImmediatePropagation();
@@ -657,8 +836,16 @@ export class LanguageFeatures implements Disposable {
 			);
 			return;
 		}
+		if (event.key === "Escape" && this.contributions.endLinked()) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			return;
+		}
 		if (event.key === "Escape") this.host.cancelSnippet();
-		if (event.key === "Escape" && (!this.widget.hidden || this.inline)) {
+		if (
+			event.key === "Escape" &&
+			(!this.widget.hidden || this.inlineSuggestions.active)
+		) {
 			event.preventDefault();
 			event.stopImmediatePropagation();
 			this.abort.abort();
@@ -693,6 +880,7 @@ export class LanguageFeatures implements Disposable {
 				});
 				options[this.index]?.scrollIntoView({ block: "nearest" });
 				this.resolveActive();
+				this.popup.updatePreview();
 				this.host.input.setAttribute(
 					"aria-activedescendant",
 					`${this.widget.id}-${this.index}`,
@@ -701,41 +889,16 @@ export class LanguageFeatures implements Disposable {
 			return;
 		}
 		if (
-			this.inline &&
+			this.inlineSuggestions.active &&
 			(event.key === "Tab" ||
 				(event.ctrlKey && event.key === "ArrowRight"))
 		) {
 			event.preventDefault();
 			event.stopImmediatePropagation();
-			const model = this.host.model();
-			let remaining = "";
-			if (model && model.getVersionId() === this.inlineVersion) {
-				const offset = this.host.selection().end,
-					text =
-						event.key === "Tab"
-							? this.inline
-							: (this.inline.match(/^\W*\w+\W*/)?.[0] ??
-								this.inline);
-				remaining = this.inline.slice(text.length);
-				this.host.apply([
-					{
-						uri: model.uri.toString(),
-						from: offset,
-						to: offset,
-						text,
-						version: model.getVersionId(),
-					},
-				]);
-			}
-			this.inline = remaining;
-			this.inlineVersion = model?.getVersionId() ?? 0;
-			this.inlineOffset = this.host.selection().end;
-			this.ghost.textContent = remaining;
-			this.ghost.hidden = !remaining;
-			if (remaining)
-				this.popup.position(this.ghost, this.host.selection().end);
+			this.inlineSuggestions.accept(event.key !== "Tab");
 			return;
 		}
+
 		if (event.key === "Tab" && this.host.nextSnippet(event.shiftKey)) {
 			event.preventDefault();
 			event.stopImmediatePropagation();
@@ -755,24 +918,66 @@ export class LanguageFeatures implements Disposable {
 			this.abort.abort();
 		}
 	};
+	private readonly compositionStart = (): void => {
+		this.cancelRequests();
+	};
+	private readonly compositionEnd = (): void => {
+		if (!this.disposed) this.changed();
+	};
 	private readonly beforeInput = (event: InputEvent): void => {
 		if (event.isComposing || !this.host.canEdit()) return;
-		const data = event.data;
-		if (event.inputType === "insertText" && data)
-			queueMicrotask(() => {
-				if (this.disposed) return;
-				if (data === "(" || data === ",") void this.run("signature");
-				else if (
+		if (event.inputType === "insertText" && event.data)
+			this.contributions.beforeInput(event.data);
+		if (
+			!["insertText", "insertLineBreak", "insertParagraph"].includes(
+				event.inputType,
+			)
+		)
+			return;
+		const model = this.host.model();
+		if (!model) return;
+		const version = model.getVersionId(),
+			data = event.data,
+			incomplete = this.completionIncomplete;
+		if (this.triggerTimer) clearTimeout(this.triggerTimer);
+		this.triggerTimer = setTimeout(() => {
+			if (
+				this.disposed ||
+				!this.host.canEdit() ||
+				this.host.model() !== model ||
+				model.getVersionId() <= version
+			)
+				return;
+			this.contributions.onType(data ?? "\n");
+			if (
+				data &&
+				(data === "(" ||
+					data === "," ||
+					languageProviders(model.getLanguageId()).some((provider) =>
+						provider.signatureTriggerCharacters?.includes(data),
+					))
+			)
+				void this.run("signature", {
+					kind: "character",
+					character: data,
+				});
+			else if (
+				data &&
+				(incomplete ||
 					data === "." ||
+					languageProviders(model.getLanguageId()).some((provider) =>
+						provider.completionTriggerCharacters?.includes(data),
+					) ||
 					isWord(
-						getLanguageConfiguration(
-							this.host.model()?.getLanguageId() ?? "",
-						),
+						getLanguageConfiguration(model.getLanguageId()),
 						data,
-					)
-				)
-					void this.run("complete");
-			});
+					))
+			)
+				void this.run("complete", {
+					kind: incomplete ? "incomplete" : "character",
+					character: data,
+				});
+		}, 0);
 	};
 	private readonly pointerMove = (event: PointerEvent): void => {
 		if (event.buttons || (!this.widget.hidden && this.choices.length))
@@ -810,14 +1015,21 @@ export class LanguageFeatures implements Disposable {
 	}
 	selectionChanged(): void {
 		const completion = this.completionContext?.context.offset;
-		if (
-			(completion !== undefined && !this.caretAt(completion)) ||
-			(this.inline && !this.caretAt(this.inlineOffset))
-		) {
+		if (completion !== undefined && !this.caretAt(completion)) {
 			this.abort.abort();
 			this.close();
 		}
+		this.inlineSuggestions.selectionChanged();
+		this.contributions.selectionChanged();
 	}
+	expandSelection(shrink = false): boolean {
+		if (!this.contributions.hasSelectionRanges()) return false;
+		void this.contributions
+			.expand(shrink)
+			.catch((error) => this.host.announce(String(error)));
+		return true;
+	}
+
 	dispose(): void {
 		this.disposed = true;
 		this.cancelRequests();
@@ -827,7 +1039,20 @@ export class LanguageFeatures implements Disposable {
 		if (this.hoverTimer) clearTimeout(this.hoverTimer);
 		for (const sub of this.subscriptions.splice(0)) sub.dispose();
 		this.host.input.removeEventListener("keydown", this.keydown, true);
-		this.host.input.removeEventListener("beforeinput", this.beforeInput);
+		this.host.input.removeEventListener(
+			"beforeinput",
+			this.beforeInput,
+			true,
+		);
+		this.host.input.removeEventListener(
+			"compositionstart",
+			this.compositionStart,
+			true,
+		);
+		this.host.input.removeEventListener(
+			"compositionend",
+			this.compositionEnd,
+		);
 		this.host.viewport.removeEventListener("pointermove", this.pointerMove);
 		this.host.viewport.removeEventListener(
 			"pointerleave",
@@ -835,6 +1060,8 @@ export class LanguageFeatures implements Disposable {
 		);
 		this.widget.removeEventListener("keydown", this.keydown);
 
+		this.contributions.dispose();
+		this.inlineSuggestions.clear();
 		this.popup.dispose();
 
 		this.status.remove();

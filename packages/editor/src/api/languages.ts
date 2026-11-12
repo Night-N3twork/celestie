@@ -2,6 +2,15 @@ import { builtinLanguages } from "../languages/builtin-languages";
 import type { LanguageConfiguration } from "../languages/configuration";
 import { matchLanguage } from "../languages/file-associations";
 import type { TextModel } from "../model/text-model";
+import type {
+	CompletionList,
+	ContributionProvider,
+	Documentation,
+	InlayHintPart,
+	LanguageTrigger,
+	ProviderWorkspace,
+	SignatureHelp,
+} from "./language-contributions";
 import type { Disposable } from "./types";
 export interface Token {
 	readonly from: number;
@@ -13,8 +22,11 @@ export interface Diagnostic {
 	readonly to: number;
 	readonly message: string;
 	readonly severity: "error" | "warning" | "info";
-	readonly code?: number;
+	readonly code?: number | string;
 	readonly source?: string;
+	readonly tags?: readonly ("unnecessary" | "deprecated")[];
+	readonly related?: readonly (Location & { readonly message: string })[];
+	readonly codeDescription?: string;
 }
 export interface LanguageEdit {
 	readonly uri: string;
@@ -39,6 +51,10 @@ export interface Location {
 	readonly preview?: string;
 }
 export interface Completion {
+	readonly filterText?: string;
+	readonly preselect?: boolean;
+	readonly replaceTo?: number;
+	readonly documentation?: Documentation;
 	readonly commitCharacters?: readonly string[];
 	readonly source?: string;
 	readonly data?: unknown;
@@ -53,6 +69,7 @@ export interface Completion {
 	readonly sort?: string;
 }
 export interface Hover {
+	readonly documentation?: Documentation;
 	readonly text: string;
 	readonly from: number;
 	readonly to: number;
@@ -62,6 +79,10 @@ export interface SymbolInformation extends Location {
 	readonly children?: readonly SymbolInformation[];
 }
 export interface CodeAction extends WorkspaceEdit {
+	readonly kind?: string;
+	readonly preferred?: boolean;
+	readonly disabled?: string;
+	readonly data?: unknown;
 	readonly title: string;
 	readonly edits: readonly LanguageEdit[];
 }
@@ -71,6 +92,8 @@ export interface DocumentColor {
 	readonly color: string;
 }
 export interface InlayHint {
+	readonly label?: readonly InlayHintPart[];
+	readonly data?: unknown;
 	readonly offset: number;
 	readonly text: string;
 	readonly tooltip?: string;
@@ -78,9 +101,16 @@ export interface InlayHint {
 export interface CodeLens {
 	readonly offset: number;
 	readonly label: string;
-	readonly command: string;
+	readonly command?: string;
+	readonly tooltip?: string;
+	readonly data?: unknown;
 }
 export interface Analysis {
+	readonly unicodeHighlights?: readonly {
+		readonly from: number;
+		readonly to: number;
+		readonly message: string;
+	}[];
 	readonly semanticTokens?: readonly Token[];
 	readonly hints?: readonly InlayHint[];
 	readonly lenses?: readonly CodeLens[];
@@ -91,27 +121,41 @@ export interface Analysis {
 	readonly symbols: readonly SymbolInformation[];
 }
 export interface LanguageContext {
+	readonly previousSemanticResultId?: string;
+	readonly workspace?: ProviderWorkspace;
+	readonly trigger?: LanguageTrigger;
 	readonly model: TextModel;
 	readonly text: string;
 	readonly offset: number;
 	readonly signal: AbortSignal;
 }
-export interface LanguageProvider {
+export interface LanguageProvider extends ContributionProvider {
 	resolveCompletion?(
 		context: LanguageContext,
 		item: Completion,
 	):
-		| Promise<{ detail: string; edits: readonly LanguageEdit[] } | null>
-		| { detail: string; edits: readonly LanguageEdit[] }
+		| Promise<{
+				detail: string;
+				edits: readonly LanguageEdit[];
+				documentation?: Documentation;
+		  } | null>
+		| {
+				detail: string;
+				edits: readonly LanguageEdit[];
+				documentation?: Documentation;
+		  }
 		| null;
 	analyze?(context: LanguageContext): Promise<Analysis> | Analysis;
 	complete?(
 		context: LanguageContext,
-	): Promise<readonly Completion[]> | readonly Completion[];
+	):
+		| Promise<readonly Completion[] | CompletionList>
+		| readonly Completion[]
+		| CompletionList;
 	hover?(context: LanguageContext): Promise<Hover | null> | Hover | null;
 	signature?(
 		context: LanguageContext,
-	): Promise<string | null> | string | null;
+	): Promise<string | SignatureHelp | null> | string | SignatureHelp | null;
 	definitions?(
 		context: LanguageContext,
 	): Promise<readonly Location[]> | readonly Location[];
@@ -156,6 +200,24 @@ const providers: {
 	languages: readonly string[];
 	provider: LanguageProvider;
 }[] = [];
+const providerListeners = new Set<() => void>();
+function providersChanged(): void {
+	for (const listener of providerListeners) {
+		try {
+			listener();
+		} catch (error) {
+			console.warn("Language provider refresh failed", error);
+		}
+	}
+}
+export function onDidChangeLanguageProviders(listener: () => void): Disposable {
+	providerListeners.add(listener);
+	return {
+		dispose() {
+			providerListeners.delete(listener);
+		},
+	};
+}
 let registryVersion = 0;
 export function registerLanguage(definition: LanguageDefinition): Disposable {
 	if (!definition.id) throw new TypeError("Language id required.");
@@ -191,11 +253,19 @@ export function registerLanguageProvider(
 		languages: typeof languages === "string" ? [languages] : languages,
 		provider,
 	};
+	const subscription = provider.onDidChange?.(providersChanged);
 	providers.push(entry);
+	providersChanged();
 	return {
 		dispose() {
 			const index = providers.indexOf(entry);
-			if (index >= 0) providers.splice(index, 1);
+			if (index < 0) return;
+			providers.splice(index, 1);
+			try {
+				subscription?.dispose();
+			} finally {
+				providersChanged();
+			}
 		},
 	};
 }

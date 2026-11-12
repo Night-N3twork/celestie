@@ -4,6 +4,8 @@ import type { LanguageFeatureHost } from "./language-host";
 export interface Choice {
 	label: string;
 	detail?: string;
+	disabled?: string;
+	preview?: string;
 	run(): void;
 }
 interface Host
@@ -18,6 +20,7 @@ export class LanguagePopup implements Disposable {
 	readonly ghost: HTMLDivElement;
 	choices: Choice[] = [];
 	index = 0;
+	mode = "";
 	private anchorOffset = 0;
 	private anchorModel: TextModel | null = null;
 	private readonly resize: ResizeObserver;
@@ -41,13 +44,29 @@ export class LanguagePopup implements Disposable {
 		host.frame.append(this.widget, this.ghost);
 	}
 	showText(title: string, text: string, offset: number): void {
-		this.choices = [];
+		this.close();
 		const heading = this.widget.ownerDocument.createElement("strong"),
 			pre = this.widget.ownerDocument.createElement("pre");
 		heading.textContent = title;
 		pre.textContent = text;
 		this.widget.replaceChildren(heading, pre);
 		this.widget.setAttribute("role", "tooltip");
+		this.widget.hidden = false;
+		this.position(this.widget, offset);
+	}
+	showContent(
+		title: string,
+		content: HTMLElement,
+		offset: number,
+		mode = "documentation",
+	): void {
+		this.close();
+		this.mode = mode;
+		const heading = this.widget.ownerDocument.createElement("strong");
+		heading.textContent = title;
+		this.widget.replaceChildren(heading, content);
+		this.widget.setAttribute("role", "dialog");
+		this.widget.setAttribute("aria-label", title);
 		this.widget.hidden = false;
 		this.position(this.widget, offset);
 	}
@@ -58,6 +77,7 @@ export class LanguagePopup implements Disposable {
 		filter = false,
 	): void {
 		this.close(false);
+		this.mode = mode;
 		if (!choices.length) {
 			if (mode !== "complete") this.host.announce("No results.");
 			return;
@@ -68,6 +88,8 @@ export class LanguagePopup implements Disposable {
 		this.widget.hidden = false;
 		const list = this.widget.ownerDocument.createElement("div");
 		list.className = "editor-language-list";
+		const preview = this.widget.ownerDocument.createElement("pre");
+		preview.className = "editor-location-preview";
 		const render = () => {
 			const fragment = list.ownerDocument.createDocumentFragment();
 			for (let index = 0; index < this.choices.length; index++) {
@@ -82,8 +104,9 @@ export class LanguagePopup implements Disposable {
 					String(index === this.index),
 				);
 				option.textContent = choice.label;
+				option.setAttribute("aria-disabled", String(!!choice.disabled));
 				const detail = list.ownerDocument.createElement("small");
-				detail.textContent = choice.detail ?? "";
+				detail.textContent = choice.disabled ?? choice.detail ?? "";
 				option.append(detail);
 				option.onclick = () => this.acceptChoice(index);
 				fragment.append(option);
@@ -107,19 +130,36 @@ export class LanguagePopup implements Disposable {
 				);
 				this.index = 0;
 				render();
+				this.updatePreview();
 			};
 			this.widget.append(input);
 			queueMicrotask(() => input.focus());
 		}
+		if (!filter) this.host.input.focus({ preventScroll: true });
 		this.widget.append(list);
+		this.widget.append(preview);
 		render();
 		this.host.input.setAttribute("aria-controls", this.widget.id);
 		this.host.input.setAttribute("aria-expanded", "true");
 		this.host.input.setAttribute("aria-autocomplete", "list");
 		this.position(this.widget, offset);
+		this.updatePreview();
+	}
+	updatePreview(): void {
+		const preview = this.widget.querySelector<HTMLElement>(
+			".editor-location-preview",
+		);
+		if (preview) {
+			preview.textContent = this.choices[this.index]?.preview ?? "";
+			preview.hidden = !preview.textContent;
+		}
 	}
 	acceptChoice(index: number): void {
 		const choice = this.choices[index];
+		if (choice?.disabled) {
+			this.host.announce(choice.disabled);
+			return;
+		}
 		this.close();
 		choice?.run();
 		this.host.input.focus({ preventScroll: true });
@@ -159,10 +199,12 @@ export class LanguagePopup implements Disposable {
 	close(clearInline = true): void {
 		this.widget.hidden = true;
 		this.widget.replaceChildren();
+		this.mode = "";
 		this.choices = [];
 		this.host.onClose(clearInline);
 		this.host.input.removeAttribute("aria-activedescendant");
 		this.host.input.setAttribute("aria-expanded", "false");
+		this.host.input.removeAttribute("aria-controls");
 		if (clearInline) {
 			this.ghost.hidden = true;
 		}

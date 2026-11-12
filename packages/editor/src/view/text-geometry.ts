@@ -134,7 +134,12 @@ export class TextGeometry {
 			ends: number[] = [];
 		let length = row.from;
 		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-			if (node.parentElement?.closest(".editor-inlay-hint")) continue;
+			if (
+				node.parentElement?.closest(
+					".editor-inlay-hint, .editor-injected-text",
+				)
+			)
+				continue;
 			nodes.push(node as Text);
 			length += node.textContent?.length ?? 0;
 			ends.push(length);
@@ -167,10 +172,15 @@ export class TextGeometry {
 		}
 		return [row.element, row.element.childNodes.length];
 	}
-	private range(row: RowGeometry, from: number, to: number): Range {
+	private range(
+		row: RowGeometry,
+		from: number,
+		to: number,
+		after = true,
+	): Range {
 		const range = this.viewport.ownerDocument.createRange();
-		range.setStart(...this.endpoint(row, from, true));
-		range.setEnd(...this.endpoint(row, to, from === to));
+		range.setStart(...this.endpoint(row, from, after));
+		range.setEnd(...this.endpoint(row, to, from === to && after));
 		return range;
 	}
 	point(
@@ -193,7 +203,12 @@ export class TextGeometry {
 					row.row.from,
 					Math.min(row.row.to, position.column - 1),
 				),
-				rect = this.range(row, column, column).getClientRects()[0],
+				rect = this.range(
+					row,
+					column,
+					column,
+					affinity === "after",
+				).getClientRects()[0],
 				bounds = row.element.getBoundingClientRect();
 			return {
 				x: (rect?.left ?? bounds.left) - origin.left,
