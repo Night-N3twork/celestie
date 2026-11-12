@@ -284,6 +284,33 @@ export class LanguageFeatures implements Disposable {
 	}
 	private async analyze(): Promise<void> {
 		try {
+			const model = this.host.model();
+			if (model && this.host.performance().mode === "reduced") {
+				const result: Analysis = {
+					tokens: [],
+					diagnostics: [
+						{
+							from: 0,
+							to: Math.min(
+								1,
+								model.getValueLength({ eol: "\n" }),
+							),
+							severity: "info",
+							source: "Editor",
+							message:
+								"File optimizations pause language assistance, smart pairing, wrapping and minimap.",
+						},
+					],
+					folds: [],
+					symbols: [],
+					unicodeHighlights: [],
+				};
+				this.lastAnalysis = result;
+				this.host.analysis(result);
+				this.status.textContent = "Large file";
+				this.status.title = result.diagnostics[0]?.message ?? "";
+				return;
+			}
 			const context = this.context(this.analysisAbort.signal),
 				version = context.model.getVersionId(),
 				result = await requestAnalysis(
@@ -307,6 +334,16 @@ export class LanguageFeatures implements Disposable {
 	}
 	async run(command: string, trigger?: LanguageTrigger): Promise<void> {
 		if (this.disposed) return;
+		if (
+			this.host.model() &&
+			this.host.performance().mode === "reduced" &&
+			!["close", "problems", "snippet"].includes(command)
+		) {
+			this.host.announce(
+				"Language assistance is paused by file optimizations.",
+			);
+			return;
+		}
 		if (this.hoverTimer) clearTimeout(this.hoverTimer);
 		if (command === "close") {
 			this.close();
@@ -925,7 +962,12 @@ export class LanguageFeatures implements Disposable {
 		if (!this.disposed) this.changed();
 	};
 	private readonly beforeInput = (event: InputEvent): void => {
-		if (event.isComposing || !this.host.canEdit()) return;
+		if (
+			event.isComposing ||
+			!this.host.canEdit() ||
+			this.host.performance().mode === "reduced"
+		)
+			return;
 		if (event.inputType === "insertText" && event.data)
 			this.contributions.beforeInput(event.data);
 		if (
@@ -980,6 +1022,7 @@ export class LanguageFeatures implements Disposable {
 		}, 0);
 	};
 	private readonly pointerMove = (event: PointerEvent): void => {
+		if (this.host.performance().mode === "reduced") return;
 		if (event.buttons || (!this.widget.hidden && this.choices.length))
 			return;
 		if (this.hoverTimer) clearTimeout(this.hoverTimer);

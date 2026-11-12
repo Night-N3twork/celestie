@@ -13,11 +13,12 @@ import {
 } from "../features/themes";
 import { mergeTokenLayers, validateTokens } from "../languages/token-spans";
 import type { TextModel } from "../model/text-model";
+import { editorPerformance } from "../performance/limits";
 import { injectedText } from "./injected-text";
 import "../styles/editor.css";
 import type { BracketGuide } from "./bracket-guides";
 import { LineNumberGutter } from "./line-number-gutter";
-import { paintOverview, paintStickyHeaders } from "./overview-painter";
+import { OverviewPainter, paintStickyHeaders } from "./overview-painter";
 import { PlatformMedia } from "./platform-media";
 import { appendRow } from "./row-painter";
 import { ScrollAxis } from "./scroll-axis";
@@ -94,6 +95,9 @@ export class TextRenderer implements Disposable {
 	private disposed = false;
 	private batchDepth = 0;
 	private renderPending = false;
+	private reduced = false;
+	private visibleDecorations: readonly VisibleDecoration[] = [];
+	private readonly overviewPainter = new OverviewPainter();
 	private readonly padding: number;
 	private activeLine = 1;
 	private selections: readonly TextSelection[] = [];
@@ -330,6 +334,17 @@ export class TextRenderer implements Disposable {
 		const factor = 1 + this.fontZoom / 10;
 		return {
 			...options,
+			...(editorPerformance(this.model, options.largeFileOptimizations)
+				.mode === "reduced"
+				? {
+						wordWrap: "off" as const,
+						minimap: false,
+						inlayHints: false,
+						codeLens: false,
+						stickyScroll: false,
+						bracketGuides: "none" as const,
+					}
+				: {}),
 			fontSize: Math.round(options.fontSize * factor * 2) / 2,
 			lineHeight: snapToDevicePixels(
 				Math.round(options.lineHeight * factor),
@@ -449,6 +464,8 @@ export class TextRenderer implements Disposable {
 		return this.layout.rowAtHeight(Math.max(0, top - this.padding)).line;
 	}
 	setFolds(folds: readonly FoldRegion[]): void {
+		if (folds === this.folds || (!folds.length && !this.folds.length))
+			return;
 		this.folds = folds;
 		this.render();
 	}
@@ -535,6 +552,11 @@ export class TextRenderer implements Disposable {
 	}
 
 	setDecorations(values: readonly VisibleDecoration[]): void {
+		if (
+			values === this.decorations ||
+			(!values.length && !this.decorations.length)
+		)
+			return;
 		this.decorations = values;
 		this.revision++;
 		this.render();
@@ -652,6 +674,17 @@ export class TextRenderer implements Disposable {
 			return;
 		}
 		if (this.disposed) return;
+		const reduced =
+			editorPerformance(
+				this.model,
+				this.requestedOptions.largeFileOptimizations,
+			).mode === "reduced";
+		if (reduced !== this.reduced) {
+			this.reduced = reduced;
+			this.options = this.effectiveOptions(this.requestedOptions);
+			this.minimap.hidden = !this.options.minimap;
+			this.revision++;
+		}
 		if (this.tokenVersion !== this.model.getVersionId()) {
 			this.semanticTokens = [];
 			this.lexicalTokens = [];
@@ -678,7 +711,7 @@ export class TextRenderer implements Disposable {
 								hint.text,
 						}))
 					: []),
-				...(!this.accessible
+				...(!this.accessible && !this.reduced
 					? injectedText(this.model, this.decorations).map(
 							(item) => ({
 								...item,
@@ -714,6 +747,13 @@ export class TextRenderer implements Disposable {
 		this.visible = [];
 		for (let index = first; index <= last; index++)
 			this.visible.push(this.layout.row(index));
+		const firstLine = this.visible[0]?.line ?? 1,
+			lastLine = this.visible.at(-1)?.line ?? firstLine;
+		this.visibleDecorations = this.decorations.filter(
+			(value) =>
+				value.range.endLine >= firstLine &&
+				value.range.startLine <= lastLine,
+		);
 		const left = this.scrollLeft;
 		this.widest = Math.max(
 			this.widest,
@@ -898,7 +938,11 @@ export class TextRenderer implements Disposable {
 					rows: 1,
 				});
 		return zones.concat(
-			this.widgetLayer.layoutZones(this.model, !this.accessible),
+			this.widgetLayer.layoutZones(
+				this.model,
+				!this.accessible,
+				this.lineHeight,
+			),
 		);
 	}
 	private readonly tokenStyle = (scope: string): string | undefined => {
@@ -914,7 +958,8 @@ export class TextRenderer implements Disposable {
 				search: this.search,
 				currentMatch: this.currentMatch,
 				brackets: this.brackets,
-				decorations: this.decorations,
+				decorations: this.visibleDecorations,
+				performanceReduced: this.reduced,
 				options: this.options,
 				accessible: this.accessible,
 				assistanceVersion: this.assistanceVersion,
@@ -957,7 +1002,7 @@ export class TextRenderer implements Disposable {
 		});
 	}
 	private paintOverview(): void {
-		paintOverview({
+		this.overviewPainter.paint({
 			scrollTop: this.scrollTop,
 			viewport: this.viewport,
 			root: this.root,
@@ -1055,6 +1100,21 @@ export class TextRenderer implements Disposable {
 		this.paintSelections();
 	}
 	setSelections(values: readonly TextSelection[]): void {
+		if (
+			this.paintedVersion === this.model.getVersionId() &&
+			values.length === this.selections.length &&
+			values.every((value, index) => {
+				const old = this.selections[index];
+				return (
+					old &&
+					value.start === old.start &&
+					value.end === old.end &&
+					value.direction === old.direction &&
+					value.affinity === old.affinity
+				);
+			})
+		)
+			return;
 		this.selections = values.map((value) => ({ ...value }));
 		if (this.options.renderWhitespace === "selection") {
 			this.revision++;
@@ -1070,6 +1130,11 @@ export class TextRenderer implements Disposable {
 		this.render();
 	}
 	setBracketGuides(values: readonly BracketGuide[]): void {
+		if (
+			values === this.bracketGuides ||
+			(!values.length && !this.bracketGuides.length)
+		)
+			return;
 		this.bracketGuides = values;
 		this.paintSelections();
 	}
@@ -1118,6 +1183,7 @@ export class TextRenderer implements Disposable {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.overviewPainter.dispose();
 		this.resizeObserver.disconnect();
 		cancelAnimationFrame(this.resizeFrame);
 		this.root.ownerDocument.fonts?.removeEventListener(

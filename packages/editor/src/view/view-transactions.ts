@@ -3,7 +3,6 @@ import type { EditingPlan } from "../features/editing-plan";
 import type { SearchEdit } from "../features/find-replace";
 import type { MultiEditingPlan } from "../features/selections";
 import { TextModel, type WorkspaceTextEdit } from "../model/text-model";
-import { normalizeInputText } from "./input";
 import type { InputSurface } from "./input-surface";
 
 interface Host {
@@ -161,7 +160,7 @@ export class ViewTransactions {
 		if (!edits.length || !this.host.canEdit()) return;
 		if (
 			this.element.value !== expectedText ||
-			normalizeInputText(this.model.getValue()) !== expectedText
+			this.model.getValue({ eol: "\n" }) !== expectedText
 		) {
 			throw new Error("Document changed. Run the search again.");
 		}

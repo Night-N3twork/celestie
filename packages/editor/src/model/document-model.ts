@@ -233,7 +233,8 @@ export class DocumentModel implements Disposable {
 		let value = this.buffer.getValue();
 		if (options.eol !== undefined) {
 			this.assertEOL(options.eol);
-			value = value.replace(/\r\n|\r|\n/g, options.eol);
+			value = this.buffer.getNormalizedValue();
+			if (options.eol !== "\n") value = value.replace(/\n/g, options.eol);
 		}
 		return (options.preserveBOM ? this.bom : "") + value;
 	}

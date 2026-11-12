@@ -1,7 +1,7 @@
 import type { DiffComputationOptions, DiffResult } from "../api/diff";
 import type { Disposable } from "../api/types";
-import type { DiffResponse } from "../workers/diff.worker";
 import { computationOptions } from "./options";
+import { validDiffResult } from "./response";
 export class DiffWorkerClient implements Disposable {
 	private worker: Worker | undefined;
 	private cancel: (() => void) | undefined;
@@ -28,7 +28,10 @@ export class DiffWorkerClient implements Disposable {
 				reject(error);
 				return;
 			}
+			let finished = false;
 			const finish = (error?: Error, result?: DiffResult) => {
+				if (finished) return;
+				finished = true;
 				clearTimeout(timer);
 				signal.removeEventListener("abort", abort);
 				worker.onmessage = null;
@@ -49,10 +52,26 @@ export class DiffWorkerClient implements Disposable {
 			);
 			this.cancel = abort;
 			signal.addEventListener("abort", abort, { once: true });
-			worker.onmessage = ({ data }: MessageEvent<DiffResponse>) => {
-				"result" in data
-					? finish(undefined, data.result)
-					: finish(new Error(data.error));
+			worker.onmessage = ({ data }: MessageEvent<unknown>) => {
+				if (
+					data &&
+					typeof data === "object" &&
+					"result" in data &&
+					validDiffResult(
+						data.result,
+						original.length,
+						modified.length,
+					)
+				)
+					finish(undefined, data.result);
+				else if (
+					data &&
+					typeof data === "object" &&
+					"error" in data &&
+					typeof data.error === "string"
+				)
+					finish(new Error(data.error));
+				else finish(new Error("Invalid diff worker response."));
 			};
 			worker.onerror = (event) => {
 				event.preventDefault();

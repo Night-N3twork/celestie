@@ -64,6 +64,10 @@ export {
 	registerLanguageProvider,
 } from "./api/languages";
 export type {
+	EditorPerformanceState,
+	LanguageWorkerStatistics,
+} from "./api/performance";
+export type {
 	LineTokenizationResult,
 	TokenizationContext,
 	TokenizerRegistration,
@@ -97,6 +101,7 @@ export {
 	type ThemeKind,
 	type TokenStyle,
 } from "./features/themes";
+export { getLanguageWorkerStatistics } from "./languages/client";
 export { defaultModelRegistry, ModelRegistry } from "./model/model-registry";
 export {
 	type EndOfLine,

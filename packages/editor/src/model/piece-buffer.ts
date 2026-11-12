@@ -4,6 +4,7 @@ import * as tree from "./piece-tree";
 export class PieceBuffer {
 	private readonly root: tree.Root;
 	private value: string | undefined;
+	private normalizedValue: string | undefined;
 	constructor(text = "", root?: tree.Node) {
 		this.root = root ?? tree.build(text);
 	}
@@ -11,6 +12,10 @@ export class PieceBuffer {
 	getValue(): string {
 		this.value ??= this.slice(0, this.getLength());
 		return this.value;
+	}
+	getNormalizedValue(): string {
+		this.normalizedValue ??= this.getValue().replace(/\r\n?/g, "\n");
+		return this.normalizedValue;
 	}
 	getLength(): number {
 		return this.root?.length ?? 0;

@@ -3,9 +3,11 @@ import {
 	getLanguages,
 	languageRegistryVersion,
 } from "../api/languages";
+import type { LanguageWorkerStatistics } from "../api/performance";
 import { languageTokenizer } from "../api/tokenization";
-import type { Disposable } from "../api/types";
+import type { Disposable, ModelChangeEvent } from "../api/types";
 import type { TextModel } from "../model/text-model";
+import { performanceLimits } from "../performance/limits";
 import type {
 	EmbeddedLanguage,
 	LanguageProfile,
@@ -83,22 +85,62 @@ export function embeddedLanguages(): EmbeddedLanguage[] {
 interface Pending {
 	resolve(value: unknown): void;
 	reject(error: Error): void;
-	timer: ReturnType<typeof setTimeout>;
 	cleanup(): void;
+	model: TextModel;
 }
 class LanguageEngine {
 	private worker: Worker | undefined;
 	private sequence = 0;
 	private registryVersion = -1;
 	private readonly pending = new Map<number, Pending>();
+	private readonly inFlight = new Map<
+		number,
+		ReturnType<typeof setTimeout>
+	>();
 	private readonly synced = new WeakMap<
 		TextModel,
-		{ worker: Worker; key: string }
+		{ worker: Worker; key: string; profile: string; version: number }
 	>();
 	private readonly models = new Map<
 		TextModel,
 		{ references: number; subscriptions: Disposable[] }
 	>();
+	private starts = 0;
+	private failures = 0;
+	private fullSyncs = 0;
+	private patchSyncs = 0;
+	private synchronizedCharacters = 0;
+	statistics(): LanguageWorkerStatistics {
+		return {
+			attachedModels: this.models.size,
+			pendingRequests: this.pending.size,
+			inFlightRequests: this.inFlight.size,
+			starts: this.starts,
+			failures: this.failures,
+			fullSyncs: this.fullSyncs,
+			patchSyncs: this.patchSyncs,
+			synchronizedCharacters: this.synchronizedCharacters,
+			running: !!this.worker,
+		};
+	}
+	private finishFlight(id: number): void {
+		const timer = this.inFlight.get(id);
+		if (timer !== undefined) clearTimeout(timer);
+		this.inFlight.delete(id);
+	}
+	private fail(error: Error, count = true): void {
+		const worker = this.worker;
+		this.worker = undefined;
+		worker?.terminate();
+		if (count) this.failures++;
+		for (const id of this.inFlight.keys()) this.finishFlight(id);
+		const pending = [...this.pending.values()];
+		this.pending.clear();
+		for (const entry of pending) {
+			entry.cleanup();
+			entry.reject(error);
+		}
+	}
 	private ensure(): Worker {
 		if (this.worker) return this.worker;
 		const worker = new Worker(
@@ -106,67 +148,136 @@ class LanguageEngine {
 			{ type: "module" },
 		);
 		this.worker = worker;
+		this.starts++;
 		this.registryVersion = -1;
-		worker.onmessage = (event) => {
-			const message = event.data as {
-				id: number;
-				result?: unknown;
-				error?: string;
-			};
-			const pending = this.pending.get(message.id);
-			if (!pending) return;
-			this.pending.delete(message.id);
-			clearTimeout(pending.timer);
-			pending.cleanup();
-			if (message.error) pending.reject(new Error(message.error));
-			else pending.resolve(message.result);
-		};
-		worker.onerror = () => {
+		worker.onmessage = ({ data }: MessageEvent<unknown>) => {
 			if (this.worker !== worker) return;
-			for (const pending of this.pending.values()) {
-				clearTimeout(pending.timer);
-				pending.cleanup();
-				pending.reject(
+			if (
+				!data ||
+				typeof data !== "object" ||
+				!("id" in data) ||
+				!Number.isInteger(data.id) ||
+				typeof data.id !== "number" ||
+				data.id < 0
+			) {
+				this.fail(new Error("Invalid language worker response."));
+				return;
+			}
+			if (
+				"requiresSync" in data &&
+				data.requiresSync === true &&
+				"documentId" in data
+			) {
+				for (const model of this.models.keys())
+					if (model.id === data.documentId) this.synced.delete(model);
+			}
+			if (!data.id) return;
+			if (
+				!("result" in data) &&
+				!("error" in data && typeof data.error === "string") &&
+				!("cancelled" in data && data.cancelled === true)
+			) {
+				this.fail(new Error("Invalid language worker response."));
+				return;
+			}
+			this.finishFlight(data.id);
+			const entry = this.pending.get(data.id);
+			if (!entry) return;
+			this.pending.delete(data.id);
+			entry.cleanup();
+			if ("error" in data) {
+				this.synced.delete(entry.model);
+				entry.reject(new Error(String(data.error)));
+			} else if ("cancelled" in data)
+				entry.reject(new DOMException("Cancelled", "AbortError"));
+			else if ("result" in data) entry.resolve(data.result);
+		};
+		worker.onerror = (event) => {
+			event.preventDefault();
+			if (this.worker === worker)
+				this.fail(
 					new Error(
 						"Language worker failed. Run the command again to restart it.",
 					),
 				);
-			}
-			this.pending.clear();
-			worker.terminate();
-			this.worker = undefined;
 		};
-		for (const model of this.models.keys()) this.sync(model);
+		worker.onmessageerror = () => {
+			if (this.worker === worker)
+				this.fail(new Error("Invalid language worker message."));
+		};
 		return worker;
 	}
-	private sync(model: TextModel): void {
+	private sync(model: TextModel, event?: ModelChangeEvent): void {
 		const worker = this.worker;
-		if (!worker) return;
+		if (!worker || model.isDisposed()) return;
 		const registryVersion = languageRegistryVersion();
-		if (this.registryVersion !== registryVersion) {
-			this.registryVersion = registryVersion;
+		const profile = `${model.getLanguageId()}:${registryVersion}:${languageTokenizer(model.getLanguageId())?.version ?? -1}`,
+			version = model.getVersionId(),
+			key = `${version}:${profile}`,
+			previous = this.synced.get(model);
+		if (previous?.worker === worker && previous.key === key) return;
+		try {
+			if (event) {
+				const changes = event.inputChanges,
+					characters =
+						changes?.reduce(
+							(sum, change) => sum + change.text.length,
+							0,
+						) ?? Infinity;
+				if (
+					!event.flush &&
+					changes &&
+					previous?.worker === worker &&
+					previous.profile === profile &&
+					previous.version === version - 1 &&
+					event.verId === version &&
+					changes.length <= 256 &&
+					characters <= performanceLimits.patchCharacters
+				) {
+					worker.postMessage({
+						id: 0,
+						method: "patch",
+						documentId: model.id,
+						baseVersion: previous.version,
+						version,
+						changes,
+					});
+					this.synced.set(model, { worker, key, profile, version });
+					this.patchSyncs++;
+					this.synchronizedCharacters += characters;
+				} else this.synced.delete(model);
+				return;
+			}
+			if (this.registryVersion !== registryVersion) {
+				worker.postMessage({
+					id: 0,
+					method: "languages",
+					languages: embeddedLanguages(),
+				});
+				this.registryVersion = registryVersion;
+			}
+			const text = model.getValue({ eol: "\n" });
 			worker.postMessage({
 				id: 0,
-				method: "languages",
-				languages: embeddedLanguages(),
+				method: "sync",
+				document: {
+					id: model.id,
+					uri: model.uri.toString(),
+					text,
+					version,
+					language: model.getLanguageId(),
+					profile: languageProfile(model.getLanguageId()),
+				},
 			});
+			this.synced.set(model, { worker, key, profile, version });
+			this.fullSyncs++;
+			this.synchronizedCharacters += text.length;
+		} catch (error) {
+			this.fail(
+				error instanceof Error ? error : new Error(String(error)),
+			);
+			if (!event) throw error;
 		}
-		const key = `${model.getVersionId()}:${model.getLanguageId()}:${registryVersion}:${languageTokenizer(model.getLanguageId())?.version ?? -1}`;
-		const previous = this.synced.get(model);
-		if (previous?.worker === worker && previous.key === key) return;
-		worker.postMessage({
-			id: 0,
-			method: "sync",
-			document: {
-				id: model.id,
-				uri: model.uri.toString(),
-				text: model.getValue({ eol: "\n" }),
-				version: model.getVersionId(),
-				language: model.getLanguageId(),
-				profile: languageProfile(model.getLanguageId()),
-			},
-		});
-		this.synced.set(model, { worker, key });
 	}
 	attach(model: TextModel): Disposable {
 		let entry = this.models.get(model);
@@ -175,12 +286,10 @@ class LanguageEngine {
 			entry = { references: 1, subscriptions: [] };
 			this.models.set(model, entry);
 			entry.subscriptions.push(
-				model.onDidChangeContent(() => this.sync(model)),
-				model.onDidChangeLanguage(() => this.sync(model)),
+				model.onDidChangeContent((event) => this.sync(model, event)),
+				model.onDidChangeLanguage(() => this.synced.delete(model)),
 				model.onWillDispose(() => this.remove(model)),
 			);
-			this.ensure();
-			this.sync(model);
 		}
 		let active = true;
 		return {
@@ -198,20 +307,28 @@ class LanguageEngine {
 		this.models.delete(model);
 		this.synced.delete(model);
 		for (const sub of entry.subscriptions) sub.dispose();
-		this.worker?.postMessage({
-			id: 0,
-			method: "close",
-			documentId: model.id,
-		});
-		if (!this.models.size) {
-			this.worker?.terminate();
-			this.worker = undefined;
-			for (const pending of this.pending.values()) {
-				clearTimeout(pending.timer);
+		for (const [id, pending] of this.pending)
+			if (pending.model === model) {
+				this.pending.delete(id);
 				pending.cleanup();
-				pending.reject(new Error("Language workspace closed."));
+				pending.reject(
+					new DOMException("Document closed.", "AbortError"),
+				);
 			}
-			this.pending.clear();
+		if (!this.models.size) {
+			this.fail(new Error("Language workspace closed."), false);
+			return;
+		}
+		try {
+			this.worker?.postMessage({
+				id: 0,
+				method: "close",
+				documentId: model.id,
+			});
+		} catch (error) {
+			this.fail(
+				error instanceof Error ? error : new Error(String(error)),
+			);
 		}
 	}
 	getModels(): readonly TextModel[] {
@@ -226,42 +343,89 @@ class LanguageEngine {
 	): Promise<T> {
 		if (signal.aborted)
 			return Promise.reject(new DOMException("Cancelled", "AbortError"));
-		if (this.pending.size >= 32)
+		if (model.isDisposed())
+			return Promise.reject(new Error("Document disposed."));
+		if (this.pending.size >= performanceLimits.workerPending)
 			return Promise.reject(new Error("Language service is busy."));
-		const worker = this.ensure(),
-			id = ++this.sequence;
+		if (this.inFlight.size >= performanceLimits.workerInFlight)
+			this.fail(
+				new Error(
+					"Language worker queue exhausted; restart on next request.",
+				),
+			);
 		return new Promise<T>((resolve, reject) => {
+			let worker: Worker;
+			try {
+				worker = this.ensure();
+				this.sync(model);
+			} catch (error) {
+				reject(
+					error instanceof Error ? error : new Error(String(error)),
+				);
+				return;
+			}
+			const id = ++this.sequence;
 			const abort = () => {
-				const pending = this.pending.get(id);
-				if (!pending) return;
-				clearTimeout(pending.timer);
+				const entry = this.pending.get(id);
+				if (!entry) return;
 				this.pending.delete(id);
-				worker.postMessage({ id: 0, method: "cancel", requestId: id });
-				signal.removeEventListener("abort", abort);
-				reject(new DOMException("Cancelled", "AbortError"));
+				entry.cleanup();
+				entry.reject(new DOMException("Cancelled", "AbortError"));
+				try {
+					worker.postMessage({
+						id: 0,
+						method: "cancel",
+						requestId: id,
+					});
+				} catch (error) {
+					if (this.worker === worker)
+						this.fail(
+							error instanceof Error
+								? error
+								: new Error(String(error)),
+						);
+				}
 			};
 			signal.addEventListener("abort", abort, { once: true });
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				worker.postMessage({ id: 0, method: "cancel", requestId: id });
-				signal.removeEventListener("abort", abort);
-				reject(new Error("Language request timed out."));
-			}, 10000);
 			this.pending.set(id, {
 				resolve: (value) => resolve(value as T),
 				reject,
-				timer,
+				model,
 				cleanup: () => signal.removeEventListener("abort", abort),
 			});
-			this.sync(model);
-			worker.postMessage({
+			// This watchdog survives caller cancellation: a blocked synchronous tokenizer cannot process cancel.
+			this.inFlight.set(
 				id,
-				method,
-				documentId: model.id,
-				offset,
-				...extra,
-			});
+				setTimeout(() => {
+					if (this.worker === worker)
+						this.fail(
+							new Error(
+								"Language worker timed out. Run the command again to restart it.",
+							),
+						);
+				}, performanceLimits.workerTimeoutMs),
+			);
+			try {
+				worker.postMessage({
+					...extra,
+					id,
+					method,
+					documentId: model.id,
+					version: model.getVersionId(),
+					offset,
+				});
+			} catch (error) {
+				if (this.worker === worker)
+					this.fail(
+						error instanceof Error
+							? error
+							: new Error(String(error)),
+					);
+			}
 		});
 	}
 }
 export const languageEngine = new LanguageEngine();
+export function getLanguageWorkerStatistics(): LanguageWorkerStatistics {
+	return languageEngine.statistics();
+}

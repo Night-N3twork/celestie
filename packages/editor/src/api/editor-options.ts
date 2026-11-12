@@ -5,6 +5,7 @@ import { isFontFeatureSettings } from "../view/text-shaping";
 import type { TextSelection } from "./types";
 
 export interface EditorOptions extends IndentationOptions {
+	readonly largeFileOptimizations: boolean;
 	readonly completionInsertMode: "insert" | "replace";
 	readonly linkedEditing: boolean;
 	readonly onTypeFormatting: boolean;
@@ -70,6 +71,7 @@ export interface EditorViewState {
 }
 
 export const defaultViewOptions = {
+	largeFileOptimizations: true,
 	completionInsertMode: "insert",
 	linkedEditing: false,
 	onTypeFormatting: false,
@@ -106,6 +108,7 @@ export function validateViewOptions(options: EditorOptions): void {
 	if (options.theme !== "auto" && !hasTheme(options.theme))
 		throw new Error(`Unknown editor theme: ${options.theme}`);
 	for (const flag of [
+		options.largeFileOptimizations,
 		options.linkedEditing,
 		options.onTypeFormatting,
 		options.unicodeHighlight,

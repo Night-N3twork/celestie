@@ -60,6 +60,7 @@ import {
 } from "../languages/configuration";
 import { mapModelInputOffset } from "../model/change-mapping";
 import { TextModel } from "../model/text-model";
+import { editorPerformance } from "../performance/limits";
 import {
 	findTextChange,
 	getInputLineRange,
@@ -254,7 +255,7 @@ export class EditorView implements Disposable {
 		);
 		if (options.detectIndentation)
 			indentation = detectIndentation(
-				normalizeInputText(model.getValue()),
+				model.getValue({ eol: "\n" }),
 				indentation,
 			);
 		this.options = {
@@ -319,6 +320,7 @@ export class EditorView implements Disposable {
 			applyPerSelection: (p, k) => this.applyPerSelection(p, k),
 			captureState: () => this.captureState(),
 			getAnalysis: () => this.getAnalysis(),
+			canAnalyze: () => this.getPerformanceState().mode === "full",
 			getSelection: () => this.getSelection(),
 			hasSnippet: () => this.snippets.active,
 			redo: () => this.redo(),
@@ -348,7 +350,7 @@ export class EditorView implements Disposable {
 			"aria-readonly",
 			String(this.options.readOnly),
 		);
-		this.element.value = normalizeInputText(model.getValue());
+		this.element.value = model.getValue({ eol: "\n" });
 		this.element.setSelectionRange(0, 0);
 		this.renderer = new TextRenderer(this.frame, model, {
 			input: this.element.native,
@@ -498,6 +500,7 @@ export class EditorView implements Disposable {
 			selections: () => this.getSelections(),
 			select: (values) => this.setSelections(values, true),
 			options: () => this.options,
+			performance: () => this.getPerformanceState(),
 			workspace: () =>
 				options.languageWorkspace ??
 				providerWorkspace(() => this.attachedModel),
@@ -558,6 +561,13 @@ export class EditorView implements Disposable {
 		this.render();
 	}
 
+	getPerformanceState() {
+		if (this.disposed) throw new Error("Editor view disposed.");
+		return editorPerformance(
+			this.model,
+			this.options.largeFileOptimizations,
+		);
+	}
 	getViewport(): EditorViewport {
 		if (this.disposed) throw new Error("Editor view disposed.");
 		return {
@@ -731,7 +741,11 @@ export class EditorView implements Disposable {
 	}
 
 	private setLanguageAnalysis(value: Analysis): void {
-		this.presentation.setLanguageAnalysis(value);
+		const anchor = this.renderer.captureAnchor();
+		this.renderer.batchPresentation(() =>
+			this.presentation.setLanguageAnalysis(value),
+		);
+		this.renderer.restoreAnchor(anchor);
 	}
 
 	runLanguageCommand(command: string): void {
@@ -973,7 +987,7 @@ export class EditorView implements Disposable {
 		this.attachedModel = model;
 		this.model = model ?? this.emptyModel;
 		this.analysis = undefined;
-		this.element.value = normalizeInputText(this.model.getValue());
+		this.element.value = this.model.getValue({ eol: "\n" });
 		this.selectionsValue = [caret(0)];
 		this.cursorUndo.length = 0;
 		this.cursorRedo.length = 0;
@@ -1268,6 +1282,8 @@ export class EditorView implements Disposable {
 			next.onTypeFormatting !== this.options.onTypeFormatting ||
 			next.accessibilitySupport !== this.options.accessibilitySupport;
 		const refreshAssistance =
+			next.largeFileOptimizations !==
+				this.options.largeFileOptimizations ||
 			next.readOnly !== this.options.readOnly ||
 			next.onTypeFormatting !== this.options.onTypeFormatting ||
 			next.accessibilitySupport !== this.options.accessibilitySupport ||
@@ -1507,6 +1523,11 @@ export class EditorView implements Disposable {
 	}
 
 	private getAnalysis(): BracketAnalysis {
+		if (this.getPerformanceState().mode === "reduced") {
+			if (this.analysis?.text !== "")
+				this.analysis = new BracketAnalysis("", this.language);
+			return this.analysis;
+		}
 		if (this.analysis?.text !== this.element.value)
 			this.analysis = new BracketAnalysis(
 				this.element.value,
@@ -1656,14 +1677,16 @@ export class EditorView implements Disposable {
 			: "No document attached";
 		this.renderer.setActiveLine(position.line);
 		const matches =
-			selection.start === selection.end
+			selection.start === selection.end &&
+			this.getPerformanceState().mode === "full"
 				? this.getAnalysis().matchingAt(offset)
 				: [];
 		this.renderer.setBracketMatches(
 			matches.map((match) => getInputPosition(this.element.value, match)),
 		);
 		this.renderer.setBracketGuides(
-			this.options.bracketGuides === "none"
+			this.options.bracketGuides === "none" ||
+				this.getPerformanceState().mode === "reduced"
 				? []
 				: this.getAnalysis().guidePairs(),
 		);
@@ -1755,17 +1778,27 @@ export class EditorView implements Disposable {
 			this.element.scrollLeft = 0;
 		}
 		const scrollAnchor = this.renderer.captureAnchor();
-		const oldAnchorOffset =
-			getInputLineRange(this.element.value, scrollAnchor.line).from +
-			scrollAnchor.column -
-			1;
+		const needsAnchor =
+			event &&
+			!event.flush &&
+			!this.pendingSelection &&
+			event.historyState?.owner !== this.owner;
+		const oldAnchorOffset = needsAnchor
+			? getInputLineRange(this.element.value, scrollAnchor.line).from +
+				scrollAnchor.column -
+				1
+			: 0;
 		const previousSelections = this.getSelections();
 		if (event && !event.flush) {
 			this.cursorUndo.length = 0;
 			this.cursorRedo.length = 0;
 		}
-		const text = normalizeInputText(this.model.getValue());
-		const change = findTextChange(this.element.value, text);
+		const text = this.model.getValue({ eol: "\n" });
+		const change = event
+			? this.element.value !== text
+				? { from: 0, to: this.element.value.length, text }
+				: null
+			: findTextChange(this.element.value, text);
 		if (change) {
 			const mapLegacyOffset = (offset: number): number => {
 				if (offset < change.from) return offset;
@@ -1842,9 +1875,11 @@ export class EditorView implements Disposable {
 			this.element.scrollTop = state.scrollTop;
 			this.element.scrollLeft = state.scrollLeft;
 		}
-		this.renderer.setFolds(this.presentation.assets().folding.get());
-		this.refreshDecorations(this.model);
-		this.renderer.render();
+		this.renderer.batchPresentation(() => {
+			this.renderer.setFolds(this.presentation.assets().folding.get());
+			this.refreshDecorations(this.model);
+			this.renderer.render();
+		});
 		if (
 			event &&
 			!event.flush &&

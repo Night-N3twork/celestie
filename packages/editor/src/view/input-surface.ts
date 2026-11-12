@@ -50,6 +50,20 @@ export function windowOffset(window: InputWindow, offset: number): number {
 
 export class InputSurface implements Disposable {
 	private source = "";
+	private nativeChange:
+		| {
+				base: string;
+				next: string;
+				change: { from: number; to: number; text: string };
+		  }
+		| undefined;
+	takeNativeChange(before: string) {
+		const entry = this.nativeChange;
+		this.nativeChange = undefined;
+		return entry?.base === before && entry.next === this.source
+			? entry.change
+			: undefined;
+	}
 	private start = 0;
 	private end = 0;
 	private direction: TextSelection["direction"] = "none";
@@ -100,6 +114,7 @@ export class InputSurface implements Disposable {
 		return this.source;
 	}
 	set value(value: string) {
+		this.nativeChange = undefined;
 		this.source = value;
 		this.start = Math.min(this.start, value.length);
 		this.end = Math.min(this.end, value.length);
@@ -203,10 +218,16 @@ export class InputSurface implements Disposable {
 		if (change) {
 			const from = windowOffset(previous, change.from),
 				to = windowOffset(previous, change.to);
+			const base = this.source;
 			this.source =
 				this.source.slice(0, from) +
 				change.text +
 				this.source.slice(to);
+			this.nativeChange = {
+				base,
+				next: this.source,
+				change: { from, to, text: change.text },
+			};
 			const replacesGap =
 				previous.gapLength > 0 &&
 				change.from <= previous.gapAt &&
@@ -325,6 +346,7 @@ export class InputSurface implements Disposable {
 	dispose(): void {
 		this.disposed = true;
 		this.source = "";
+		this.nativeChange = undefined;
 		this.scrollCoordinates = undefined;
 		this.viewportValue = undefined;
 		this.native.removeEventListener(

@@ -13,12 +13,7 @@ import type { LanguageConfiguration } from "../languages/configuration";
 import { mapOffset } from "../model/change-mapping";
 import { rebaseEdit } from "../model/rebase-edit";
 import type { TextModel } from "../model/text-model";
-import {
-	findTextChange,
-	getInputPosition,
-	getLineIndent,
-	normalizeInputText,
-} from "./input";
+import { findTextChange, getLineIndent } from "./input";
 import type { InputSurface } from "./input-surface";
 
 interface Host {
@@ -43,6 +38,7 @@ interface Host {
 	): void;
 	captureState(): HistoryViewState;
 	getAnalysis(): BracketAnalysis;
+	canAnalyze(): boolean;
 	getSelection(): TextSelection;
 	hasSnippet(): boolean;
 	redo(): void;
@@ -63,6 +59,7 @@ export class NativeInputController {
 		selection: TextSelection,
 		event: InputEvent,
 	): EditingPlan | undefined {
+		if (!this.host.canAnalyze()) return;
 		const owned = this.autoClosedPairs.owns(
 			this.model,
 			this.element.value,
@@ -271,7 +268,7 @@ export class NativeInputController {
 			const selection =
 				this.beforeInputState?.selection ?? this.lastSelection;
 			this.beforeInputState = undefined;
-			this.element.value = normalizeInputText(this.model.getValue());
+			this.element.value = this.model.getValue({ eol: "\n" });
 			this.element.setSelectionRange(
 				selection.start,
 				selection.end,
@@ -291,7 +288,7 @@ export class NativeInputController {
 			input?.inputType === "historyUndo" ||
 			input?.inputType === "historyRedo"
 		) {
-			this.element.value = normalizeInputText(this.model.getValue());
+			this.element.value = this.model.getValue({ eol: "\n" });
 			this.element.setSelectionRange(
 				beforeState.selection.start,
 				beforeState.selection.end,
@@ -317,17 +314,18 @@ export class NativeInputController {
 					this.element.setRangeText(indent, caret, caret, "end");
 			}
 		}
-		const original = this.model.getValue();
-		const before = normalizeInputText(original);
-		const change = findTextChange(before, this.element.value);
+		const before = this.model.getValue({ eol: "\n" });
+		const change =
+			this.element.takeNativeChange(before) ??
+			findTextChange(before, this.element.value);
 		if (!change) {
 			this.breakHistoryGroup();
 			this.host.updateCursor();
 			if (lineBreak) this.host.revealCursor();
 			return;
 		}
-		const start = getInputPosition(before, change.from);
-		const end = getInputPosition(before, change.to);
+		const start = this.model.getPositionAtInputOffset(change.from);
+		const end = this.model.getPositionAtInputOffset(change.to);
 		const eol = this.model.getEOL();
 		if (this.selectionsValue.length > 1) {
 			this.selectionsValue = [this.host.captureState().selection];
@@ -473,7 +471,7 @@ export class NativeInputController {
 				(value, changes) => mapOffset(value, changes, "after"),
 				offset,
 			);
-		this.element.value = normalizeInputText(this.model.getValue());
+		this.element.value = this.model.getValue({ eol: "\n" });
 		const before = deferred.before.selection;
 		this.element.setSelectionRange(
 			throughForeign(before.start),

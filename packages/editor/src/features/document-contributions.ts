@@ -96,7 +96,7 @@ export class DocumentContributions implements Disposable {
 		};
 	}
 	async refreshLinks(): Promise<void> {
-		if (!this.model) return;
+		if (!this.model || this.host.performance().mode === "reduced") return;
 		this.linkAbort.abort();
 		this.linkAbort = new AbortController();
 		const context = this.context(this.linkAbort.signal),
@@ -120,7 +120,7 @@ export class DocumentContributions implements Disposable {
 		);
 	}
 	selectionChanged(): void {
-		if (!this.model) return;
+		if (!this.model || this.host.performance().mode === "reduced") return;
 		if (this.ranges.length) {
 			const selections = this.host.selections(),
 				texts = this.ranges.map((tracked) => {
@@ -162,7 +162,7 @@ export class DocumentContributions implements Disposable {
 		}, 140);
 	}
 	private async updateSelection(): Promise<void> {
-		if (!this.model) return;
+		if (!this.model || this.host.performance().mode === "reduced") return;
 		const context = this.context(this.abort.signal),
 			version = this.model.getVersionId();
 		const values = await requestLanguage<readonly DocumentHighlight[]>(
@@ -190,6 +190,7 @@ export class DocumentContributions implements Disposable {
 	async startLinked(): Promise<void> {
 		if (
 			!this.model ||
+			this.host.performance().mode === "reduced" ||
 			!this.host.canEdit() ||
 			this.host.selections().length !== 1
 		)
@@ -303,7 +304,7 @@ export class DocumentContributions implements Disposable {
 		return true;
 	}
 	async expand(shrink: boolean): Promise<void> {
-		if (!this.model) return;
+		if (!this.model || this.host.performance().mode === "reduced") return;
 		const selections = this.host.selections();
 		if (this.selectionKey !== JSON.stringify(selections)) this.history = [];
 		if (shrink) {
@@ -357,6 +358,7 @@ export class DocumentContributions implements Disposable {
 			[...character].length !== 1 ||
 			!this.model ||
 			!this.host.options().onTypeFormatting ||
+			this.host.performance().mode === "reduced" ||
 			!this.host.canEdit() ||
 			this.host.selections().length !== 1
 		)
@@ -389,7 +391,9 @@ export class DocumentContributions implements Disposable {
 	}
 	hasSelectionRanges(): boolean {
 		return (
-			!!this.model && hasLanguageProvider(this.model, "selectionRanges")
+			!!this.model &&
+			this.host.performance().mode === "full" &&
+			hasLanguageProvider(this.model, "selectionRanges")
 		);
 	}
 	private readonly click = (event: MouseEvent) => {

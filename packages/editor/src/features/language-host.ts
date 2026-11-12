@@ -8,6 +8,7 @@ import type {
 	Location,
 	WorkspaceEdit,
 } from "../api/languages";
+import type { EditorPerformanceState } from "../api/performance";
 import type { TextSelection } from "../api/types";
 import type { TextModel } from "../model/text-model";
 import type { DecorationCollection } from "./decorations";
@@ -20,6 +21,7 @@ export interface LanguageFeatureHost {
 	selections(): readonly TextSelection[];
 	select(values: readonly TextSelection[]): void;
 	options(): EditorOptions;
+	performance(): EditorPerformanceState;
 	workspace(): ProviderWorkspace;
 	decorations(): DecorationCollection;
 	execute(id: string): Promise<boolean>;

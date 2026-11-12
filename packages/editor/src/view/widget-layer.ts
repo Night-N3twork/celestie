@@ -119,6 +119,9 @@ export class WidgetLayer implements Disposable {
 	private readonly overlayLayer: HTMLDivElement;
 	private readonly zoneLayer: HTMLDivElement;
 	private sequence = 0;
+	private zoneRevision = 0;
+	private zoneCacheKey = "";
+	private zoneCache: LayoutZone[] = [];
 	private overlayRects: Rect[] = [];
 	constructor(
 		private readonly surface: HTMLElement,
@@ -298,28 +301,41 @@ export class WidgetLayer implements Disposable {
 		this.zoneLayer.append(container);
 		const entry: ZoneEntry = { container, anchor, model, rows };
 		this.zones.set(id, entry);
+		this.zoneRevision++;
 		this.bindFocus(id, container, focus);
 		this.invalidate();
 		return {
 			refresh: () => {
-				if (this.zones.get(id) === entry) this.invalidate();
+				if (this.zones.get(id) === entry) {
+					this.zoneRevision++;
+					this.invalidate();
+				}
 			},
 			dispose: () => {
 				if (this.zones.get(id) !== entry) return;
 				this.zones.delete(id);
+				this.zoneRevision++;
 				this.release(id, container);
 				this.invalidate();
 			},
 		};
 	}
-	layoutZones(model: TextModel, enabled: boolean): LayoutZone[] {
+	layoutZones(
+		model: TextModel,
+		enabled: boolean,
+		lineHeight = 1,
+	): LayoutZone[] {
 		if (!enabled) return [];
+		const key = `${model.id}:${model.getVersionId()}:${this.zoneRevision}:${lineHeight}`;
+		if (key === this.zoneCacheKey) return this.zoneCache;
 		const result: LayoutZone[] = [];
 		for (const [id, zone] of this.zones)
 			if (zone.model === model) {
 				const anchor = zone.anchor();
 				result.push({ id, ...anchor, rows: zone.rows() });
 			}
+		this.zoneCacheKey = key;
+		this.zoneCache = result;
 		return result;
 	}
 	paint(state: WidgetPaintState): void {
@@ -380,9 +396,11 @@ export class WidgetLayer implements Disposable {
 					start !== undefined &&
 					start <= last &&
 					start + Math.ceil(rows) - 1 >= first;
-			zone.container.hidden =
+			const hidden =
 				start === undefined ||
 				(!visible && !zone.container.contains(active));
+			if (zone.container.hidden !== hidden)
+				zone.container.hidden = hidden;
 			if (zone.container.hidden || start === undefined) continue;
 			zone.container.style.top = `${state.padding + state.layout.rowTop(start) - state.originY}px`;
 			zone.container.style.left = `${state.view.left}px`;
@@ -486,6 +504,8 @@ export class WidgetLayer implements Disposable {
 		}
 	}
 	dispose(): void {
+		this.zoneCache = [];
+		this.zoneCacheKey = "";
 		for (const binding of this.focusBindings.values()) binding.dispose();
 		this.focusBindings.clear();
 		for (const entry of this.content.values()) entry.node.remove();

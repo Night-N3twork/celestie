@@ -1,3 +1,4 @@
+import type { ContentChange } from "../api/types";
 export interface SerializedPattern {
 	source: string;
 	flags: string;
@@ -36,6 +37,9 @@ export interface LanguageDocument {
 
 export interface LanguageRequest {
 	requestId?: number;
+	changes?: readonly ContentChange[];
+	baseVersion?: number;
+	version?: number;
 	id: number;
 	method: string;
 	document?: LanguageDocument;

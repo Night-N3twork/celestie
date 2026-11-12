@@ -93,7 +93,7 @@ export class LanguageEdits {
 				edit.version !== model.getVersionId()
 			)
 				throw new Error("The document changed. Run the command again.");
-			const length = model.getValue({ eol: "\n" }).length;
+			const length = model.getValueLength({ eol: "\n" });
 			if (
 				!Number.isInteger(edit.from) ||
 				!Number.isInteger(edit.to) ||

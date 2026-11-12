@@ -1,6 +1,7 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { VisibleDecoration } from "../features/decorations";
 import type { TextModel } from "../model/text-model";
+import { performanceLimits } from "../performance/limits";
 import type { FoldRegion, VisualLayout, VisualRow } from "./visual-layout";
 
 interface paintOverviewState {
@@ -16,61 +17,127 @@ interface paintOverviewState {
 	readonly model: TextModel;
 	readonly lineHeight: number;
 }
-export function paintOverview(state: paintOverviewState): void {
-	const height = state.viewport.clientHeight,
-		fragment = state.root.ownerDocument.createDocumentFragment();
-	state.overview.style.height = `${height}px`;
-	for (const decoration of state.decorations) {
-		if (!decoration.overview) continue;
-		const node = state.root.ownerDocument.createElement("button");
-		node.type = "button";
-		node.className = "editor-overview-marker";
-		node.title = decoration.hover ?? "Decoration";
-		node.style.cssText = `top:${(state.layout.rowTop(state.layout.position(decoration.range.startLine, 1).index) / Math.max(1, state.layout.height)) * height}px;background:${decoration.overview}`;
-		node.onclick = () =>
-			state.callbacks.onSelectLine?.(decoration.range.startLine);
-		fragment.append(node);
-	}
-	state.overview.replaceChildren(fragment);
-	if (!state.options.minimap) return;
-	const scale = devicePixelRatio || 1,
-		width = 80;
-	state.minimap.width = width * scale;
-	state.minimap.height = Math.max(1, height * scale);
-	state.minimap.style.height = `${height}px`;
-	const context = state.minimap.getContext("2d");
-	if (!context) return;
-	context.scale(scale, scale);
-	const style = getComputedStyle(state.root),
-		foreground = style.getPropertyValue("--editor-foreground");
-	context.fillStyle = foreground;
-	context.globalAlpha = 0.45;
-	const count = Math.min(2000, state.layout.rowCount);
-	for (let index = 0; index < count; index++) {
-		const row = state.layout.row(
-				state.layout.rowAtHeight((index / count) * state.layout.height)
-					.index,
-			),
-			text = state.model
-				.getLineContent(row.line)
-				.slice(row.from, Math.min(row.to, row.from + 120));
-		for (const match of text.matchAll(/\S+/g))
-			context.fillRect(
-				3 + match.index * 0.6,
-				(index / count) * height,
-				Math.min(74 - match.index * 0.6, match[0].length * 0.6),
-				Math.max(1, height / count),
+export class OverviewPainter {
+	private key = "";
+	private mapKey = "";
+	private decorations: readonly VisibleDecoration[] = [];
+	private base: HTMLCanvasElement | undefined;
+	paint(state: paintOverviewState): void {
+		const height = state.viewport.clientHeight,
+			scale = devicePixelRatio || 1,
+			width = 80,
+			key = `${state.model.id}:${state.model.getVersionId()}:${state.layout.revision}:${height}:${scale}:${state.options.theme}`;
+		if (key !== this.key || this.decorations !== state.decorations) {
+			this.key = key;
+			this.decorations = state.decorations;
+			state.overview.style.height = `${height}px`;
+			const slots = Math.max(
+					1,
+					Math.min(
+						Math.ceil(height),
+						performanceLimits.overviewMarkers,
+					),
+				),
+				buckets = new Map<
+					number,
+					{ decoration: VisibleDecoration; count: number }
+				>();
+			for (const decoration of state.decorations) {
+				if (!decoration.overview) continue;
+				const top =
+						state.layout.rowTop(
+							state.layout.position(decoration.range.startLine, 1)
+								.index,
+						) / Math.max(1, state.layout.height),
+					slot = Math.min(
+						slots - 1,
+						Math.max(0, Math.floor(top * slots)),
+					);
+				const old = buckets.get(slot);
+				buckets.set(slot, { decoration, count: (old?.count ?? 0) + 1 });
+			}
+			const fragment = state.root.ownerDocument.createDocumentFragment();
+			for (const [slot, { decoration, count }] of buckets) {
+				const node = state.root.ownerDocument.createElement("button");
+				node.type = "button";
+				node.className = "editor-overview-marker";
+				node.title = `${decoration.hover ?? "Decoration"}${count > 1 ? ` (${count} markers in this row)` : ""}`;
+				node.style.cssText = `top:${(slot / slots) * height}px;background:${decoration.overview}`;
+				node.onclick = () =>
+					state.callbacks.onSelectLine?.(decoration.range.startLine);
+				fragment.append(node);
+			}
+			state.overview.replaceChildren(fragment);
+		}
+		if (!state.options.minimap) {
+			if (this.base) {
+				this.base.width = 0;
+				this.base = undefined;
+				this.mapKey = "";
+			}
+			return;
+		}
+		if (!this.base)
+			this.base = state.root.ownerDocument.createElement("canvas");
+		if (this.mapKey !== key) {
+			this.mapKey = key;
+			this.base.width = width * scale;
+			this.base.height = Math.max(1, height * scale);
+			const context = this.base.getContext("2d");
+			if (!context) return;
+			context.scale(scale, scale);
+			context.fillStyle = getComputedStyle(state.root).getPropertyValue(
+				"--editor-foreground",
 			);
+			context.globalAlpha = 0.45;
+			const count = Math.min(2000, state.layout.rowCount);
+			for (let index = 0; index < count; index++) {
+				const row = state.layout.rowAtHeight(
+						(index / count) * state.layout.height,
+					),
+					text = state.model
+						.getLineContent(row.line)
+						.slice(row.from, Math.min(row.to, row.from + 120));
+				for (const match of text.matchAll(/\S+/g))
+					context.fillRect(
+						3 + match.index * 0.6,
+						(index / count) * height,
+						Math.min(74 - match.index * 0.6, match[0].length * 0.6),
+						Math.max(1, height / count),
+					);
+			}
+		}
+		if (state.minimap.width !== width * scale)
+			state.minimap.width = width * scale;
+		if (state.minimap.height !== Math.max(1, height * scale))
+			state.minimap.height = Math.max(1, height * scale);
+		state.minimap.style.height = `${height}px`;
+		const context = state.minimap.getContext("2d");
+		if (!context) return;
+		context.setTransform(1, 0, 0, 1, 0, 0);
+		context.clearRect(0, 0, state.minimap.width, state.minimap.height);
+		context.drawImage(this.base, 0, 0);
+		context.scale(scale, scale);
+		context.globalAlpha = 0.18;
+		context.fillStyle = getComputedStyle(state.root).getPropertyValue(
+			"--editor-accent",
+		);
+		const total = Math.max(1, state.layout.height);
+		context.fillRect(
+			0,
+			(state.scrollTop / total) * height,
+			width,
+			Math.max(6, (height / total) * height),
+		);
+		context.globalAlpha = 1;
 	}
-	context.globalAlpha = 0.18;
-	context.fillStyle = style.getPropertyValue("--editor-accent");
-	const total = state.layout.height;
-	context.fillRect(
-		0,
-		(state.scrollTop / total) * height,
-		width,
-		Math.max(6, (height / total) * height),
-	);
+	dispose(): void {
+		if (this.base) this.base.width = 0;
+		this.base = undefined;
+		this.decorations = [];
+		this.key = "";
+		this.mapKey = "";
+	}
 }
 
 interface paintStickyHeadersState {

@@ -161,6 +161,7 @@ function shapeAdvances(
 	}
 }
 export class VisualLayout {
+	revision = 0;
 	private counts: number[] = [];
 	private starts: number[] = [];
 	private segments = new Map<number, Segment[]>();
@@ -212,6 +213,7 @@ export class VisualLayout {
 		const key = `${model.id}:${model.getVersionId()}:${width}:${options.lineHeight}:${options.tabSize}:${options.wrapIndent}:${options.fontFamily}:${options.fontSize}:${options.fontLigatures}:${accessible}:${JSON.stringify(folds)}:${zones.map((zone) => `${zone.id}@${zone.line}${zone.placement}${zone.rows}`).join(",")}:${JSON.stringify(hints)}`;
 		if (key === this.key) return false;
 		this.key = key;
+		this.revision++;
 		this.lineHeight = options.lineHeight;
 		this.zoneAdjustments = [];
 		this.zones = new Map();

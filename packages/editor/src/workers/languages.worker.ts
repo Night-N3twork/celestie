@@ -20,9 +20,14 @@ const listResults = new Set([
 	"actions",
 ]);
 
+function abortDocument(id: string): void {
+	for (const entry of requests.values())
+		if (entry.documentId === id) entry.controller.abort();
+}
 function run(request: Request, signal: AbortSignal): unknown {
 	if (request.method === "cancel") {
 		requests.get(request.requestId ?? -1)?.controller.abort();
+		scope.postMessage({ id: request.requestId ?? 0, cancelled: true });
 		return null;
 	}
 	if (request.method === "languages") {
@@ -30,6 +35,7 @@ function run(request: Request, signal: AbortSignal): unknown {
 		return null;
 	}
 	if (request.method === "sync" && request.document) {
+		abortDocument(request.document.id);
 		documents.set(request.document.id, request.document);
 		return null;
 	}
@@ -42,8 +48,51 @@ function run(request: Request, signal: AbortSignal): unknown {
 		disposeSyntaxTokens(request.documentId ?? "");
 		return null;
 	}
+	if (request.method === "patch") {
+		const document = documents.get(request.documentId ?? "");
+		if (!document || document.version !== request.baseVersion) {
+			scope.postMessage({
+				id: 0,
+				requiresSync: true,
+				documentId: request.documentId,
+			});
+			return null;
+		}
+		const changes = request.changes ?? [];
+		let end = 0;
+		for (const change of changes) {
+			if (
+				!Number.isInteger(change.offset) ||
+				!Number.isInteger(change.length) ||
+				change.offset < end ||
+				change.length < 0 ||
+				change.offset + change.length > document.text.length ||
+				typeof change.text !== "string"
+			)
+				throw new Error("Invalid document patch.");
+			end = change.offset + change.length;
+		}
+		abortDocument(document.id);
+		let text = document.text;
+		for (let index = changes.length - 1; index >= 0; index--) {
+			const change = changes[index];
+			if (change)
+				text =
+					text.slice(0, change.offset) +
+					change.text +
+					text.slice(change.offset + change.length);
+		}
+		documents.set(document.id, {
+			...document,
+			text,
+			version: request.version ?? document.version,
+		});
+		return null;
+	}
 	const document = documents.get(request.documentId ?? "");
 	if (!document) throw new Error("Document is no longer available.");
+	if (request.version !== undefined && document.version !== request.version)
+		throw new Error("Document version mismatch.");
 	if (request.method === "unicodeHighlights")
 		return unicodeHighlights(document.text);
 	if (request.method === "analyze")
@@ -66,11 +115,29 @@ scope.onmessage = async (event) => {
 			controller,
 		});
 	try {
-		const result = await run(event.data, controller.signal);
+		let rejectAbort: ((error: Error) => void) | undefined;
+		const onAbort = () =>
+			rejectAbort?.(new DOMException("Cancelled", "AbortError"));
+		controller.signal.addEventListener("abort", onAbort, { once: true });
+		let result: unknown;
+		try {
+			result = await Promise.race([
+				Promise.resolve(run(event.data, controller.signal)),
+				new Promise<never>((_, reject) => {
+					rejectAbort = reject;
+				}),
+			]);
+		} finally {
+			controller.signal.removeEventListener("abort", onAbort);
+		}
 		if (!controller.signal.aborted && event.data.id)
 			scope.postMessage({ id: event.data.id, result });
 	} catch (error) {
-		if (controller.signal.aborted) return;
+		if (controller.signal.aborted) {
+			if (event.data.id)
+				scope.postMessage({ id: event.data.id, cancelled: true });
+			return;
+		}
 		scope.postMessage({
 			id: event.data.id,
 			error: error instanceof Error ? error.message : String(error),

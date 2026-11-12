@@ -19,6 +19,7 @@ interface appendRowState {
 	readonly decorations: readonly VisibleDecoration[];
 	readonly options: EditorOptions;
 	readonly accessible: boolean;
+	readonly performanceReduced: boolean;
 	readonly assistanceVersion: number;
 	readonly hints: readonly InlayHint[];
 	readonly activateHint: (hint: InlayHint, part?: number) => void;
@@ -171,6 +172,7 @@ export function appendRow(
 	const hints =
 		text.length <= longLineLimit &&
 		state.options.inlayHints &&
+		!state.performanceReduced &&
 		!state.accessible &&
 		state.assistanceVersion === state.model.getVersionId()
 			? state.hints.filter(
@@ -179,13 +181,14 @@ export function appendRow(
 						hint.offset <= start + row.to,
 				)
 			: [];
-	const injections = state.accessible
-		? []
-		: injectedText(state.model, state.decorations).filter(
-				(item) =>
-					item.offset >= start + row.from &&
-					item.offset <= start + row.to,
-			);
+	const injections =
+		state.accessible || state.performanceReduced
+			? []
+			: injectedText(state.model, state.decorations).filter(
+					(item) =>
+						item.offset >= start + row.from &&
+						item.offset <= start + row.to,
+				);
 	for (const item of injections) boundaries.add(item.offset - start);
 	for (const hint of hints) boundaries.add(hint.offset - start);
 	const appendHints = (column: number) => {

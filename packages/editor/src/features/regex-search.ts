@@ -54,15 +54,46 @@ export class RegexSearch implements Disposable {
 				worker.onmessage = (
 					event: MessageEvent<RegexSearchResponse>,
 				) => {
-					if (this.pending?.id !== id || event.data?.id !== id)
+					if (this.pending?.id !== id) return;
+					if (
+						!event.data ||
+						typeof event.data !== "object" ||
+						!Number.isInteger(event.data.id)
+					) {
+						this.cancel("Invalid search worker response.");
 						return;
+					}
+					if (event.data.id !== id) return;
 					clearTimeout(timer);
 					this.pending = undefined;
 					worker.onmessage = null;
 					if (
 						!Array.isArray(event.data.matches) ||
-						typeof event.data.truncated !== "boolean"
+						typeof event.data.truncated !== "boolean" ||
+						event.data.matches.length > 10000 ||
+						!event.data.matches.every(
+							(match) =>
+								match &&
+								Number.isInteger(match.from) &&
+								Number.isInteger(match.to) &&
+								match.from >= 0 &&
+								match.to >= match.from &&
+								match.to <= text.length &&
+								match.range &&
+								Number.isInteger(match.range.startLine) &&
+								match.range.startLine >= 1 &&
+								Number.isInteger(match.range.endLine) &&
+								match.range.endLine >= match.range.startLine &&
+								Number.isInteger(match.range.startColumn) &&
+								match.range.startColumn >= 1 &&
+								Number.isInteger(match.range.endColumn) &&
+								match.range.endColumn >= 1,
+						)
 					) {
+						worker.terminate();
+						if (this.worker === worker) this.worker = undefined;
+						worker.onerror = null;
+						worker.onmessageerror = null;
 						reject(new Error("Invalid search worker response."));
 						return;
 					}
@@ -71,6 +102,11 @@ export class RegexSearch implements Disposable {
 				worker.onerror = (event) => {
 					event.preventDefault();
 					this.cancel("Regex search worker failed. Try again.");
+					worker.terminate();
+					if (this.worker === worker) this.worker = undefined;
+				};
+				worker.onmessageerror = () => {
+					this.cancel("Invalid search worker message.");
 					worker.terminate();
 					if (this.worker === worker) this.worker = undefined;
 				};
@@ -100,7 +136,12 @@ export class RegexSearch implements Disposable {
 		if (!pending) return;
 		this.pending = undefined;
 		clearTimeout(pending.timer);
-		this.worker?.terminate();
+		if (this.worker) {
+			this.worker.onmessage = null;
+			this.worker.onerror = null;
+			this.worker.onmessageerror = null;
+			this.worker.terminate();
+		}
 		this.worker = undefined;
 		pending.reject(new Error(message));
 	}

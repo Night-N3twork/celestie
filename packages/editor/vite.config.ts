@@ -1,7 +1,9 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { editorBundleBudgets } from "./build/bundle-budgets.ts";
 
 export default defineConfig({
+	plugins: [editorBundleBudgets()],
 	root: fileURLToPath(new URL("./playground", import.meta.url)),
 	build: {
 		rolldownOptions: {
