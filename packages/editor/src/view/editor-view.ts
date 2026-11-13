@@ -61,6 +61,7 @@ import {
 import { mapModelInputOffset } from "../model/change-mapping";
 import { TextModel } from "../model/text-model";
 import { editorPerformance } from "../performance/limits";
+import { describeEditorInput, EditorAnnouncer } from "./accessibility";
 import {
 	findTextChange,
 	getInputLineRange,
@@ -120,6 +121,7 @@ export class EditorView implements Disposable {
 		(options: EditorOptions) => void
 	>();
 	private readonly notice: HTMLDivElement;
+	private readonly announcer: EditorAnnouncer;
 	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	private selectionsValue: TextSelection[] = [caret(0)];
 	private readonly cursors: SelectionController;
@@ -334,12 +336,7 @@ export class EditorView implements Disposable {
 		});
 		this.element.className = "editor-native-input";
 		this.element.setAttribute("aria-label", options.ariaLabel ?? "Editor");
-		this.element.setAttribute(
-			"aria-description",
-			"Tab indents; Shift+Tab outdents. Control or Command Z undoes. Add Shift to redo. Alt Up or Down moves lines; add Shift to duplicate. Control or Command Shift K deletes lines. Control or Command Enter inserts a line below; add Shift for above. Control or Command slash toggles line comments; Shift Alt A toggles block comments. Press Escape, then Tab to move focus.",
-		);
-		this.element.title =
-			"Tab: indent - Shift+Tab: outdent - Escape, then Tab: move focus";
+		describeEditorInput(this.element.native, this.options);
 		this.element.setAttribute("autocapitalize", "off");
 		this.element.setAttribute("autocorrect", "off");
 		this.element.spellcheck = false;
@@ -417,7 +414,8 @@ export class EditorView implements Disposable {
 		this.cursorLabel.className = "editor-cursor-label";
 		this.notice = document.createElement("div");
 		this.notice.className = "editor-notice";
-		this.notice.setAttribute("role", "status");
+		this.notice.setAttribute("aria-hidden", "true");
+		this.announcer = new EditorAnnouncer(this.frame);
 		this.notice.hidden = true;
 		this.frame.append(this.notice);
 		this.frame.appendChild(this.cursorLabel);
@@ -1012,6 +1010,10 @@ export class EditorView implements Disposable {
 			);
 		}
 		this.element.readOnly = this.options.readOnly || !model;
+		describeEditorInput(this.element.native, {
+			...this.options,
+			readOnly: this.element.readOnly,
+		});
 		this.element.setAttribute(
 			"aria-readonly",
 			String(this.element.readOnly),
@@ -1312,6 +1314,10 @@ export class EditorView implements Disposable {
 		);
 		this.breakHistoryGroup();
 		this.element.readOnly = next.readOnly || !this.attachedModel;
+		describeEditorInput(this.element.native, {
+			...next,
+			readOnly: this.element.readOnly,
+		});
 		if (next.readOnly) this.clearSnippet();
 		if (cancelAssistance) this.languageFeatures.cancelRequests();
 		if (next.readOnly) this.languageEdits.cancel();
@@ -1469,6 +1475,7 @@ export class EditorView implements Disposable {
 	private announce(message: string): void {
 		if (this.disposed) return;
 		if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer);
+		this.announcer.announce(message);
 		this.notice.textContent = message;
 		this.notice.hidden = !message;
 		this.noticeTimer = setTimeout(() => {
@@ -1906,6 +1913,7 @@ export class EditorView implements Disposable {
 		this.nativeInput.resetAutoClosing();
 		this.nativeInput.deferredComposition = undefined;
 		this.analysis = undefined;
+		this.announcer.dispose();
 		if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer);
 		this.optionListeners.clear();
 		this.scrollListeners.clear();

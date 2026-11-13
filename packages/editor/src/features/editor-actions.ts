@@ -6,6 +6,7 @@ import type { LineCommand } from "./line-commands";
 export function registerEditorActions(view: EditorView): void {
 	for (const [id, label, shortcut] of [
 		["complete", "Trigger Suggestions", "Ctrl+Space"],
+		["hints", "Show Inlay Hints", ""],
 		["color", "Change Document Color", ""],
 		["hover", "Show Hover", "Ctrl+K Ctrl+I"],
 		["signature", "Signature Help", "Ctrl+Shift+Space"],
@@ -545,6 +546,17 @@ export function registerEditorActions(view: EditorView): void {
 			}),
 		false,
 		"Ctrl+M",
+	);
+	add(
+		"editor.action.toggleScreenReaderMode",
+		"Toggle Screen Reader Mode",
+		() =>
+			view.updateOptions({
+				accessibilitySupport:
+					view.getOptions().accessibilitySupport === "on"
+						? "off"
+						: "on",
+			}),
 	);
 	registerEverydayShortcuts(
 		view.shortcuts,

@@ -97,6 +97,7 @@ export class CommandMenu implements Disposable {
 		this.host.onOpen();
 		this.palette = !position;
 		this.panel.hidden = false;
+		this.input.setAttribute("aria-expanded", "true");
 		this.panel.classList.toggle("is-palette", this.palette);
 		this.panel.setAttribute("role", this.palette ? "dialog" : "menu");
 		this.panel.setAttribute(
@@ -126,6 +127,8 @@ export class CommandMenu implements Disposable {
 
 	close(focus = true): void {
 		this.panel.hidden = true;
+		this.input.removeAttribute("aria-activedescendant");
+		this.input.setAttribute("aria-expanded", "false");
 		if (focus) this.host.focus();
 	}
 
@@ -172,7 +175,13 @@ export class CommandMenu implements Disposable {
 			button.append(label, key);
 			this.list.append(button);
 		});
-		if (this.items.length)
+		if (
+			this.palette &&
+			this.items.some(
+				(item, index) =>
+					index === this.index && this.commands.isEnabled(item.id),
+			)
+		)
 			this.input.setAttribute(
 				"aria-activedescendant",
 				`${this.list.id}-${this.index}`,

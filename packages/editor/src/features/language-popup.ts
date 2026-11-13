@@ -25,6 +25,57 @@ export class LanguagePopup implements Disposable {
 	private anchorModel: TextModel | null = null;
 	private readonly resize: ResizeObserver;
 	private disposed = false;
+	private controller: HTMLInputElement | HTMLTextAreaElement | undefined;
+	private savedAttributes = new Map<string, string | null>();
+	get choiceInput(): HTMLInputElement | HTMLTextAreaElement | undefined {
+		return this.controller;
+	}
+	private bindChoices(
+		input: HTMLInputElement | HTMLTextAreaElement,
+		list: HTMLElement,
+	): void {
+		this.controller = input;
+		for (const name of [
+			"aria-controls",
+			"aria-expanded",
+			"aria-autocomplete",
+			"aria-haspopup",
+			"aria-activedescendant",
+		])
+			this.savedAttributes.set(name, input.getAttribute(name));
+		input.setAttribute("aria-controls", list.id);
+		if (input !== this.host.input)
+			input.setAttribute("aria-expanded", "true");
+		input.setAttribute("aria-autocomplete", "list");
+		input.setAttribute("aria-haspopup", "listbox");
+	}
+	updateSelection(): void {
+		const options =
+			this.widget.querySelectorAll<HTMLElement>('[role="option"]');
+		options.forEach((option, index) => {
+			option.setAttribute("aria-selected", String(index === this.index));
+		});
+		const active = options[this.index];
+		if (active)
+			this.controller?.setAttribute("aria-activedescendant", active.id);
+		else this.controller?.removeAttribute("aria-activedescendant");
+		active?.scrollIntoView({ block: "nearest" });
+		this.updatePreview();
+	}
+	private describe(visible: boolean): void {
+		const input = this.host.input;
+		const ids = (input.getAttribute("aria-describedby") ?? "")
+			.split(/\s+/)
+			.filter((id) => id && id !== this.widget.id);
+		if (visible) ids.push(this.widget.id);
+		if (ids.length) input.setAttribute("aria-describedby", ids.join(" "));
+		else input.removeAttribute("aria-describedby");
+	}
+	private readonly focusOut = (event: FocusEvent): void => {
+		const next = event.relatedTarget as Node | null;
+		if (next && next !== this.host.input && !this.widget.contains(next))
+			this.close();
+	};
 	constructor(private readonly host: Host) {
 		const doc = host.frame.ownerDocument;
 		this.widget = doc.createElement("div");
@@ -39,8 +90,11 @@ export class LanguagePopup implements Disposable {
 		this.ghost.setAttribute("aria-hidden", "true");
 		this.resize = new ResizeObserver(() => this.reposition());
 		this.resize.observe(host.frame);
+		this.resize.observe(this.widget);
 		host.viewport.addEventListener("scroll", this.reposition, true);
 		this.widget.addEventListener("pointerdown", this.keepFocus);
+		this.widget.addEventListener("focusout", this.focusOut);
+		host.input.addEventListener("focusout", this.focusOut);
 		host.frame.append(this.widget, this.ghost);
 	}
 	showText(title: string, text: string, offset: number): void {
@@ -51,6 +105,8 @@ export class LanguagePopup implements Disposable {
 		pre.textContent = text;
 		this.widget.replaceChildren(heading, pre);
 		this.widget.setAttribute("role", "tooltip");
+		this.widget.setAttribute("aria-label", title);
+		this.describe(true);
 		this.widget.hidden = false;
 		this.position(this.widget, offset);
 	}
@@ -64,7 +120,11 @@ export class LanguagePopup implements Disposable {
 		this.mode = mode;
 		const heading = this.widget.ownerDocument.createElement("strong");
 		heading.textContent = title;
-		this.widget.replaceChildren(heading, content);
+		const close = this.widget.ownerDocument.createElement("button");
+		close.type = "button";
+		close.textContent = "Close";
+		close.onclick = () => this.close();
+		this.widget.replaceChildren(heading, content, close);
 		this.widget.setAttribute("role", "dialog");
 		this.widget.setAttribute("aria-label", title);
 		this.widget.hidden = false;
@@ -84,10 +144,23 @@ export class LanguagePopup implements Disposable {
 		}
 		this.choices = choices;
 		this.index = 0;
-		this.widget.setAttribute("role", "listbox");
+		this.widget.setAttribute("role", "group");
+		this.widget.setAttribute(
+			"aria-label",
+			mode === "complete" ? "Suggestions" : "Language results",
+		);
 		this.widget.hidden = false;
 		const list = this.widget.ownerDocument.createElement("div");
 		list.className = "editor-language-list";
+		list.id = `${this.widget.id}-list`;
+		list.setAttribute("role", "listbox");
+		list.setAttribute(
+			"aria-label",
+			mode === "complete" ? "Suggestions" : "Language results",
+		);
+		const status = this.widget.ownerDocument.createElement("div");
+		status.className = "editor-language-result-status";
+		status.setAttribute("role", "status");
 		const preview = this.widget.ownerDocument.createElement("pre");
 		preview.className = "editor-location-preview";
 		const render = () => {
@@ -97,6 +170,7 @@ export class LanguagePopup implements Disposable {
 				if (!choice) continue;
 				const option = list.ownerDocument.createElement("button");
 				option.type = "button";
+				option.tabIndex = -1;
 				option.id = `${this.widget.id}-${index}`;
 				option.setAttribute("role", "option");
 				option.setAttribute(
@@ -112,16 +186,19 @@ export class LanguagePopup implements Disposable {
 				fragment.append(option);
 			}
 			list.replaceChildren(fragment);
-			this.host.input.setAttribute(
-				"aria-activedescendant",
-				`${this.widget.id}-${this.index}`,
-			);
+			status.textContent = this.choices.length
+				? `${this.choices.length} results`
+				: "No results";
+			this.updateSelection();
 		};
 		this.widget.replaceChildren();
 		if (filter) {
 			const input = this.widget.ownerDocument.createElement("input");
 			input.setAttribute("aria-label", "Filter results");
 			input.placeholder = "Filter results";
+			input.setAttribute("role", "combobox");
+			input.autocomplete = "off";
+			this.bindChoices(input, list);
 			input.oninput = () => {
 				this.choices = choices.filter((choice) =>
 					choice.label
@@ -133,15 +210,23 @@ export class LanguagePopup implements Disposable {
 				this.updatePreview();
 			};
 			this.widget.append(input);
-			queueMicrotask(() => input.focus());
+			queueMicrotask(() => {
+				if (
+					!this.disposed &&
+					!this.widget.hidden &&
+					this.controller === input &&
+					input.isConnected
+				)
+					input.focus();
+			});
 		}
-		if (!filter) this.host.input.focus({ preventScroll: true });
+		if (!filter) {
+			this.bindChoices(this.host.input, list);
+			this.host.input.focus({ preventScroll: true });
+		}
 		this.widget.append(list);
-		this.widget.append(preview);
+		this.widget.append(preview, status);
 		render();
-		this.host.input.setAttribute("aria-controls", this.widget.id);
-		this.host.input.setAttribute("aria-expanded", "true");
-		this.host.input.setAttribute("aria-autocomplete", "list");
 		this.position(this.widget, offset);
 		this.updatePreview();
 	}
@@ -161,8 +246,8 @@ export class LanguagePopup implements Disposable {
 			return;
 		}
 		this.close();
-		choice?.run();
 		this.host.input.focus({ preventScroll: true });
+		choice?.run();
 	}
 	position(element: HTMLElement, offset: number): void {
 		this.anchorOffset = offset;
@@ -174,11 +259,19 @@ export class LanguagePopup implements Disposable {
 			element.style.top = `${point.y - bounds.top}px`;
 			return;
 		}
-		element.style.left = `${Math.max(8, Math.min(point.x - bounds.left, bounds.width - 360))}px`;
-		element.style.top = `${Math.max(8, Math.min(point.y + point.height - bounds.top, bounds.height - 180))}px`;
+		const frame = this.host.frame;
+		const scaleX = bounds.width / Math.max(1, frame.offsetWidth) || 1;
+		const scaleY = bounds.height / Math.max(1, frame.offsetHeight) || 1;
+		const width = element.offsetWidth,
+			height = element.offsetHeight;
+		const below = (point.y + point.height - bounds.top) / scaleY;
+		const above = (point.y - bounds.top) / scaleY - height;
+		const top = below + height <= frame.clientHeight - 8 ? below : above;
+		element.style.left = `${Math.max(8, Math.min((point.x - bounds.left) / scaleX, frame.clientWidth - width - 8))}px`;
+		element.style.top = `${Math.max(8, Math.min(top, frame.clientHeight - height - 8))}px`;
 	}
 	private readonly reposition = (): void => {
-		if (this.disposed) return;
+		if (this.disposed || (this.widget.hidden && this.ghost.hidden)) return;
 		if (this.host.model() !== this.anchorModel) {
 			this.close();
 			return;
@@ -193,18 +286,30 @@ export class LanguagePopup implements Disposable {
 		if (!this.ghost.hidden) this.position(this.ghost, this.anchorOffset);
 	};
 	private readonly keepFocus = (event: PointerEvent): void => {
-		if (event.target instanceof Element && event.target.closest("button"))
+		if (
+			event.target instanceof Element &&
+			event.target.closest('[role="option"]')
+		)
 			event.preventDefault();
 	};
 	close(clearInline = true): void {
+		const focused = this.widget.contains(
+			this.widget.ownerDocument.activeElement,
+		);
 		this.widget.hidden = true;
+		this.describe(false);
+		for (const [name, value] of this.savedAttributes) {
+			if (value === null) this.controller?.removeAttribute(name);
+			else this.controller?.setAttribute(name, value);
+		}
+		this.savedAttributes.clear();
+		this.controller = undefined;
 		this.widget.replaceChildren();
 		this.mode = "";
 		this.choices = [];
 		this.host.onClose(clearInline);
-		this.host.input.removeAttribute("aria-activedescendant");
-		this.host.input.setAttribute("aria-expanded", "false");
-		this.host.input.removeAttribute("aria-controls");
+		if (focused && !this.disposed)
+			this.host.input.focus({ preventScroll: true });
 		if (clearInline) {
 			this.ghost.hidden = true;
 		}
@@ -215,6 +320,8 @@ export class LanguagePopup implements Disposable {
 		this.resize.disconnect();
 		this.host.viewport.removeEventListener("scroll", this.reposition, true);
 		this.widget.removeEventListener("pointerdown", this.keepFocus);
+		this.widget.removeEventListener("focusout", this.focusOut);
+		this.host.input.removeEventListener("focusout", this.focusOut);
 		this.widget.remove();
 		this.ghost.remove();
 	}

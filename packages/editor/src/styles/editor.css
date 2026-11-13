@@ -641,10 +641,11 @@
 .editor-language-widget {
 	position: absolute;
 	z-index: 40;
-	min-width: 260px;
+	box-sizing: border-box;
+	min-width: 0;
 	width: 360px;
 	max-width: calc(100% - 16px);
-	max-height: 300px;
+	max-height: min(300px, calc(100% - 16px));
 	overflow: auto;
 	border: 1px solid var(--editor-border, #666);
 	border-radius: 4px;
@@ -1022,4 +1023,43 @@
 	border: 1px solid currentColor;
 	text-align: left;
 	cursor: pointer;
+}
+
+.editor-announcement {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+.editor-view-frame
+	:is(button, input, select, a, canvas, [tabindex]):focus-visible {
+	outline: 2px solid var(--editor-accent, Highlight);
+	outline-offset: 2px;
+}
+.editor-language-result-status {
+	padding: 4px 8px;
+}
+@media (forced-colors: active) {
+	.editor-view-frame
+		:is(button, input, select, a, canvas, [tabindex]):focus-visible {
+		outline-color: Highlight;
+	}
+	.editor-language-list [aria-selected="true"],
+	.editor-command-menu .is-active {
+		outline: 2px solid Highlight;
+		outline-offset: -2px;
+	}
+}
+
+.editor-language-list button[aria-selected="true"] small {
+	opacity: 1;
+}
+.editor-command-menu button.is-active kbd,
+.editor-command-menu button:hover:not(:disabled) kbd {
+	color: inherit;
 }

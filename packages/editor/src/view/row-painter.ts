@@ -222,6 +222,7 @@ export function appendRow(
 					child.title = part.tooltip ?? "";
 					if (child instanceof HTMLButtonElement) {
 						child.type = "button";
+						child.tabIndex = -1;
 						child.onclick = () => state.activateHint(hint, index);
 					}
 					node.append(child);

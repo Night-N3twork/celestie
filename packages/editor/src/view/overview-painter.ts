@@ -60,6 +60,37 @@ export class OverviewPainter {
 			for (const [slot, { decoration, count }] of buckets) {
 				const node = state.root.ownerDocument.createElement("button");
 				node.type = "button";
+				node.tabIndex = fragment.childNodes.length ? -1 : 0;
+				node.onkeydown = (event) => {
+					if (
+						event.ctrlKey ||
+						event.altKey ||
+						event.metaKey ||
+						event.isComposing
+					)
+						return;
+					const keys = ["ArrowUp", "ArrowDown", "Home", "End"];
+					if (!keys.includes(event.key)) return;
+					event.preventDefault();
+					const buttons = [
+						...state.overview.querySelectorAll<HTMLButtonElement>(
+							"button",
+						),
+					];
+					const index = buttons.indexOf(node);
+					const next =
+						event.key === "Home"
+							? 0
+							: event.key === "End"
+								? buttons.length - 1
+								: (index +
+										(event.key === "ArrowDown" ? 1 : -1) +
+										buttons.length) %
+									buttons.length;
+					for (const [index, button] of buttons.entries())
+						button.tabIndex = index === next ? 0 : -1;
+					buttons[next]?.focus({ preventScroll: true });
+				};
 				node.className = "editor-overview-marker";
 				node.title = `${decoration.hover ?? "Decoration"}${count > 1 ? ` (${count} markers in this row)` : ""}`;
 				node.style.cssText = `top:${(slot / slots) * height}px;background:${decoration.overview}`;

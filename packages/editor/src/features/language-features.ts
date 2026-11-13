@@ -85,6 +85,8 @@ export class LanguageFeatures implements Disposable {
 	>();
 
 	private disposed = false;
+	private analyzedModel: TextModel | undefined;
+	private analyzedVersion = 0;
 	private lastAnalysis: Analysis = {
 		tokens: [],
 		diagnostics: [],
@@ -131,6 +133,7 @@ export class LanguageFeatures implements Disposable {
 		this.widget.addEventListener("keydown", this.keydown);
 	}
 	setModel(model: TextModel | null): void {
+		this.analyzedModel = undefined;
 		this.cancelRequests();
 		this.resolved = new WeakMap();
 		this.contributions.setModel(model);
@@ -319,6 +322,8 @@ export class LanguageFeatures implements Disposable {
 					this.semantic,
 				);
 			if (!this.valid(context, version)) return;
+			this.analyzedModel = context.model;
+			this.analyzedVersion = version;
 			this.lastAnalysis = result;
 			this.host.analysis(result);
 			void this.contributions.refreshLinks().catch(() => {});
@@ -359,6 +364,10 @@ export class LanguageFeatures implements Disposable {
 		}
 		if (command === "color") {
 			this.colorPicker();
+			return;
+		}
+		if (command === "hints") {
+			this.hints();
 			return;
 		}
 		if (command === "symbols") {
@@ -766,6 +775,41 @@ export class LanguageFeatures implements Disposable {
 		);
 	}
 
+	private hints(): void {
+		const model = this.host.model();
+		if (
+			!model ||
+			model !== this.analyzedModel ||
+			model.getVersionId() !== this.analyzedVersion
+		) {
+			this.host.announce("Hints are updating. Try again shortly.");
+			return;
+		}
+		this.popup.showChoices(
+			"hints",
+			(this.lastAnalysis.hints ?? []).flatMap((hint) =>
+				hint.label?.length
+					? hint.label.map((part, index) => ({
+							label: part.text,
+							detail: part.tooltip ?? hint.tooltip ?? "",
+							run: () => {
+								void this.activateHint(hint, index);
+							},
+						}))
+					: [
+							{
+								label: hint.text,
+								detail: hint.tooltip ?? "",
+								run: () => {
+									void this.activateHint(hint);
+								},
+							},
+						],
+			),
+			this.host.selection().end,
+			true,
+		);
+	}
 	private symbols(): void {
 		const flatten = (
 			symbols: readonly SymbolInformation[],
@@ -832,6 +876,14 @@ export class LanguageFeatures implements Disposable {
 	private readonly keydown = (event: KeyboardEvent): void => {
 		if (event.isComposing) return;
 		if (
+			event.key === "Tab" &&
+			event.target === this.host.input &&
+			(this.host.options().tabFocusMode || this.host.options().readOnly)
+		) {
+			this.close();
+			return;
+		}
+		if (
 			this.popup.mode === "signature" &&
 			event.altKey &&
 			["ArrowUp", "ArrowDown"].includes(event.key)
@@ -891,7 +943,27 @@ export class LanguageFeatures implements Disposable {
 			return;
 		}
 		if (
+			event.target !== this.host.input &&
+			event.target !== this.popup.choiceInput
+		)
+			return;
+		if (
 			!this.widget.hidden &&
+			this.popup.choiceInput &&
+			event.key === "Tab" &&
+			(this.popup.mode !== "complete" || event.shiftKey)
+		) {
+			this.close();
+			event.stopImmediatePropagation();
+			return;
+		}
+		if (
+			!this.widget.hidden &&
+			event.target === this.popup.choiceInput &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.altKey &&
+			!event.shiftKey &&
 			this.choices.length &&
 			["ArrowDown", "ArrowUp", "Enter", "Tab"].includes(event.key)
 		) {
@@ -905,26 +977,12 @@ export class LanguageFeatures implements Disposable {
 						(event.key === "ArrowDown" ? 1 : -1) +
 						this.choices.length) %
 					this.choices.length;
-				const options =
-					this.widget.querySelectorAll<HTMLElement>(
-						'[role="option"]',
-					);
-				options.forEach((option, index) => {
-					option.setAttribute(
-						"aria-selected",
-						String(index === this.index),
-					);
-				});
-				options[this.index]?.scrollIntoView({ block: "nearest" });
+				this.popup.updateSelection();
 				this.resolveActive();
-				this.popup.updatePreview();
-				this.host.input.setAttribute(
-					"aria-activedescendant",
-					`${this.widget.id}-${this.index}`,
-				);
 			}
 			return;
 		}
+		if (event.target !== this.host.input) return;
 		if (
 			this.inlineSuggestions.active &&
 			(event.key === "Tab" ||
@@ -1075,6 +1133,7 @@ export class LanguageFeatures implements Disposable {
 
 	dispose(): void {
 		this.disposed = true;
+		this.analyzedModel = undefined;
 		this.cancelRequests();
 		this.abort.abort();
 		this.analysisAbort.abort();

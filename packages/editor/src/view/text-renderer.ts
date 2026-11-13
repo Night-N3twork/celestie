@@ -186,6 +186,7 @@ export class TextRenderer implements Disposable {
 		this.scroller = doc.createElement("div");
 		this.scroller.className = "editor-text-viewport";
 		this.scroller.tabIndex = -1;
+		this.scroller.id = `editor-viewport-${crypto.randomUUID()}`;
 		this.surface = doc.createElement("div");
 		this.surface.className = "editor-text-surface";
 		this.rows = doc.createElement("div");
@@ -210,8 +211,15 @@ export class TextRenderer implements Disposable {
 		this.minimap.className = "editor-minimap";
 		this.minimap.tabIndex = 0;
 		this.minimap.setAttribute("aria-label", "Document overview");
+		this.minimap.setAttribute("role", "scrollbar");
+		this.minimap.setAttribute("aria-orientation", "vertical");
+		this.minimap.setAttribute("aria-controls", this.scroller.id);
+		this.minimap.setAttribute("aria-valuemin", "0");
 		this.overview = doc.createElement("div");
 		this.overview.className = "editor-overview";
+		this.overview.setAttribute("role", "toolbar");
+		this.overview.setAttribute("aria-label", "Document markers");
+		this.overview.setAttribute("aria-orientation", "vertical");
 		this.root.append(this.scroller, this.minimap, this.overview);
 		this.root.dir = "ltr";
 		container.append(this.root);
@@ -1002,6 +1010,19 @@ export class TextRenderer implements Disposable {
 		});
 	}
 	private paintOverview(): void {
+		const maximum = Math.max(
+			0,
+			this.layout.height + this.padding * 2 - this.viewport.clientHeight,
+		);
+		this.minimap.setAttribute("aria-valuemax", String(Math.ceil(maximum)));
+		this.minimap.setAttribute(
+			"aria-valuenow",
+			String(Math.round(Math.max(0, Math.min(maximum, this.scrollTop)))),
+		);
+		this.minimap.setAttribute(
+			"aria-valuetext",
+			`Line ${this.visible.find((row) => row.kind !== "zone")?.line ?? 1} of ${this.model.getLineCount()}`,
+		);
 		this.overviewPainter.paint({
 			scrollTop: this.scrollTop,
 			viewport: this.viewport,
@@ -1042,7 +1063,16 @@ export class TextRenderer implements Disposable {
 		this.render();
 	};
 	private readonly mapKey = (event: KeyboardEvent): void => {
-		if (
+		if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing)
+			return;
+		if (["Home", "End"].includes(event.key)) {
+			event.preventDefault();
+			this.scrollTop =
+				event.key === "Home"
+					? 0
+					: this.layout.height + this.padding * 2;
+			this.render();
+		} else if (
 			["ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(event.key)
 		) {
 			event.preventDefault();

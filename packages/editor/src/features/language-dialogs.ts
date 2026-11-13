@@ -75,7 +75,10 @@ export async function showRename(
 			preparation?.to ?? word.to,
 		);
 	label.append(field);
-	form.append(label);
+	const submit = form.ownerDocument.createElement("button");
+	submit.type = "submit";
+	submit.textContent = "Rename";
+	form.append(label, submit);
 	form.onsubmit = (event) => {
 		event.preventDefault();
 		if (
