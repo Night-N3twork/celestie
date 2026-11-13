@@ -6,6 +6,7 @@ import {
 import type { LanguageWorkerStatistics } from "../api/performance";
 import { languageTokenizer } from "../api/tokenization";
 import type { Disposable, ModelChangeEvent } from "../api/types";
+import { createEditorWorker } from "../api/workers";
 import type { TextModel } from "../model/text-model";
 import { performanceLimits } from "../performance/limits";
 import type {
@@ -143,9 +144,13 @@ class LanguageEngine {
 	}
 	private ensure(): Worker {
 		if (this.worker) return this.worker;
-		const worker = new Worker(
-			new URL("../workers/languages.worker.ts", import.meta.url),
-			{ type: "module" },
+		const worker = createEditorWorker(
+			"language",
+			() =>
+				new Worker(
+					new URL("../workers/languages.worker.ts", import.meta.url),
+					{ type: "module" },
+				),
 		);
 		this.worker = worker;
 		this.starts++;

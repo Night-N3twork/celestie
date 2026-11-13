@@ -87,6 +87,8 @@ export type {
 	TextSelection,
 } from "./api/types";
 export { Uri, type UriComponents } from "./api/uri";
+export type { EditorWorkerFactory, EditorWorkerKind } from "./api/workers";
+export { setEditorWorkerFactory } from "./api/workers";
 export { computeDiff } from "./diff/client";
 export type { TransferContext, TransferProvider } from "./features/clipboard";
 export type { EditorCommand } from "./features/commands";

@@ -1,4 +1,5 @@
 import type { Disposable } from "../api/types";
+import { createEditorWorker } from "../api/workers";
 import type { SearchMatch, SearchOptions } from "./search";
 
 export interface RegexSearchRequest {
@@ -37,9 +38,16 @@ export class RegexSearch implements Disposable {
 			try {
 				const worker =
 					this.worker ??
-					new Worker(
-						new URL("../workers/search.worker.ts", import.meta.url),
-						{ type: "module" },
+					createEditorWorker(
+						"search",
+						() =>
+							new Worker(
+								new URL(
+									"../workers/search.worker.ts",
+									import.meta.url,
+								),
+								{ type: "module" },
+							),
 					);
 				this.worker = worker;
 				const id = ++this.sequence;

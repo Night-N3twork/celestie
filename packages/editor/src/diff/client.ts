@@ -1,5 +1,6 @@
 import type { DiffComputationOptions, DiffResult } from "../api/diff";
 import type { Disposable } from "../api/types";
+import { createEditorWorker } from "../api/workers";
 import { computationOptions } from "./options";
 import { validDiffResult } from "./response";
 export class DiffWorkerClient implements Disposable {
@@ -20,9 +21,16 @@ export class DiffWorkerClient implements Disposable {
 		return new Promise((resolve, reject) => {
 			let worker: Worker;
 			try {
-				worker = this.worker ??= new Worker(
-					new URL("../workers/diff.worker.ts", import.meta.url),
-					{ type: "module" },
+				worker = this.worker ??= createEditorWorker(
+					"diff",
+					() =>
+						new Worker(
+							new URL(
+								"../workers/diff.worker.ts",
+								import.meta.url,
+							),
+							{ type: "module" },
+						),
 				);
 			} catch (error) {
 				reject(error);

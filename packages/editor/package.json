@@ -1,10 +1,30 @@
 {
 	"name": "@celestie/editor",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"types": "./src/index.ts",
+	"types": "./dist/index.d.ts",
 	"exports": {
-		".": "./src/index.ts"
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./editor.css": "./dist/editor.css",
+		"./package.json": "./package.json",
+		"./workers/language": "./dist/workers/languages.worker.js",
+		"./workers/search": "./dist/workers/search.worker.js",
+		"./workers/diff": "./dist/workers/diff.worker.js"
+	},
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"files": [
+		"dist",
+		"README.md",
+		"THIRD_PARTY_NOTICES.md"
+	],
+	"sideEffects": true,
+	"scripts": {
+		"build": "node build/library.mjs",
+		"prepack": "node build/library.mjs"
 	}
 }

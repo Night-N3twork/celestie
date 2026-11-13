@@ -6,6 +6,7 @@ export function editorBundleBudgets(): Plugin {
 	return {
 		name: "editor-bundle-budgets",
 		apply: "build",
+		enforce: "post",
 		generateBundle(_options, bundle) {
 			const files = Object.values(bundle)
 				.filter((file) => /\.(?:[cm]?js|css)$/.test(file.fileName))
@@ -40,7 +41,7 @@ export function editorBundleBudgets(): Plugin {
 				{
 					name: "Language worker",
 					entries: files.filter((file) =>
-						/languages\.worker-/.test(file.file),
+						/languages\.worker(?:-|\.)/.test(file.file),
 					),
 					raw: 160 * kib,
 					gzip: 55 * kib,
