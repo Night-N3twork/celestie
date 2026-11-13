@@ -11,6 +11,10 @@ import type {
 } from "../api/languages";
 import { languageProviders } from "../api/languages";
 import { languageEngine } from "../languages/client";
+import {
+	awaitProviderResult,
+	validateProviderResult,
+} from "./provider-results";
 import type { SemanticContributions } from "./semantic-contributions";
 
 const origins = new WeakMap<object, LanguageProvider>();
@@ -52,6 +56,141 @@ export function hasLanguageProvider(
 		(provider) => typeof provider[method] === "function",
 	);
 }
+async function invokeProvider(
+	method: string,
+	provider: LanguageProvider,
+	context: LanguageContext,
+	extra: Record<string, unknown>,
+): Promise<unknown> {
+	let value: unknown;
+	switch (method) {
+		case "declarations":
+			value = await provider.declarations?.(context);
+			break;
+		case "typeDefinitions":
+			value = await provider.typeDefinitions?.(context);
+			break;
+		case "implementations":
+			value = await provider.implementations?.(context);
+			break;
+		case "documentHighlights":
+			value = await provider.documentHighlights?.(context);
+			break;
+		case "linkedEditing":
+			value = await provider.linkedEditing?.(context);
+			break;
+		case "links":
+			value = await provider.links?.(context);
+			break;
+		case "resolveLink":
+			value = await provider.resolveLink?.(
+				context,
+				extra.item as DocumentLink,
+			);
+			break;
+		case "selectionRanges":
+			value = await provider.selectionRanges?.(
+				context,
+				extra.offsets as readonly number[],
+			);
+			break;
+		case "onTypeFormat":
+			value = await provider.onTypeFormat?.(
+				context,
+				String(extra.character ?? ""),
+			);
+			break;
+		case "inlineCompletions":
+			value = await provider.inlineCompletions?.(context);
+			break;
+		case "prepareRename":
+			value = await provider.prepareRename?.(context);
+			break;
+		case "resolveAction":
+			value = await provider.resolveAction?.(
+				context,
+				extra.item as CodeAction,
+			);
+			break;
+		case "semanticTokens":
+			value = await provider.semanticTokens?.(context);
+			break;
+		case "diagnostics":
+			value = await provider.diagnostics?.(context);
+			break;
+		case "foldingRanges":
+			value = await provider.foldingRanges?.(context);
+			break;
+		case "documentSymbols":
+			value = await provider.documentSymbols?.(context);
+			break;
+		case "documentColors":
+			value = await provider.documentColors?.(context);
+			break;
+		case "inlayHints":
+			value = await provider.inlayHints?.(context);
+			break;
+		case "resolveInlayHint":
+			value = await provider.resolveInlayHint?.(
+				context,
+				extra.item as InlayHint,
+			);
+			break;
+		case "codeLenses":
+			value = await provider.codeLenses?.(context);
+			break;
+		case "resolveCodeLens":
+			value = await provider.resolveCodeLens?.(
+				context,
+				extra.item as CodeLens,
+			);
+			break;
+		case "colorPresentations":
+			value = await provider.colorPresentations?.(
+				context,
+				extra.item as DocumentColor,
+				String(extra.color),
+			);
+			break;
+		case "analyze":
+			value = await provider.analyze?.(context);
+			break;
+		case "resolveCompletion":
+			value = await provider.resolveCompletion?.(
+				context,
+				extra.item as Completion,
+			);
+			break;
+		case "complete":
+			value = await provider.complete?.(context);
+			break;
+		case "hover":
+			value = await provider.hover?.(context);
+			break;
+		case "signature":
+			value = await provider.signature?.(context);
+			break;
+		case "definitions":
+			value = await provider.definitions?.(context);
+			break;
+		case "references":
+			value = await provider.references?.(context);
+			break;
+		case "rename":
+			value = await provider.rename?.(context, String(extra.name ?? ""));
+			break;
+		case "format":
+			value = await provider.format?.(
+				context,
+				extra.range as { from: number; to: number } | undefined,
+			);
+			break;
+		case "actions":
+			value = await provider.actions?.(context);
+			break;
+	}
+	return value;
+}
 export async function requestLanguage<T>(
 	method: string,
 	context: LanguageContext,
@@ -66,137 +205,13 @@ export async function requestLanguage<T>(
 		? [origin]
 		: languageProviders(context.model.getLanguageId())) {
 		context.signal.throwIfAborted();
-		let value: unknown;
-		switch (method) {
-			case "declarations":
-				value = await provider.declarations?.(context);
-				break;
-			case "typeDefinitions":
-				value = await provider.typeDefinitions?.(context);
-				break;
-			case "implementations":
-				value = await provider.implementations?.(context);
-				break;
-			case "documentHighlights":
-				value = await provider.documentHighlights?.(context);
-				break;
-			case "linkedEditing":
-				value = await provider.linkedEditing?.(context);
-				break;
-			case "links":
-				value = await provider.links?.(context);
-				break;
-			case "resolveLink":
-				value = await provider.resolveLink?.(
-					context,
-					extra.item as DocumentLink,
-				);
-				break;
-			case "selectionRanges":
-				value = await provider.selectionRanges?.(
-					context,
-					extra.offsets as readonly number[],
-				);
-				break;
-			case "onTypeFormat":
-				value = await provider.onTypeFormat?.(
-					context,
-					String(extra.character ?? ""),
-				);
-				break;
-			case "inlineCompletions":
-				value = await provider.inlineCompletions?.(context);
-				break;
-			case "prepareRename":
-				value = await provider.prepareRename?.(context);
-				break;
-			case "resolveAction":
-				value = await provider.resolveAction?.(
-					context,
-					extra.item as CodeAction,
-				);
-				break;
-			case "semanticTokens":
-				value = await provider.semanticTokens?.(context);
-				break;
-			case "diagnostics":
-				value = await provider.diagnostics?.(context);
-				break;
-			case "foldingRanges":
-				value = await provider.foldingRanges?.(context);
-				break;
-			case "documentSymbols":
-				value = await provider.documentSymbols?.(context);
-				break;
-			case "documentColors":
-				value = await provider.documentColors?.(context);
-				break;
-			case "inlayHints":
-				value = await provider.inlayHints?.(context);
-				break;
-			case "resolveInlayHint":
-				value = await provider.resolveInlayHint?.(
-					context,
-					extra.item as InlayHint,
-				);
-				break;
-			case "codeLenses":
-				value = await provider.codeLenses?.(context);
-				break;
-			case "resolveCodeLens":
-				value = await provider.resolveCodeLens?.(
-					context,
-					extra.item as CodeLens,
-				);
-				break;
-			case "colorPresentations":
-				value = await provider.colorPresentations?.(
-					context,
-					extra.item as DocumentColor,
-					String(extra.color),
-				);
-				break;
-			case "analyze":
-				value = await provider.analyze?.(context);
-				break;
-			case "resolveCompletion":
-				value = await provider.resolveCompletion?.(
-					context,
-					extra.item as Completion,
-				);
-				break;
-			case "complete":
-				value = await provider.complete?.(context);
-				break;
-			case "hover":
-				value = await provider.hover?.(context);
-				break;
-			case "signature":
-				value = await provider.signature?.(context);
-				break;
-			case "definitions":
-				value = await provider.definitions?.(context);
-				break;
-			case "references":
-				value = await provider.references?.(context);
-				break;
-			case "rename":
-				value = await provider.rename?.(
-					context,
-					String(extra.name ?? ""),
-				);
-				break;
-			case "format":
-				value = await provider.format?.(
-					context,
-					extra.range as { from: number; to: number } | undefined,
-				);
-				break;
-			case "actions":
-				value = await provider.actions?.(context);
-				break;
-		}
+		const value = await awaitProviderResult(
+			invokeProvider(method, provider, context, extra),
+			context.signal,
+			method,
+		);
 		if (value !== undefined) {
+			validateProviderResult(method, value, context.text.length);
 			remember(value, provider);
 			return value as T;
 		}
@@ -280,6 +295,10 @@ export async function requestAnalysis(
 						context.model,
 						context.offset,
 						context.signal,
+						{
+							unicodeHighlightOptions:
+								extra.unicodeHighlightOptions,
+						},
 					)
 				: Promise.resolve([]),
 		),

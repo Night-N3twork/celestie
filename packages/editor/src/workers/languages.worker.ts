@@ -94,7 +94,10 @@ function run(request: Request, signal: AbortSignal): unknown {
 	if (request.version !== undefined && document.version !== request.version)
 		throw new Error("Document version mismatch.");
 	if (request.method === "unicodeHighlights")
-		return unicodeHighlights(document.text);
+		return unicodeHighlights(
+			document.text,
+			request.unicodeHighlightOptions,
+		);
 	if (request.method === "analyze")
 		return analyzeWithTokenizer(document, signal);
 	if (document.text.length > 600000)

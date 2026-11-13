@@ -33,6 +33,7 @@ export function registerEditorActions(view: EditorView): void {
 		["format", "Format Document", "Shift+Alt+F"],
 		["formatSelection", "Format Selection", "Ctrl+K Ctrl+F"],
 		["actions", "Quick Fix / Code Actions", "Ctrl+."],
+		["previewActions", "Preview Code Actions", ""],
 		["snippet", "Insert Snippet", ""],
 		["inline", "Suggest Inline Completion", "Alt+\\"],
 		["problems", "Show Problems", "Ctrl+Shift+M"],

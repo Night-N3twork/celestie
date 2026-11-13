@@ -33,6 +33,7 @@ export interface LanguageFeatureHost {
 		inlayHints: boolean;
 		codeLens: boolean;
 		unicodeHighlight: boolean;
+		unicodeHighlightOptions: import("../api/unicode-highlights").UnicodeHighlightOptions;
 	};
 	point(offset: number): { x: number; y: number; height: number };
 	offsetAtPoint(x: number, y: number): number;

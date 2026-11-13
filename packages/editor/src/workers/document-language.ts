@@ -29,7 +29,11 @@ export function analyzeDocument(
 	return {
 		tokens,
 		diagnostics: [],
-		folds: indentationFolds(document.text, foldingRules(document)),
+		folds: indentationFolds(
+			document.text,
+			foldingRules(document),
+			document.profile.tabSize ?? 4,
+		),
 		symbols: [],
 	};
 }

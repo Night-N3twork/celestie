@@ -62,6 +62,7 @@ export class LanguageFeatures implements Disposable {
 	private readonly status: HTMLButtonElement;
 	private subscriptions: Disposable[] = [];
 	private abort = new AbortController();
+	private pendingCommands = 0;
 	private analysisAbort = new AbortController();
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private hoverTimer: ReturnType<typeof setTimeout> | undefined;
@@ -246,6 +247,8 @@ export class LanguageFeatures implements Disposable {
 	}
 
 	private changed(): void {
+		this.abort.abort();
+		this.abort = new AbortController();
 		this.close();
 		this.contributions.changed();
 		this.analysisAbort.abort();
@@ -401,6 +404,7 @@ export class LanguageFeatures implements Disposable {
 		this.inlineSuggestions.clear();
 		this.abort.abort();
 		this.abort = new AbortController();
+		this.pendingCommands++;
 		try {
 			const context = {
 					...this.context(this.abort.signal),
@@ -534,7 +538,14 @@ export class LanguageFeatures implements Disposable {
 				if (this.valid(context, version)) await this.host.apply(result);
 				return;
 			}
-			if (["actions", "refactor", "organizeImports"].includes(command))
+			if (
+				[
+					"actions",
+					"refactor",
+					"organizeImports",
+					"previewActions",
+				].includes(command)
+			)
 				await this.navigation.actions(
 					context,
 					command === "refactor"
@@ -542,12 +553,15 @@ export class LanguageFeatures implements Disposable {
 						: command === "organizeImports"
 							? "source.organizeImports"
 							: undefined,
+					command === "previewActions",
 				);
 		} catch (error) {
 			if (!(error instanceof DOMException && error.name === "AbortError"))
 				this.host.announce(
 					error instanceof Error ? error.message : String(error),
 				);
+		} finally {
+			this.pendingCommands--;
 		}
 	}
 	private async resolveItem(
@@ -933,7 +947,9 @@ export class LanguageFeatures implements Disposable {
 		if (event.key === "Escape") this.host.cancelSnippet();
 		if (
 			event.key === "Escape" &&
-			(!this.widget.hidden || this.inlineSuggestions.active)
+			(!this.widget.hidden ||
+				this.inlineSuggestions.active ||
+				this.pendingCommands > 0)
 		) {
 			event.preventDefault();
 			event.stopImmediatePropagation();

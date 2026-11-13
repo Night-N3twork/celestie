@@ -2,6 +2,7 @@ import {
 	formatSnippetCaptures,
 	type SnippetFormatIndent,
 } from "./snippet-format";
+import { snippetExpressionEnd, snippetTransformParts } from "./snippet-syntax";
 export interface SnippetTabstop {
 	readonly index: number;
 	readonly from: number;
@@ -24,23 +25,8 @@ export function transformSnippet(
 	body: string,
 	indent?: SnippetFormatIndent,
 ): string {
-	const sections: string[] = [];
-	let part = "",
-		depth = 0;
-	for (let index = 1; index < body.length; index++) {
-		const char = body[index] ?? "";
-		if (char === "\\") {
-			part += char + (body[++index] ?? "");
-			continue;
-		}
-		if (char === "{") depth++;
-		if (char === "}") depth--;
-		if (char === "/" && depth === 0) {
-			sections.push(part);
-			part = "";
-		} else part += char;
-	}
-	sections.push(part);
+	const sections = snippetTransformParts(body);
+	if (!sections) return value;
 	try {
 		return value.replace(
 			new RegExp(sections[0] ?? "", sections[2] ?? ""),
@@ -67,7 +53,8 @@ interface SnippetNode {
 	readonly body: string;
 	readonly children: readonly (string | SnippetNode)[];
 }
-function snippetNodes(input: string): (string | SnippetNode)[] {
+function snippetNodes(input: string, depth = 0): (string | SnippetNode)[] {
+	if (depth > 64) return [input];
 	const nodes: (string | SnippetNode)[] = [];
 	let literal = "";
 	const flush = () => {
@@ -87,27 +74,18 @@ function snippetNodes(input: string): (string | SnippetNode)[] {
 		const opening = i++;
 		let expression = "";
 		if (input[i] === "{") {
-			let depth = 1,
-				j = ++i;
-			for (; j < input.length && depth; j++) {
-				if (input[j] === "\\") {
-					j++;
-					continue;
-				}
-				if (input[j] === "{") depth++;
-				if (input[j] === "}") depth--;
-			}
-			if (depth) {
+			const end = snippetExpressionEnd(input, opening);
+			if (end < 0) {
 				literal += input.slice(opening);
 				break;
 			}
-			expression = input.slice(i, j - 1);
-			i = j;
+			expression = input.slice(i + 1, end);
+			i = end + 1;
 		} else {
 			expression = input.slice(i).match(/^(\d+|[A-Za-z_]\w*)/)?.[0] ?? "";
 			i += expression.length;
 		}
-		const match = expression.match(/^(\w+)([\s\S]*)$/),
+		const match = expression.match(/^((?:\d+|[A-Za-z_]\w*))([\s\S]*)$/),
 			key = match?.[1] ?? "",
 			body = match?.[2] ?? "",
 			kind = body[0] ?? "";
@@ -120,7 +98,8 @@ function snippetNodes(input: string): (string | SnippetNode)[] {
 			key,
 			body,
 			kind,
-			children: kind === ":" ? snippetNodes(body.slice(1)) : [],
+			children:
+				kind === ":" ? snippetNodes(body.slice(1), depth + 1) : [],
 		});
 	}
 	flush();

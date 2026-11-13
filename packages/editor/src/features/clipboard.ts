@@ -9,6 +9,7 @@ import {
 	selectionsMime,
 	wholeLineMime,
 } from "./clipboard-payload";
+import { replaceColumns } from "./column-selection";
 import type { EditingPlan } from "./editing-plan";
 import type { IndentationOptions } from "./indentation-options";
 import { planLineCommand } from "./line-commands";
@@ -117,7 +118,8 @@ export class EditorClipboard implements Disposable {
 			text === this.host.getText() &&
 			now.start === selection.start &&
 			now.end === selection.end &&
-			now.direction === selection.direction
+			now.direction === selection.direction &&
+			JSON.stringify(now.columns) === JSON.stringify(selection.columns)
 		);
 	}
 
@@ -133,6 +135,7 @@ export class EditorClipboard implements Disposable {
 				JSON.stringify(this.host.getSelections())
 			)
 				return false;
+
 			const plan = payload.wholeLine
 				? combineLinePlans(
 						payload.document,
@@ -149,11 +152,27 @@ export class EditorClipboard implements Disposable {
 					)
 				: combinePlans(
 						payload.selections.map((selection) =>
-							replacementPlan(selection, ""),
+							replacementPlan(
+								selection,
+								"",
+								payload.document,
+								this.host.getTabSize(),
+							),
 						),
 						payload.document.length,
 					);
 			this.host.apply(plan);
+			return true;
+		}
+		if (payload.selection.columns) {
+			this.host.apply(
+				replaceColumns(
+					payload.document,
+					payload.selection,
+					"",
+					this.host.getTabSize(),
+				),
+			);
 			return true;
 		}
 		const plan = payload.wholeLine
@@ -363,7 +382,11 @@ export class EditorClipboard implements Disposable {
 			return;
 		const selections = this.host.getSelections();
 		const indentation =
-			wholeLine || parts ? undefined : this.host.pasteIndentation();
+			wholeLine ||
+			parts ||
+			selections.some((selection) => selection.columns)
+				? undefined
+				: this.host.pasteIndentation();
 		const prepare = (selection: TextSelection, text: string) =>
 			indentation
 				? indentPastedText(original, selection, text, indentation)
@@ -394,9 +417,25 @@ export class EditorClipboard implements Disposable {
 						selection: makeCaret(selection.start + insert.length),
 					};
 				}
-				return replacementPlan(selection, prepare(selection, insert));
+				return replacementPlan(
+					selection,
+					prepare(selection, insert),
+					original,
+					this.host.getTabSize(),
+				);
 			});
 			this.host.apply(combinePlans(plans, original.length));
+			return;
+		}
+		if (selection.columns) {
+			this.host.apply(
+				replaceColumns(
+					original,
+					selection,
+					value,
+					this.host.getTabSize(),
+				),
+			);
 			return;
 		}
 		const from =

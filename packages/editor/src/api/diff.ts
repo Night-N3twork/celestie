@@ -17,7 +17,17 @@ export interface DiffChange {
 	readonly modified: DiffRange;
 	readonly characters: readonly DiffCharacterChange[];
 }
+export interface DiffMove {
+	readonly id: number;
+	readonly originalStart: number;
+	readonly originalEnd: number;
+	readonly modifiedStart: number;
+	readonly modifiedEnd: number;
+	readonly original: DiffRange;
+	readonly modified: DiffRange;
+}
 export interface DiffComputationOptions {
+	readonly detectMoves?: boolean;
 	readonly ignoreTrimWhitespace?: boolean;
 	readonly maxComputationTimeMs?: number;
 	readonly maxFileSize?: number;
@@ -25,6 +35,7 @@ export interface DiffComputationOptions {
 	readonly maxWork?: number;
 }
 export interface DiffResult {
+	readonly moves?: readonly DiffMove[];
 	readonly changes: readonly DiffChange[];
 	readonly identical: boolean;
 	readonly quitEarly: boolean;

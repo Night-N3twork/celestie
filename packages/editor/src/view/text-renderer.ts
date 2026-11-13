@@ -2,6 +2,7 @@ import { defaultViewOptions, type EditorOptions } from "../api/editor-options";
 import type { InlayHint, Token } from "../api/languages";
 import type { Disposable, Position, TextSelection } from "../api/types";
 import type { SyntaxPalette } from "../features/clipboard-payload";
+import { columnBoundary } from "../features/column-selection";
 import type { VisibleDecoration } from "../features/decorations";
 import type { SearchMatch } from "../features/search";
 import {
@@ -590,6 +591,60 @@ export class TextRenderer implements Disposable {
 				(relative ? this.viewport.scrollTop : 0),
 		};
 	}
+	horizontalMove(
+		offset: number,
+		direction: -1 | 1,
+		affinity?: "before" | "after",
+	) {
+		return this.geometry.horizontalMove(offset, direction, affinity);
+	}
+	private columnExtent(): number {
+		return this.selections.reduce(
+			(width, selection) =>
+				selection.columns
+					? Math.max(
+							width,
+							this.selectionPoint({
+								...selection,
+								direction: "forward",
+							}).x + this.padding,
+						)
+					: width,
+			0,
+		);
+	}
+	selectionPoint(selection: TextSelection): {
+		x: number;
+		y: number;
+		height: number;
+	} {
+		const position = this.model.getPositionAtInputOffset(
+			selection.direction === "backward"
+				? selection.start
+				: selection.end,
+		);
+		if (!selection.columns) return this.point(position, selection.affinity);
+		const boundary = columnBoundary(
+			this.model.getLineContent(position.line),
+			selection.direction === "backward"
+				? selection.columns.start
+				: selection.columns.end,
+			this.options.tabSize,
+		);
+		const point = this.point(
+			{ line: position.line, column: boundary.offset + 1 },
+			selection.affinity,
+		);
+		return { ...point, x: point.x + boundary.inset * this.columnWidth };
+	}
+	hitAffinity(offset: number, clientX: number): "before" | "after" {
+		return this.geometry.hitAffinity(
+			offset,
+			clientX -
+				this.viewport.getBoundingClientRect().left +
+				this.scrollLeft,
+		);
+	}
 	offsetAtLineX(line: number, x: number): number {
 		return this.geometry.offsetAtRowX(
 			this.layout.position(line, 1).index,
@@ -770,7 +825,7 @@ export class TextRenderer implements Disposable {
 				.map((row) => this.padding * 2 + this.geometry.rowWidth(row)),
 		);
 		this.horizontalScroll.configure(
-			Math.max(source.clientWidth, this.widest),
+			Math.max(source.clientWidth, this.widest, this.columnExtent()),
 			source.clientWidth,
 		);
 		this.surface.style.width = `${this.accessible ? source.clientWidth : this.horizontalScroll.extent}px`;
@@ -853,7 +908,7 @@ export class TextRenderer implements Disposable {
 		);
 		if (!this.accessible) {
 			this.horizontalScroll.configure(
-				Math.max(source.clientWidth, this.widest),
+				Math.max(source.clientWidth, this.widest, this.columnExtent()),
 				source.clientWidth,
 			);
 			this.surface.style.width = `${this.horizontalScroll.extent}px`;
@@ -1140,13 +1195,18 @@ export class TextRenderer implements Disposable {
 					value.start === old.start &&
 					value.end === old.end &&
 					value.direction === old.direction &&
-					value.affinity === old.affinity
+					value.affinity === old.affinity &&
+					value.columns?.start === old.columns?.start &&
+					value.columns?.end === old.columns?.end
 				);
 			})
 		)
 			return;
+		const projected =
+			this.selections.some((value) => value.columns) ||
+			values.some((value) => value.columns);
 		this.selections = values.map((value) => ({ ...value }));
-		if (this.options.renderWhitespace === "selection") {
+		if (projected || this.options.renderWhitespace === "selection") {
 			this.revision++;
 			this.render();
 			return;

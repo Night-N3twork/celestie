@@ -1,5 +1,6 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { TextSelection } from "../api/types";
+import { columnRange, displayColumn } from "../features/column-selection";
 import type { TextModel } from "../model/text-model";
 import type { InputSurface } from "./input-surface";
 import { SelectionController } from "./selection-controller";
@@ -33,6 +34,10 @@ export function createSelectionController(
 			host.setSelections(values, reveal),
 		offsetAtPoint: (x, y) => host.offsetAtPoint(x, y),
 		columnWidth: () => renderer.columnWidth,
+		headPoint: (selection) => renderer.selectionPoint(selection).x,
+		horizontalMove: (offset, direction, affinity) =>
+			renderer.horizontalMove(offset, direction, affinity),
+		hitAffinity: (offset, x) => renderer.hitAffinity(offset, x),
 		viewport: () => input.viewport,
 		scrollLeft: () => input.scrollLeft,
 		scrollBy: (x, y) => {
@@ -70,6 +75,62 @@ export function createSelectionController(
 		},
 		visualRowCount: () => renderer.layout.rowCount,
 		isTextRow: (row) => renderer.layout.row(row).kind !== "zone",
+		columnSelection: (row, a, b) => {
+			const visual = renderer.layout.row(row),
+				model = host.model(),
+				text = model.getLineContent(visual.line),
+				start = model.getInputOffsetAt({
+					line: visual.line,
+					column: 1,
+				});
+			const at = (x: number) => {
+				const offset = renderer.verticalOffset(
+					model.getInputOffsetAt({
+						line: visual.line,
+						column: visual.from + 1,
+					}),
+					0,
+					x,
+				);
+				const position = model.getPositionAtInputOffset(offset),
+					relative = position.column - 1;
+				const point = renderer.point(
+					position,
+					renderer.visualAffinity(row, offset),
+				);
+				const column = displayColumn(
+					text.slice(0, relative),
+					host.options().tabSize,
+				);
+				const adjustable =
+					text[relative] === "\t" ||
+					text[relative - 1] === "\t" ||
+					(relative === text.length && visual.to === text.length);
+				return Math.max(
+					displayColumn(
+						text.slice(0, visual.from),
+						host.options().tabSize,
+					),
+					column +
+						(adjustable
+							? Math.round((x - point.x) / renderer.columnWidth)
+							: 0),
+				);
+			};
+			return {
+				...columnRange(
+					text,
+					start,
+					at(a),
+					at(b),
+					host.options().tabSize,
+				),
+				affinity: renderer.visualAffinity(
+					row,
+					renderer.verticalOffset(start + visual.from, 0, b),
+				),
+			};
+		},
 		offsetAtVisualRowX: (row, x) =>
 			renderer.verticalOffset(
 				host.model().getInputOffsetAt({

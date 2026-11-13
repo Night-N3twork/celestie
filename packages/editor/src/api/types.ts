@@ -15,7 +15,16 @@ export interface TextEdit {
 	readonly text: string;
 }
 
+export interface SelectionColumns {
+	readonly start: number;
+	readonly end: number;
+}
+export interface ColumnPosition {
+	readonly line: number;
+	readonly column: number;
+}
 export interface TextSelection {
+	readonly columns?: SelectionColumns;
 	readonly start: number;
 	readonly end: number;
 	readonly direction: "forward" | "backward" | "none";

@@ -1,6 +1,7 @@
 import type { DiffComputationOptions, DiffEditorOptions } from "../api/diff";
 export const computationDefaults = {
 	ignoreTrimWhitespace: false,
+	detectMoves: true,
 	maxComputationTimeMs: 1000,
 	maxFileSize: 4_000_000,
 	maxLines: 200_000,
@@ -8,6 +9,7 @@ export const computationDefaults = {
 } as const;
 export function computationOptions(options: DiffComputationOptions) {
 	const result = {
+		detectMoves: options.detectMoves ?? computationDefaults.detectMoves,
 		ignoreTrimWhitespace:
 			options.ignoreTrimWhitespace ??
 			computationDefaults.ignoreTrimWhitespace,
@@ -18,7 +20,10 @@ export function computationOptions(options: DiffComputationOptions) {
 		maxLines: options.maxLines ?? computationDefaults.maxLines,
 		maxWork: options.maxWork ?? computationDefaults.maxWork,
 	};
-	if (typeof result.ignoreTrimWhitespace !== "boolean")
+	if (
+		typeof result.ignoreTrimWhitespace !== "boolean" ||
+		typeof result.detectMoves !== "boolean"
+	)
 		throw new TypeError("ignoreTrimWhitespace must be a boolean.");
 	for (const [name, value, min, max] of [
 		["maxComputationTimeMs", result.maxComputationTimeMs, 10, 30_000],

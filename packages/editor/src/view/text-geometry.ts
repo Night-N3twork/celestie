@@ -2,6 +2,7 @@ import type { Position } from "../api/types";
 import type { TextModel } from "../model/text-model";
 import { LineMetrics, longLineLimit } from "./line-metrics";
 import { calibrationSamples, hasRightToLeft } from "./text-shaping";
+import { type VisualCaret, visualCarets } from "./visual-carets";
 import type { VisualLayout, VisualRow } from "./visual-layout";
 
 interface RowGeometry {
@@ -17,6 +18,10 @@ export interface TextPoint {
 }
 export class TextGeometry {
 	private rows = new Map<number, RowGeometry>();
+	private readonly carets = new WeakMap<
+		RowGeometry,
+		readonly VisualCaret[]
+	>();
 	private readonly canvas: CanvasRenderingContext2D | null;
 	private readonly segments = new Intl.Segmenter(undefined, {
 		granularity: "grapheme",
@@ -183,6 +188,95 @@ export class TextGeometry {
 		range.setEnd(...this.endpoint(row, to, from === to && after));
 		return range;
 	}
+	private visualStops(row: RowGeometry): readonly VisualCaret[] | undefined {
+		const text = this.model().getLineContent(row.row.line);
+		if (
+			!hasRightToLeft(text.slice(row.row.from, row.row.to)) &&
+			!row.element.querySelector(
+				".editor-inlay-hint,.editor-injected-text",
+			)
+		)
+			return;
+		let found = this.carets.get(row);
+		if (!found) {
+			const left = row.element.getBoundingClientRect().left;
+			found = visualCarets(
+				text,
+				row.row.from,
+				row.row.to,
+				(from, to) => {
+					const bounds = this.range(
+						row,
+						from,
+						to,
+					).getBoundingClientRect();
+					return {
+						left: bounds.left - left,
+						right: bounds.right - left,
+					};
+				},
+				(offset, after) =>
+					(this.range(row, offset, offset, after).getClientRects()[0]
+						?.left ?? left) - left,
+			);
+			this.carets.set(row, found);
+		}
+		return found;
+	}
+	horizontalMove(
+		offset: number,
+		direction: -1 | 1,
+		affinity: "before" | "after" = "after",
+	): { offset: number; affinity: "before" | "after" } | undefined {
+		const position = this.model().getPositionAtInputOffset(offset),
+			segment = this.layout.position(
+				position.line,
+				position.column,
+				affinity,
+			),
+			row = this.rows.get(segment.index);
+		if (!row) return;
+		const stops = this.visualStops(row);
+		if (!stops) return;
+		const current =
+			stops.find(
+				(stop) =>
+					stop.offset === position.column - 1 &&
+					stop.affinity === affinity,
+			) ?? stops.find((stop) => stop.offset === position.column - 1);
+		if (!current) return;
+		const next =
+			direction > 0
+				? stops.find((stop) => stop.x > current.x + 0.1)
+				: [...stops].reverse().find((stop) => stop.x < current.x - 0.1);
+		if (!next) return;
+		return {
+			offset: this.model().getInputOffsetAt({
+				line: position.line,
+				column: next.offset + 1,
+			}),
+			affinity: next.affinity,
+		};
+	}
+	hitAffinity(offset: number, x: number): "before" | "after" {
+		const position = this.model().getPositionAtInputOffset(offset),
+			row = this.rows.get(
+				this.layout.position(position.line, position.column).index,
+			);
+		if (!row) return "after";
+		const origin =
+			row.element.getBoundingClientRect().left -
+			this.surface.getBoundingClientRect().left +
+			this.originX;
+		return (
+			this.visualStops(row)
+				?.filter((stop) => stop.offset === position.column - 1)
+				.sort(
+					(a, b) =>
+						Math.abs(a.x + origin - x) - Math.abs(b.x + origin - x),
+				)[0]?.affinity ?? "after"
+		);
+	}
 	point(
 		position: Position,
 		affinity: "before" | "after" = "after",
@@ -211,7 +305,14 @@ export class TextGeometry {
 				).getClientRects()[0],
 				bounds = row.element.getBoundingClientRect();
 			return {
-				x: (rect?.left ?? bounds.left) - origin.left,
+				x:
+					bounds.left -
+					origin.left +
+					(this.visualStops(row)?.find(
+						(stop) =>
+							stop.offset === column &&
+							stop.affinity === affinity,
+					)?.x ?? (rect?.left ?? bounds.left) - bounds.left),
 				y: bounds.top - origin.top,
 				height: this.lineHeight,
 			};
@@ -320,6 +421,25 @@ export class TextGeometry {
 				this.measure(text.slice(segment.from, offset))
 			);
 		};
+		const stops = row && this.visualStops(row);
+		if (stops?.length) {
+			const originX =
+				(row?.element.getBoundingClientRect().left ?? 0) -
+				origin.left +
+				this.originX;
+			let nearest = stops[0];
+			for (const stop of stops)
+				if (
+					Math.abs(stop.x + originX - x) <
+					Math.abs((nearest?.x ?? 0) + originX - x)
+				)
+					nearest = stop;
+			if (nearest)
+				return model.getInputOffsetAt({
+					line: segment.line,
+					column: nearest.offset + 1,
+				});
+		}
 		let offset = segment.from;
 		if (hasRightToLeft(text.slice(measured.from, measured.to))) {
 			let distance = Infinity;

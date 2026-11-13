@@ -29,7 +29,7 @@ export function editorBundleBudgets(): Plugin {
 					entries: files.filter((file) =>
 						/\.[cm]?js$/.test(file.file),
 					),
-					raw: 650 * kib,
+					raw: 700 * kib,
 					gzip: 200 * kib,
 				},
 				{

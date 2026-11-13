@@ -7,6 +7,7 @@ import type {
 import { AutoClosedPairs } from "../features/auto-closed-pairs";
 import type { BracketAnalysis } from "../features/bracket-analysis";
 import { planBracketInput } from "../features/bracket-editing";
+import { columnRange, replaceColumns } from "../features/column-selection";
 import type { EditingPlan } from "../features/editing-plan";
 import { graphemeOffset, replacementPlan } from "../features/selections";
 import type { LanguageConfiguration } from "../languages/configuration";
@@ -87,6 +88,7 @@ export class NativeInputController {
 				before: HistoryViewState;
 				batches: (readonly ContentChange[])[];
 				flush: boolean;
+				snippet?: boolean;
 		  }
 		| undefined;
 	beforeInputState: HistoryViewState | undefined;
@@ -171,6 +173,7 @@ export class NativeInputController {
 		)
 			return;
 		if (
+			this.selectionsValue.some((selection) => selection.columns) ||
 			this.selectionsValue.length > 1 ||
 			this.host.hasSnippet() ||
 			this.options.accessibilitySupport !== "on"
@@ -188,8 +191,46 @@ export class NativeInputController {
 				let index = 0;
 				this.host.applyPerSelection(
 					(selection) => {
-						const slot = index++,
-							bracket = this.bracketPlan(selection, event);
+						const slot = index++;
+						if (selection.columns) {
+							let target = selection;
+							if (
+								event.inputType.startsWith("delete") &&
+								selection.columns.start ===
+									selection.columns.end
+							) {
+								const from =
+									selection.columns.start -
+									(event.inputType.endsWith("Backward")
+										? 1
+										: 0);
+								const position =
+									this.model.getPositionAtInputOffset(
+										selection.start,
+									);
+								target = columnRange(
+									this.model.getLineContent(position.line),
+									this.model.getInputOffsetAt({
+										line: position.line,
+										column: 1,
+									}),
+									Math.max(0, from),
+									Math.max(0, from + 1),
+									this.options.tabSize,
+								);
+							}
+							return replaceColumns(
+								this.element.value,
+								target,
+								event.inputType.startsWith("delete")
+									? ""
+									: event.inputType === "insertText"
+										? (event.data ?? "")
+										: "\n",
+								this.options.tabSize,
+							);
+						}
+						const bracket = this.bracketPlan(selection, event);
 						if (bracket?.autoClosedPair)
 							pairs.set(slot, bracket.autoClosedPair);
 						if (bracket) return bracket;
@@ -261,7 +302,6 @@ export class NativeInputController {
 	};
 	readonly handleInput = (event?: Event): void => {
 		if (this.deferredComposition) {
-			this.host.updateCursor();
 			return;
 		}
 		if (this.options.readOnly || !this.attachedModel) {
@@ -421,13 +461,27 @@ export class NativeInputController {
 	readonly handleCompositionStart = (): void => {
 		this.resetAutoClosing();
 		this.host.resetCursors();
-		if (this.selectionsValue.length > 1) {
+		const before = this.host.captureState(),
+			snippet = this.host.hasSnippet(),
+			multiple = this.selectionsValue.length > 1;
+		if (multiple && !snippet) {
 			this.host.writeSelections([this.host.getSelection()]);
 			this.host.announce("Composition uses the primary cursor.");
 		}
 		this.breakHistoryGroup();
 		this.compositionGroup = this.host.nextGroup();
-		this.beforeInputState = this.host.captureState();
+		this.beforeInputState = before;
+		if (before.selection.columns || snippet || multiple) {
+			this.deferredComposition = {
+				model: this.model,
+				base: this.element.value,
+				before: this.beforeInputState,
+				snippet,
+				batches: [],
+				flush: false,
+			};
+			this.frame.classList.add("editor-composition-pending");
+		}
 		this.composing = true;
 	};
 	readonly handleCompositionEnd = (event: CompositionEvent): void => {
@@ -448,7 +502,7 @@ export class NativeInputController {
 					insertSpaces: options.insertSpaces,
 				});
 			});
-		this.host.updateCursor();
+		if (!deferred) this.host.updateCursor();
 	};
 	private finishDeferredComposition(
 		deferred: NonNullable<NativeInputController["deferredComposition"]>,
@@ -460,8 +514,18 @@ export class NativeInputController {
 		)
 			return;
 		const local = this.element.value;
-		const selection = this.host.captureState().selection;
-		const change = findTextChange(deferred.base, local);
+		let selection = this.host.captureState().selection;
+		let change = findTextChange(deferred.base, local);
+		if (change && deferred.before.selection.columns) {
+			const plan = replaceColumns(
+				deferred.base,
+				deferred.before.selection,
+				change.text,
+				this.options.tabSize,
+			);
+			change = plan.edits[0] ?? null;
+			selection = plan.selection;
+		}
 		this.deferredComposition = undefined;
 		this.compositionGroup = undefined;
 		this.beforeInputState = undefined;
@@ -478,6 +542,39 @@ export class NativeInputController {
 			throughForeign(before.end),
 			before.direction,
 		);
+		if (
+			deferred.before.selection.columns ||
+			(deferred.before.selections &&
+				deferred.before.selections.length > 1) ||
+			deferred.snippet
+		)
+			this.host.writeSelections(
+				(deferred.before.selections ?? [before]).map((value) => ({
+					start: throughForeign(value.start),
+					end: throughForeign(value.end),
+					direction: value.direction,
+					...(!deferred.batches.length && value.columns
+						? { columns: value.columns }
+						: {}),
+				})),
+			);
+		if (
+			deferred.snippet &&
+			this.host.hasSnippet() &&
+			!deferred.batches.length
+		) {
+			if (change)
+				this.host.applyPerSelection((value) =>
+					replacementPlan(
+						value,
+						this.compositionEndText,
+						this.element.value,
+						this.options.tabSize,
+					),
+				);
+			this.host.render();
+			return;
+		}
 		if (change) {
 			const rebased = rebaseEdit(change, deferred.batches);
 			const caret = (offset: number): number => {

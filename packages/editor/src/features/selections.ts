@@ -1,6 +1,7 @@
 import type { TextSelection } from "../api/types";
 import { mapOffset } from "../model/change-mapping";
 import { getInputLineRange, getInputPosition } from "../view/input";
+import { maximumColumn, replaceColumns } from "./column-selection";
 import { type EditingPlan, type InputEdit, mapSelection } from "./editing-plan";
 
 export const selectionLimit = 1000;
@@ -47,8 +48,20 @@ export function normalizeSelections(
 				!["none", "forward", "backward"].includes(value.direction)
 			)
 				throw new TypeError("Invalid selection.");
+			if (
+				value.columns &&
+				(!Number.isInteger(value.columns.start) ||
+					!Number.isInteger(value.columns.end) ||
+					value.columns.start < 0 ||
+					value.columns.end < value.columns.start ||
+					value.columns.end > maximumColumn)
+			)
+				throw new TypeError("Invalid selection columns.");
 			return {
 				...value,
+				...(value.columns
+					? { columns: Object.freeze({ ...value.columns }) }
+					: {}),
 				start: Math.min(length, value.start),
 				end: Math.min(length, value.end),
 				index,
@@ -77,7 +90,8 @@ export function normalizeSelections(
 	}
 	return result
 		.sort((a, b) => a.index - b.index)
-		.map(({ start, end, direction, affinity }) => ({
+		.map(({ start, end, direction, affinity, columns }) => ({
+			...(columns ? { columns } : {}),
 			start,
 			end,
 			direction,
@@ -181,6 +195,7 @@ export function combinePlans(
 				})),
 		);
 		return {
+			...plan.selection,
 			start: mapOffset(plan.selection.start, others, "after"),
 			end: mapOffset(
 				plan.selection.end,
@@ -209,7 +224,11 @@ export function combinePlans(
 export function replacementPlan(
 	selection: TextSelection,
 	text: string,
+	source?: string,
+	tabSize = 4,
 ): EditingPlan {
+	if (selection.columns && source !== undefined)
+		return replaceColumns(source, selection, text, tabSize);
 	return {
 		edits: [{ from: selection.start, to: selection.end, text }],
 		selection: caret(selection.start + text.length),

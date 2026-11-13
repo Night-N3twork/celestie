@@ -38,6 +38,10 @@ interface FoldPair {
 }
 export class DiffPresentation implements Disposable {
 	private assets: Disposable[] = [];
+	private aligned = true;
+	get alignmentAvailable(): boolean {
+		return this.aligned;
+	}
 	private folds: FoldPair[] = [];
 	private originalMarks: DecorationCollection | undefined;
 	private modifiedMarks: DecorationCollection | undefined;
@@ -89,6 +93,38 @@ export class DiffPresentation implements Disposable {
 				for (const change of snapshot.changes) {
 					this.highlight(models.original, change, true, a);
 					this.highlight(models.modified, change, false, b);
+				}
+				for (const move of snapshot.moves ?? []) {
+					for (const [model, from, to, values, other] of [
+						[
+							models.original,
+							move.originalStart,
+							move.originalEnd,
+							a,
+							move.modifiedStart,
+						],
+						[
+							models.modified,
+							move.modifiedStart,
+							move.modifiedEnd,
+							b,
+							move.originalStart,
+						],
+					] as const) {
+						values.push({
+							range: {
+								startLine: from + 1,
+								startColumn: 1,
+								endLine: to,
+								endColumn: model.getLineMaxColumn(to),
+							},
+							wholeLine: true,
+							className: "editor-diff-moved-line",
+							gutter: "↕",
+							overview: "var(--editor-accent)",
+							hover: `Moved block ${move.id}; counterpart starts at line ${other + 1}`,
+						});
+					}
 				}
 				this.originalMarks.set(a);
 				this.modifiedMarks.set(b);
@@ -205,7 +241,12 @@ export class DiffPresentation implements Disposable {
 								change.originalEnd -
 								change.originalStart -
 								(change.modifiedEnd - change.modifiedStart);
-							if (difference && diffAlignmentAvailable(snapshot))
+							if (
+								difference &&
+								diffAlignmentAvailable(snapshot) &&
+								this.modified.getOptions().wordWrap === "off" &&
+								this.original.getOptions().wordWrap === "off"
+							)
 								this.padding(
 									difference > 0
 										? this.modified
@@ -226,6 +267,93 @@ export class DiffPresentation implements Disposable {
 				}
 			}),
 		);
+		this.aligned = diffAlignmentAvailable(snapshot);
+		if (
+			this.aligned &&
+			options.mode !== "inline" &&
+			this.modified.getOptions().accessibilitySupport !== "on" &&
+			this.original.getOptions().accessibilitySupport !== "on" &&
+			(this.modified.getOptions().wordWrap !== "off" ||
+				this.original.getOptions().wordWrap !== "off")
+		) {
+			const pads: {
+				view: EditorView;
+				afterLine: number;
+				rows: number;
+			}[] = [];
+			const add = (
+				oldFrom: number,
+				oldTo: number,
+				newFrom: number,
+				newTo: number,
+			) => {
+				const height = (view: EditorView, from: number, to: number) =>
+					view.getLineTop(to + 1) - view.getLineTop(from + 1);
+				const difference =
+					(height(this.original, oldFrom, oldTo) -
+						height(this.modified, newFrom, newTo)) /
+					this.modified.getViewport().lineHeight;
+				if (Math.abs(difference) > 0.001)
+					pads.push({
+						view: difference > 0 ? this.modified : this.original,
+						afterLine: difference > 0 ? newTo : oldTo,
+						rows: Math.abs(difference),
+					});
+			};
+			let oldAt = 0,
+				newAt = 0;
+			if (
+				models.original.getLineCount() +
+					models.modified.getLineCount() <=
+				40000
+			) {
+				for (const change of [
+					...snapshot.changes,
+					{
+						originalStart: models.original.getLineCount(),
+						originalEnd: models.original.getLineCount(),
+						modifiedStart: models.modified.getLineCount(),
+						modifiedEnd: models.modified.getLineCount(),
+					},
+				]) {
+					for (
+						let line = 0;
+						line <
+						Math.min(
+							change.originalStart - oldAt,
+							change.modifiedStart - newAt,
+						);
+						line++
+					)
+						add(
+							oldAt + line,
+							oldAt + line + 1,
+							newAt + line,
+							newAt + line + 1,
+						);
+					add(
+						change.originalStart,
+						change.originalEnd,
+						change.modifiedStart,
+						change.modifiedEnd,
+					);
+					oldAt = change.originalEnd;
+					newAt = change.modifiedEnd;
+				}
+			} else this.aligned = false;
+			this.aligned =
+				this.aligned &&
+				pads.length <= 5000 &&
+				pads.every((pad) => pad.rows <= 100000);
+			if (this.aligned)
+				this.original.batchPresentation(() =>
+					this.modified.batchPresentation(() => {
+						for (const pad of pads)
+							if (pad.rows > 0.001)
+								this.padding(pad.view, pad.afterLine, pad.rows);
+					}),
+				);
+		}
 		this.original.setScrollPosition(oldScroll);
 		this.modified.setScrollPosition(newScroll);
 		this.paint();

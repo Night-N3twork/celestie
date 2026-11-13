@@ -266,7 +266,12 @@ export class SnippetSession implements Disposable {
 		});
 		const basePlan = combinePlans(
 			selections.map((selection, index) =>
-				replacementPlan(selection, instances[index]?.text ?? ""),
+				replacementPlan(
+					selection,
+					instances[index]?.text ?? "",
+					this.host.text(),
+					this.host.options().tabSize,
+				),
 			),
 			this.host.text().length,
 		);

@@ -3,6 +3,10 @@ import { hasTheme } from "../features/themes";
 import type { LanguageConfiguration } from "../languages/configuration";
 import { isFontFeatureSettings } from "../view/text-shaping";
 import type { TextSelection } from "./types";
+import {
+	type UnicodeHighlightOptions,
+	validateUnicodeHighlightOptions,
+} from "./unicode-highlights";
 
 export interface EditorOptions extends IndentationOptions {
 	readonly largeFileOptimizations: boolean;
@@ -10,6 +14,7 @@ export interface EditorOptions extends IndentationOptions {
 	readonly linkedEditing: boolean;
 	readonly onTypeFormatting: boolean;
 	readonly unicodeHighlight: boolean;
+	readonly unicodeHighlightOptions: UnicodeHighlightOptions;
 	readonly autoClosingBrackets: boolean;
 	readonly autoClosingQuotes: boolean;
 	readonly autoClosingComments: boolean;
@@ -76,6 +81,7 @@ export const defaultViewOptions = {
 	linkedEditing: false,
 	onTypeFormatting: false,
 	unicodeHighlight: true,
+	unicodeHighlightOptions: {},
 	autoClosingBrackets: true,
 	autoClosingQuotes: true,
 	autoClosingComments: true,
@@ -105,6 +111,7 @@ export const defaultViewOptions = {
 	rulers: [],
 } as const;
 export function validateViewOptions(options: EditorOptions): void {
+	validateUnicodeHighlightOptions(options.unicodeHighlightOptions);
 	if (options.theme !== "auto" && !hasTheme(options.theme))
 		throw new Error(`Unknown editor theme: ${options.theme}`);
 	for (const flag of [

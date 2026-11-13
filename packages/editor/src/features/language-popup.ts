@@ -25,6 +25,11 @@ export class LanguagePopup implements Disposable {
 	private anchorModel: TextModel | null = null;
 	private readonly resize: ResizeObserver;
 	private disposed = false;
+	private readonly contentResources: Disposable[] = [];
+	ownContent(value: Disposable): void {
+		if (this.disposed || this.widget.hidden) value.dispose();
+		else this.contentResources.push(value);
+	}
 	private controller: HTMLInputElement | HTMLTextAreaElement | undefined;
 	private savedAttributes = new Map<string, string | null>();
 	get choiceInput(): HTMLInputElement | HTMLTextAreaElement | undefined {
@@ -142,7 +147,8 @@ export class LanguagePopup implements Disposable {
 			if (mode !== "complete") this.host.announce("No results.");
 			return;
 		}
-		this.choices = choices;
+		let matchingCount = choices.length;
+		this.choices = choices.slice(0, 1000);
 		this.index = 0;
 		this.widget.setAttribute("role", "group");
 		this.widget.setAttribute(
@@ -187,7 +193,9 @@ export class LanguagePopup implements Disposable {
 			}
 			list.replaceChildren(fragment);
 			status.textContent = this.choices.length
-				? `${this.choices.length} results`
+				? matchingCount > this.choices.length
+					? `Showing ${this.choices.length} of ${matchingCount} results. Filter to narrow the list.`
+					: `${matchingCount} results`
 				: "No results";
 			this.updateSelection();
 		};
@@ -200,11 +208,13 @@ export class LanguagePopup implements Disposable {
 			input.autocomplete = "off";
 			this.bindChoices(input, list);
 			input.oninput = () => {
-				this.choices = choices.filter((choice) =>
+				const matching = choices.filter((choice) =>
 					choice.label
 						.toLowerCase()
 						.includes(input.value.toLowerCase()),
 				);
+				matchingCount = matching.length;
+				this.choices = matching.slice(0, 1000);
 				this.index = 0;
 				render();
 				this.updatePreview();
@@ -297,6 +307,8 @@ export class LanguagePopup implements Disposable {
 			this.widget.ownerDocument.activeElement,
 		);
 		this.widget.hidden = true;
+		for (const resource of this.contentResources.splice(0))
+			resource.dispose();
 		this.describe(false);
 		for (const [name, value] of this.savedAttributes) {
 			if (value === null) this.controller?.removeAttribute(name);

@@ -4,12 +4,14 @@ import type {
 	LanguageContext,
 	Location,
 } from "../api/languages";
+import { EmbeddedPreviews } from "./embedded-previews";
 import type { LanguageFeatureHost } from "./language-host";
 import type { LanguagePopup } from "./language-popup";
 import { requestLanguage } from "./language-request";
 
 export class LanguageNavigation {
 	private locations: readonly Location[] = [];
+	private readonly previews: EmbeddedPreviews;
 	private index = -1;
 	private diagnosticAbort = new AbortController();
 	cancel(): void {
@@ -24,7 +26,9 @@ export class LanguageNavigation {
 	constructor(
 		private readonly host: LanguageFeatureHost,
 		private readonly popup: LanguagePopup,
-	) {}
+	) {
+		this.previews = new EmbeddedPreviews(host, popup);
+	}
 	async show(
 		context: LanguageContext,
 		method: string,
@@ -45,6 +49,10 @@ export class LanguageNavigation {
 			return;
 		this.locations = locations;
 		this.index = 0;
+		if (peek && locations.length === 1 && locations[0]) {
+			await this.previews.peek(context, locations[0]);
+			return;
+		}
 		if (!peek && method !== "references" && locations.length === 1) {
 			const location = locations[0];
 			if (location) this.host.open(location);
@@ -85,7 +93,13 @@ export class LanguageNavigation {
 					preview,
 					run: () => {
 						this.index = index;
-						this.host.open(location);
+						if (peek)
+							void this.previews
+								.peek(context, location)
+								.catch((error) =>
+									this.host.announce(String(error)),
+								);
+						else this.host.open(location);
 					},
 				};
 			}),
@@ -191,7 +205,11 @@ export class LanguageNavigation {
 		);
 		this.host.announce(item.message);
 	}
-	async actions(context: LanguageContext, kind?: string): Promise<void> {
+	async actions(
+		context: LanguageContext,
+		kind?: string,
+		preview = false,
+	): Promise<void> {
 		const version = context.model.getVersionId();
 		const actions = await requestLanguage<readonly CodeAction[]>(
 			"actions",
@@ -230,7 +248,12 @@ export class LanguageNavigation {
 					.join("\n\n")
 					.slice(0, 4000),
 				run: () => {
-					void this.applyAction(context, version, action);
+					void this.applyAction(
+						context,
+						version,
+						action,
+						preview || !!kind?.startsWith("refactor"),
+					);
 				},
 			})),
 			context.offset,
@@ -241,6 +264,7 @@ export class LanguageNavigation {
 		context: LanguageContext,
 		version: number,
 		action: CodeAction,
+		preview: boolean,
 	): Promise<void> {
 		try {
 			const resolved =
@@ -260,7 +284,9 @@ export class LanguageNavigation {
 				this.host.announce(resolved.disabled);
 				return;
 			}
-			await this.host.apply(resolved);
+			if (preview)
+				await this.previews.review(context, resolved.title, resolved);
+			else await this.host.apply(resolved);
 		} catch (error) {
 			this.host.announce(String(error));
 		}

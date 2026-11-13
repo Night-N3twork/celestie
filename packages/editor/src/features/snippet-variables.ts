@@ -4,6 +4,7 @@ import {
 	wordExpression,
 } from "../languages/configuration";
 import type { TextModel } from "../model/text-model";
+import { selectedColumns } from "./column-selection";
 import { wordRange } from "./editing-commands";
 
 export function snippetVariables(
@@ -23,7 +24,11 @@ export function snippetVariables(
 	);
 	const pad = (value: number) => String(value).padStart(2, "0");
 	return {
-		TM_SELECTED_TEXT: text.slice(selection.start, selection.end),
+		TM_SELECTED_TEXT: selectedColumns(
+			text,
+			selection,
+			model.getOptions().tabSize,
+		),
 		TM_FILENAME: filename,
 		TM_FILENAME_BASE: filename.replace(/\.[^.]+$/, ""),
 		TM_DIRECTORY: path.slice(0, path.lastIndexOf("/")),

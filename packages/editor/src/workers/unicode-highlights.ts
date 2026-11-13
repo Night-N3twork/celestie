@@ -1,15 +1,41 @@
+import type { UnicodeHighlightOptions } from "../api/unicode-highlights";
+import { asciiConfusables } from "./unicode-confusables";
 export interface UnicodeHighlight {
 	readonly from: number;
 	readonly to: number;
 	readonly message: string;
 }
-export function unicodeHighlights(text: string): UnicodeHighlight[] {
+export function unicodeHighlights(
+	text: string,
+	options: UnicodeHighlightOptions = {},
+): UnicodeHighlight[] {
+	const allowed = new Set(options.allowedCharacters ?? []);
+	const locales = new Set(
+		(options.allowedLocales ?? []).map(
+			(locale) => new Intl.Locale(locale).language,
+		),
+	);
+	const allowedScript = (char: string) =>
+		(/\p{Script=Greek}/u.test(char) && locales.has("el")) ||
+		(/\p{Script=Cyrillic}/u.test(char) &&
+			["ru", "uk", "bg", "mk", "sr", "be"].some((locale) =>
+				locales.has(locale),
+			)) ||
+		(/\p{Script=Latin}/u.test(char) &&
+			["en", "fr", "de", "es", "pt", "it", "tr", "vi"].some((locale) =>
+				locales.has(locale),
+			));
 	const values: UnicodeHighlight[] = [];
-	for (const match of text.matchAll(
+	for (const match of (options.invisibleCharacters === false
+		? ""
+		: text
+	).matchAll(
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: meow
-		/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g,
+		// biome-ignore lint/suspicious/noMisleadingCharacterClass: meow
+		/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u00ad\u034f\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u2028\u2029\ufeff]/g,
 	)) {
 		if (values.length >= 1000) break;
+		if (allowed.has(match[0])) continue;
 		const code = (match[0].codePointAt(0) ?? 0)
 			.toString(16)
 			.toUpperCase()
@@ -20,20 +46,32 @@ export function unicodeHighlights(text: string): UnicodeHighlight[] {
 			message: `Invisible, directional or unusual line-separator character U+${code}.`,
 		});
 	}
-	for (const word of text.matchAll(/[\p{ID_Continue}$]+/gu)) {
-		if (values.length >= 1000) break;
-		if (!/[A-Za-z]/.test(word[0])) continue;
-		for (const char of word[0].matchAll(
-			/[\u0391\u0392\u0395\u0397\u0399\u039a\u039c\u039d\u039f\u03a1\u03a4\u03a5\u03a7\u03bf\u03c1\u0410\u0412\u0415\u041a\u041c\u041d\u041e\u0420\u0421\u0422\u0425\u0430\u0435\u043e\u0440\u0441\u0445\u0456]/g,
-		)) {
+	if (options.ambiguousCharacters !== "off")
+		for (const word of text.matchAll(/[\p{ID_Continue}$]+/gu)) {
 			if (values.length >= 1000) break;
-			values.push({
-				from: word.index + char.index,
-				to: word.index + char.index + 1,
-				message:
-					"Mixed-script identifier contains a character resembling an ASCII letter.",
-			});
+			if (
+				options.ambiguousCharacters !== "all" &&
+				!/[A-Za-z]/.test(word[0])
+			)
+				continue;
+			let at = word.index;
+			for (const char of word[0]) {
+				const replacement = asciiConfusables.get(
+					char.codePointAt(0) ?? 0,
+				);
+				if (
+					values.length < 1000 &&
+					replacement &&
+					!allowed.has(char) &&
+					!allowedScript(char)
+				)
+					values.push({
+						from: at,
+						to: at + char.length,
+						message: `Identifier character resembles ASCII "${replacement}".`,
+					});
+				at += char.length;
+			}
 		}
-	}
 	return values.sort((a, b) => a.from - b.from);
 }

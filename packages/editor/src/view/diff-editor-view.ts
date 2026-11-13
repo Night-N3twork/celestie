@@ -7,11 +7,7 @@ import type {
 import type { Disposable } from "../api/types";
 import { DiffWorkerClient } from "../diff/client";
 import { diffOptions } from "../diff/options";
-import {
-	DiffPresentation,
-	diffAlignmentAvailable,
-	inlinePreviewLines,
-} from "../diff/presentation";
+import { DiffPresentation, inlinePreviewLines } from "../diff/presentation";
 import { registerDiffActions } from "../features/diff-actions";
 import { EditorView } from "./editor-view";
 
@@ -44,6 +40,9 @@ export class DiffEditorView implements Disposable {
 	private switching = false;
 	private presenting = false;
 	private active = 0;
+	private activeMove = -1;
+	private readonly resize: ResizeObserver;
+	private resizeFrame = 0;
 	constructor(
 		container: HTMLElement,
 		models: DiffModels,
@@ -66,6 +65,7 @@ export class DiffEditorView implements Disposable {
 			["diff.revert", "Revert change"],
 			["diff.toggleMode", "Inline view"],
 			["diff.toggleUnchanged", "Hide unchanged"],
+			["diff.nextMove", "Next moved block"],
 		] as const) {
 			const button = doc.createElement("button");
 			button.type = "button";
@@ -134,6 +134,8 @@ export class DiffEditorView implements Disposable {
 			ready: () => this.valid() && !!this.state.result?.changes.length,
 			canRevert: () => this.canRevert(),
 			next: (direction: number) => this.nextChange(direction),
+			nextMove: () => this.nextMove(),
+			hasMoves: () => this.valid() && !!this.state.result?.moves?.length,
 			revert: () => {
 				this.revertChange();
 			},
@@ -187,6 +189,24 @@ export class DiffEditorView implements Disposable {
 			);
 		this.root.addEventListener("compositionstart", this.composition);
 		this.root.addEventListener("compositionend", this.composition);
+		const widths = () =>
+			[this.root, this.originalPane, this.modifiedPane]
+				.map((element) => element.clientWidth)
+				.join(":");
+		let width = widths();
+		this.resize = new ResizeObserver(() => {
+			const next = widths();
+			if (this.disposed || next === width) return;
+			width = next;
+			cancelAnimationFrame(this.resizeFrame);
+			this.resizeFrame = requestAnimationFrame(() => {
+				this.resizeFrame = 0;
+				if (!this.disposed && this.valid()) this.renderResult();
+			});
+		});
+		this.resize.observe(this.root);
+		this.resize.observe(this.originalPane);
+		this.resize.observe(this.modifiedPane);
 		this.setModels(models);
 	}
 	private paneOptions(original: boolean) {
@@ -196,7 +216,7 @@ export class DiffEditorView implements Disposable {
 				? this.options.originalLabel
 				: this.options.modifiedLabel,
 			readOnly: original || this.options.readOnly,
-			wordWrap: "off" as const,
+			wordWrap: this.options.editorOptions?.wordWrap ?? ("off" as const),
 			codeLens: false,
 			inlayHints: false,
 			stickyScroll: false,
@@ -343,6 +363,7 @@ export class DiffEditorView implements Disposable {
 	}
 	async refresh(): Promise<DiffSnapshot | undefined> {
 		this.assertLive();
+		this.activeMove = -1;
 		if (this.timer) clearTimeout(this.timer);
 		this.abort.abort();
 		this.abort = new AbortController();
@@ -473,6 +494,41 @@ export class DiffEditorView implements Disposable {
 		if (applied) this.modified.focus();
 		return applied;
 	}
+	nextMove(direction = 1): void {
+		this.assertLive();
+		const moves = this.state.result?.moves;
+		if (!this.valid() || !moves?.length) return;
+		this.activeMove =
+			this.activeMove < 0
+				? direction > 0
+					? 0
+					: moves.length - 1
+				: (this.activeMove + (direction > 0 ? 1 : -1) + moves.length) %
+					moves.length;
+		const move = moves[this.activeMove];
+		if (!move) return;
+		this.original.setSelections(
+			[
+				{
+					start: move.original.from,
+					end: move.original.to,
+					direction: "forward",
+				},
+			],
+			true,
+		);
+		this.modified.setSelections(
+			[
+				{
+					start: move.modified.from,
+					end: move.modified.to,
+					direction: "forward",
+				},
+			],
+			true,
+		);
+		this.modified.focus();
+	}
 	nextChange(direction = 1): void {
 		this.assertLive();
 		const changes = this.state.result?.changes;
@@ -568,8 +624,7 @@ export class DiffEditorView implements Disposable {
 		let top = position.scrollTop;
 		if (
 			(this.native() ||
-				(this.state.result &&
-					!diffAlignmentAvailable(this.state.result))) &&
+				(this.state.result && !this.presentation.alignmentAvailable)) &&
 			this.state.result
 		) {
 			const original = source === this.original,
@@ -653,7 +708,7 @@ export class DiffEditorView implements Disposable {
 		);
 		this.status.textContent =
 			this.state.status === "ready"
-				? `${count ? `${this.active + 1} / ${count} changes` : "No differences"}${this.state.result?.quitEarly ? ` - Limited diff (${this.state.result.reason})` : ""}${this.native() ? " - Native panes (inline zones unavailable)" : this.state.result && !diffAlignmentAvailable(this.state.result) ? " - Line-mapped scrolling" : ""}`
+				? `${this.state.result?.moves?.length ? `${this.state.result.moves.length} moved blocks - ` : ""}${count ? `${this.active + 1} / ${count} changes` : "No differences"}${this.state.result?.quitEarly ? ` - Limited diff (${this.state.result.reason})` : ""}${this.native() ? " - Native panes (inline zones unavailable)" : this.state.result && !this.presentation.alignmentAvailable ? " - Line-mapped scrolling" : ""}`
 				: (this.state.message ??
 					(this.state.status === "loading"
 						? "Loading differences…"
@@ -689,6 +744,8 @@ export class DiffEditorView implements Disposable {
 	dispose(): void {
 		if (this.disposed) return;
 		this.abort.abort();
+		this.resize.disconnect();
+		cancelAnimationFrame(this.resizeFrame);
 		if (this.timer) clearTimeout(this.timer);
 		this.client.dispose();
 		this.presenting = true;

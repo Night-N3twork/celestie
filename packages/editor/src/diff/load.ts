@@ -3,7 +3,9 @@ import type {
 	DiffComputationOptions,
 	DiffResult,
 } from "../api/diff";
+import { movedBlocks } from "./moved-blocks";
 import { computationOptions } from "./options";
+import { anchoredEdits } from "./patience";
 
 type Edit = { a: number; b: number; deleteCount: number; insertCount: number };
 class Budget {
@@ -201,7 +203,7 @@ export function calculateDiff(
 		return coarse(original, modified, "size");
 	const compare = (lines: string[]) =>
 		config.ignoreTrimWhitespace ? lines.map((line) => line.trim()) : lines;
-	const changes = edits(compare(a), compare(b), budget);
+	const changes = anchoredEdits(compare(a), compare(b), budget, edits);
 	if (!changes) return coarse(original, modified, budget.reason ?? "work");
 	if (changes.length > 5000) return coarse(original, modified, "changes");
 	const ao = starts(a),
@@ -265,7 +267,12 @@ export function calculateDiff(
 			characters,
 		});
 	}
+	const moves =
+		config.detectMoves && !budget.reason
+			? movedBlocks(a, b, result, budget)
+			: [];
 	return {
+		moves,
 		changes: result,
 		identical: result.length === 0,
 		quitEarly: !!budget.reason,

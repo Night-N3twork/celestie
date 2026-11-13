@@ -1063,3 +1063,30 @@
 .editor-command-menu button:hover:not(:disabled) kbd {
 	color: inherit;
 }
+
+.editor-diff-moved-line {
+	box-shadow: inset 3px 0 var(--editor-accent);
+}
+
+.editor-language-widget:has(.editor-embedded-preview) {
+	width: min(900px, calc(100% - 16px));
+	max-height: calc(100% - 16px);
+}
+.editor-peek-editor,
+.editor-action-diff {
+	height: 300px;
+	min-width: 0;
+}
+.editor-peek-editor > .editor-view-frame {
+	height: 100%;
+}
+.editor-action-diff .editor-diff {
+	height: 100%;
+	min-height: 0;
+}
+.editor-embedded-preview > select {
+	max-width: 100%;
+}
+.editor-embedded-preview .editor-language-widget {
+	z-index: 45;
+}

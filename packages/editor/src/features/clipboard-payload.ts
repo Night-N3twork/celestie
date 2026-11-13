@@ -1,6 +1,7 @@
 import type { Token } from "../api/languages";
 import type { TextSelection } from "../api/types";
 import { normalizeInputText } from "../view/input";
+import { selectedColumns } from "./column-selection";
 
 interface PayloadHost {
 	getText(): string;
@@ -96,10 +97,12 @@ export function richCopyHtml(
 }
 
 export function createClipboardPayload(host: PayloadHost) {
-	const palette = host.syntaxPalette();
+	const palette = host.getSelections().some((selection) => selection.columns)
+		? undefined
+		: host.syntaxPalette();
 	const text = host.getText();
 	const selection = host.getSelection();
-	const wholeLine = selection.start === selection.end;
+	const wholeLine = !selection.columns && selection.start === selection.end;
 	const from = wholeLine
 		? selection.start === 0
 			? 0
@@ -112,7 +115,9 @@ export function createClipboardPayload(host: PayloadHost) {
 			: newline + 1
 		: selection.end;
 	const selections = host.getSelections();
-	const allWholeLine = selections.every((value) => value.start === value.end);
+	const allWholeLine = selections.every(
+		(value) => !value.columns && value.start === value.end,
+	);
 	const pieces = selections
 		.slice()
 		.sort((a, b) => a.start - b.start)
@@ -120,7 +125,7 @@ export function createClipboardPayload(host: PayloadHost) {
 			if (!allWholeLine)
 				return {
 					start: value.start,
-					text: text.slice(value.start, value.end),
+					text: selectedColumns(text, value, host.getTabSize()),
 				};
 			const start =
 				value.start === 0
@@ -137,7 +142,9 @@ export function createClipboardPayload(host: PayloadHost) {
 	];
 	const single = {
 		start: from,
-		text: text.slice(from, to) + (wholeLine && newline === -1 ? "\n" : ""),
+		text: selection.columns
+			? selectedColumns(text, selection, host.getTabSize())
+			: text.slice(from, to) + (wholeLine && newline === -1 ? "\n" : ""),
 	};
 	const plain =
 		selections.length > 1

@@ -5,6 +5,7 @@ export interface SerializedPattern {
 }
 
 export interface LanguageProfile {
+	tabSize?: number;
 	tokenizer?: { moduleUrl: string; version: number };
 	grammar?: string;
 	fencedCode?: boolean;
@@ -36,6 +37,7 @@ export interface LanguageDocument {
 }
 
 export interface LanguageRequest {
+	unicodeHighlightOptions?: import("../api/unicode-highlights").UnicodeHighlightOptions;
 	requestId?: number;
 	changes?: readonly ContentChange[];
 	baseVersion?: number;

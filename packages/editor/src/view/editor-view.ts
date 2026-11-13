@@ -15,6 +15,7 @@ import type {
 	WorkspaceEdit,
 } from "../api/languages";
 import type {
+	ColumnPosition,
 	Disposable,
 	HistoryViewState,
 	ModelChangeEvent,
@@ -22,6 +23,7 @@ import type {
 } from "../api/types";
 import { BracketAnalysis } from "../features/bracket-analysis";
 import type { TransferProvider } from "../features/clipboard";
+import { columnRange } from "../features/column-selection";
 import { CommandRegistry } from "../features/commands";
 import type { DecorationCollection } from "../features/decorations";
 import { safeLink } from "../features/documentation";
@@ -526,6 +528,7 @@ export class EditorView implements Disposable {
 			diagnostics: () => this.getDiagnostics(),
 			analysisOptions: () => ({
 				unicodeHighlight: this.options.unicodeHighlight,
+				unicodeHighlightOptions: this.options.unicodeHighlightOptions,
 				inlayHints: this.options.inlayHints,
 				codeLens: this.options.codeLens,
 			}),
@@ -775,11 +778,23 @@ export class EditorView implements Disposable {
 		)
 			item = { ...item, insertText: item.insertText + commitCharacter };
 		const primary = this.getSelection(),
-			values = this.getSelections().map((selection) => ({
-				...selection,
-				start: Math.max(0, selection.start + item.from - primary.start),
-				end: Math.max(0, selection.end + item.to - primary.end),
-			}));
+			values = this.getSelections().map((value) => {
+				const { columns, ...source } = value;
+				const selection =
+					columns &&
+					item.from === primary.start &&
+					item.to === primary.end
+						? value
+						: source;
+				return {
+					...selection,
+					start: Math.max(
+						0,
+						selection.start + item.from - primary.start,
+					),
+					end: Math.max(0, selection.end + item.to - primary.end),
+				};
+			});
 		if (item.snippet)
 			this.snippets.insert(
 				item.insertText,
@@ -793,7 +808,12 @@ export class EditorView implements Disposable {
 				this.mergeCompletionEdits(
 					combinePlans(
 						values.map((selection) =>
-							replacementPlan(selection, item.insertText),
+							replacementPlan(
+								selection,
+								item.insertText,
+								this.element.value,
+								this.options.tabSize,
+							),
 						),
 						this.element.value.length,
 					),
@@ -1123,6 +1143,37 @@ export class EditorView implements Disposable {
 	getSelections(): readonly TextSelection[] {
 		return this.selectionsValue.map((selection) => ({ ...selection }));
 	}
+	setColumnSelection(anchor: ColumnPosition, active: ColumnPosition): void {
+		for (const position of [anchor, active])
+			if (
+				!Number.isInteger(position.line) ||
+				position.line < 1 ||
+				position.line > this.model.getLineCount() ||
+				!Number.isInteger(position.column) ||
+				position.column < 0 ||
+				position.column > 10000
+			)
+				throw new RangeError("Invalid column position.");
+		const step = active.line < anchor.line ? 1 : -1,
+			values: TextSelection[] = [];
+		for (
+			let line = active.line;
+			values.length < selectionLimit;
+			line += step
+		) {
+			values.push(
+				columnRange(
+					this.model.getLineContent(line),
+					this.model.getInputOffsetAt({ line, column: 1 }),
+					anchor.column,
+					active.column,
+					this.options.tabSize,
+				),
+			);
+			if (line === anchor.line) break;
+		}
+		this.setSelections(values, true);
+	}
 	setSelections(values: readonly TextSelection[], reveal = false): void {
 		if (this.disposed) throw new Error("Editor view disposed.");
 		if (this.isComposing) return;
@@ -1284,12 +1335,15 @@ export class EditorView implements Disposable {
 			next.onTypeFormatting !== this.options.onTypeFormatting ||
 			next.accessibilitySupport !== this.options.accessibilitySupport;
 		const refreshAssistance =
+			next.tabSize !== this.options.tabSize ||
 			next.largeFileOptimizations !==
 				this.options.largeFileOptimizations ||
 			next.readOnly !== this.options.readOnly ||
 			next.onTypeFormatting !== this.options.onTypeFormatting ||
 			next.accessibilitySupport !== this.options.accessibilitySupport ||
 			next.unicodeHighlight !== this.options.unicodeHighlight ||
+			JSON.stringify(next.unicodeHighlightOptions) !==
+				JSON.stringify(this.options.unicodeHighlightOptions) ||
 			next.linkedEditing !== this.options.linkedEditing ||
 			next.inlayHints !== this.options.inlayHints ||
 			next.codeLens !== this.options.codeLens;
@@ -1598,6 +1652,11 @@ export class EditorView implements Disposable {
 	private captureState(): HistoryViewState {
 		const previous = this.selectionsValue[0];
 		const selection: TextSelection = {
+			...(previous?.columns &&
+			previous.start === this.element.selectionStart &&
+			previous.end === this.element.selectionEnd
+				? { columns: previous.columns }
+				: {}),
 			start: this.element.selectionStart,
 			end: this.element.selectionEnd,
 			...(previous?.affinity &&
@@ -1606,9 +1665,13 @@ export class EditorView implements Disposable {
 				? { affinity: previous.affinity }
 				: {}),
 			direction:
-				this.element.selectionStart === this.element.selectionEnd
-					? "none"
-					: this.element.selectionDirection,
+				previous?.columns &&
+				previous.start === this.element.selectionStart &&
+				previous.end === this.element.selectionEnd
+					? previous.direction
+					: this.element.selectionStart === this.element.selectionEnd
+						? "none"
+						: this.element.selectionDirection,
 		};
 		return {
 			owner: this.owner,
@@ -1644,6 +1707,7 @@ export class EditorView implements Disposable {
 	}
 
 	private readonly updateCursor = (): void => {
+		if (this.nativeInput.deferredComposition) return;
 		const selection = this.captureState().selection;
 		if (
 			!this.sameSelection(
@@ -1704,7 +1768,6 @@ export class EditorView implements Disposable {
 			this.updateCursor();
 	};
 	private readonly handleCompositionStart = (): void => {
-		this.clearSnippet();
 		this.languageFeatures.cancelRequests();
 		this.nativeInput.handleCompositionStart();
 	};
@@ -1735,10 +1798,10 @@ export class EditorView implements Disposable {
 			: this.model.getPositionAtInputOffset(offset);
 		if (this.presentation.assets().folding.reveal(position.line))
 			this.renderer.setFolds(this.presentation.assets().folding.get());
-		const top = this.renderer.point(
-			position,
-			this.getSelection().affinity,
-		).y;
+		const point = this.nativeInput.deferredComposition
+			? this.renderer.point(position, this.getSelection().affinity)
+			: this.renderer.selectionPoint(this.getSelection());
+		const top = point.y;
 		if (top < this.element.scrollTop + 16)
 			this.element.scrollTop = Math.max(0, top - 16);
 		else if (
@@ -1748,10 +1811,7 @@ export class EditorView implements Disposable {
 			this.element.scrollTop =
 				top + this.options.lineHeight + 16 - this.element.clientHeight;
 		}
-		const left = this.renderer.point(
-			position,
-			this.getSelection().affinity,
-		).x;
+		const left = point.x;
 		if (left < this.element.scrollLeft + 16)
 			this.element.scrollLeft = Math.max(0, left - 16);
 		else if (

@@ -1,3 +1,4 @@
+import { snippetExpressionEnd } from "./snippet-syntax";
 export interface SnippetFormatIndent {
 	readonly newline: string;
 	readonly tab: string;
@@ -33,17 +34,12 @@ export function formatSnippetCaptures(
 			result += "$";
 			continue;
 		}
-		let end = i + 1,
-			depth = 1;
-		for (; end < format.length && depth; end++) {
-			if (format[end] === "\\") end++;
-			else if (format[end] === "{") depth++;
-			else if (format[end] === "}") depth--;
-		}
-		if (depth) {
+		const closing = snippetExpressionEnd(format, i - 1);
+		if (closing < 0) {
 			result += format.slice(i - 1);
 			break;
 		}
+		const end = closing + 1;
 		const expression = format.slice(i + 1, end - 1),
 			match = expression.match(/^(\d+)(?::([\s\S]*))?$/);
 		if (!match) {

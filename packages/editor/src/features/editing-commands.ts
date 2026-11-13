@@ -32,13 +32,24 @@ export function wordRange(
 	offset: number,
 	pattern: RegExp = word,
 ): { from: number; to: number } {
-	for (const match of text.matchAll(pattern))
+	const from = offset === 0 ? 0 : text.lastIndexOf("\n", offset - 1) + 1,
+		newline = text.indexOf("\n", offset);
+	const expression = new RegExp(
+		pattern.source,
+		`${pattern.flags.replace(/[gy]/g, "")}g`,
+	);
+	for (const match of text
+		.slice(from, newline < 0 ? text.length : newline)
+		.matchAll(expression))
 		if (
 			match[0] &&
-			match.index <= offset &&
-			offset <= match.index + match[0].length
+			from + match.index <= offset &&
+			offset <= from + match.index + match[0].length
 		)
-			return { from: match.index, to: match.index + match[0].length };
+			return {
+				from: from + match.index,
+				to: from + match.index + match[0].length,
+			};
 	return { from: offset, to: offset };
 }
 
@@ -49,7 +60,8 @@ function wordTokens(
 	if (pattern === word)
 		return [
 			...text.matchAll(
-				/[\p{ID_Continue}$]+|\s+|[^\p{ID_Continue}$\s]+/gu,
+				// biome-ignore lint/suspicious/noMisleadingCharacterClass: purr
+				/[\p{ID_Continue}$\u200c\u200d]+|\s+|[^\p{ID_Continue}$\u200c\u200d\s]+/gu,
 			),
 		].map((match) => ({ index: match.index, text: match[0] }));
 	const tokens: { index: number; text: string }[] = [];

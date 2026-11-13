@@ -5,6 +5,8 @@ export interface DiffActionHost {
 	ready(): boolean;
 	canRevert(): boolean;
 	next(direction: number): void;
+	nextMove(): void;
+	hasMoves(): boolean;
 	revert(): void;
 	toggleMode(): void;
 	toggleUnchanged(): void;
@@ -15,6 +17,13 @@ export function registerDiffActions(
 ): Disposable {
 	const subscriptions: Disposable[] = [];
 	for (const [id, label, run, when, shortcut] of [
+		[
+			"diff.nextMove",
+			"Next Moved Block",
+			() => host.nextMove(),
+			() => host.hasMoves(),
+			"",
+		],
 		[
 			"diff.next",
 			"Next Change",

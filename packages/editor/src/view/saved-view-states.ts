@@ -17,6 +17,7 @@ export class SavedViewStates implements Disposable {
 			selections: {
 				range: TrackedRange;
 				direction: TextSelection["direction"];
+				columns?: TextSelection["columns"];
 				affinity?: TextSelection["affinity"];
 			}[];
 			direction: TextSelection["direction"];
@@ -72,6 +73,7 @@ export class SavedViewStates implements Disposable {
 						{ stickiness: "never" },
 					),
 					direction: value.direction,
+					...(value.columns ? { columns: value.columns } : {}),
 					...(value.affinity ? { affinity: value.affinity } : {}),
 				};
 			}),
@@ -133,6 +135,9 @@ export class SavedViewStates implements Disposable {
 									column: tracked.endColumn,
 								}),
 								direction: value.direction,
+								...(value.columns
+									? { columns: value.columns }
+									: {}),
 								...(value.affinity
 									? { affinity: value.affinity }
 									: {}),

@@ -1,5 +1,6 @@
 import type { EditorOptions } from "../api/editor-options";
 import type { Position, TextSelection } from "../api/types";
+import { columnBoundary } from "../features/column-selection";
 import type { TextModel } from "../model/text-model";
 import { type BracketGuide, paintBracketGuides } from "./bracket-guides";
 import { activeIndentationGuide } from "./indentation-guides";
@@ -56,10 +57,47 @@ export function paintSelectionLayers(state: paintSelectionLayersState): void {
 		node.style.cssText = `left:${x}px;top:${y}px;width:${width}px;height:${height}px`;
 		fragment.append(node);
 	};
+	const columnPoint = (selection: TextSelection, cell: number) => {
+		const position = state.model.getPositionAtInputOffset(selection.start),
+			content = state.model.getLineContent(position.line),
+			boundary = columnBoundary(content, cell, state.options.tabSize);
+		const point = state.geometry.point(
+			{ line: position.line, column: boundary.offset + 1 },
+			selection.affinity,
+		);
+		return { ...point, x: point.x + boundary.inset * state.columnWidth };
+	};
 	const lines = new Set(state.visible.map((row) => row.line));
 	for (const selection of state.accessible
-		? state.selections.slice(1)
+		? state.selections.filter(
+				(selection, index) => index > 0 || selection.columns,
+			)
 		: state.selections) {
+		if (selection.columns) {
+			const line = state.model.getPositionAtInputOffset(
+				selection.start,
+			).line;
+			if (!lines.has(line)) continue;
+			const a = columnPoint(selection, selection.columns.start),
+				b = columnPoint(selection, selection.columns.end);
+			if (selection.columns.end > selection.columns.start)
+				rectangle(
+					"editor-custom-selection",
+					Math.min(a.x, b.x),
+					a.y,
+					Math.abs(b.x - a.x),
+					a.height,
+				);
+			const active = selection.direction === "backward" ? a : b;
+			rectangle(
+				"editor-custom-caret",
+				active.x,
+				active.y,
+				2,
+				active.height,
+			);
+			continue;
+		}
 		const start = state.model.getPositionAtInputOffset(selection.start),
 			end = state.model.getPositionAtInputOffset(selection.end);
 		if (selection.start !== selection.end)
@@ -204,14 +242,21 @@ export function paintSelectionLayers(state: paintSelectionLayersState): void {
 	state.rulerLayer.replaceChildren(rulerFragment);
 	if (state.input && !state.accessible && state.selections[0]) {
 		const selection = state.selections[0],
-			point = state.point(
-				state.model.getPositionAtInputOffset(
-					selection.direction === "backward"
-						? selection.start
-						: selection.end,
-				),
-				selection.affinity,
-			);
+			point = selection.columns
+				? columnPoint(
+						selection,
+						selection.direction === "backward"
+							? selection.columns.start
+							: selection.columns.end,
+					)
+				: state.point(
+						state.model.getPositionAtInputOffset(
+							selection.direction === "backward"
+								? selection.start
+								: selection.end,
+						),
+						selection.affinity,
+					);
 		state.input.style.left = `${Math.max(state.viewport.scrollLeft, Math.min(point.x - state.originX, state.viewport.scrollLeft + state.viewport.clientWidth - 4))}px`;
 		state.input.style.top = `${Math.max(state.viewport.scrollTop, Math.min(point.y - state.originY, state.viewport.scrollTop + state.viewport.clientHeight - state.lineHeight))}px`;
 		state.input.style.height = `${state.lineHeight}px`;

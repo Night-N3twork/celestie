@@ -21,12 +21,16 @@ const serialized = (pattern: RegExp): SerializedPattern => ({
 	flags: pattern.flags.replace(/[gy]/g, ""),
 });
 
-export function languageProfile(languageId: string): LanguageProfile {
+export function languageProfile(
+	languageId: string,
+	tabSize = 4,
+): LanguageProfile {
 	const definition = getLanguage(languageId),
 		configuration = getLanguageConfiguration(languageId),
 		markers = configuration.folding?.markers,
 		tokenizer = languageTokenizer(languageId);
 	return {
+		tabSize,
 		...(tokenizer ? { tokenizer } : {}),
 		...(definition?.grammar ? { grammar: definition.grammar } : {}),
 		...(definition?.fencedCode ? { fencedCode: true } : {}),
@@ -216,7 +220,7 @@ class LanguageEngine {
 		const worker = this.worker;
 		if (!worker || model.isDisposed()) return;
 		const registryVersion = languageRegistryVersion();
-		const profile = `${model.getLanguageId()}:${registryVersion}:${languageTokenizer(model.getLanguageId())?.version ?? -1}`,
+		const profile = `${model.getLanguageId()}:${registryVersion}:${languageTokenizer(model.getLanguageId())?.version ?? -1}:${model.getOptions().tabSize}`,
 			version = model.getVersionId(),
 			key = `${version}:${profile}`,
 			previous = this.synced.get(model);
@@ -271,7 +275,10 @@ class LanguageEngine {
 					text,
 					version,
 					language: model.getLanguageId(),
-					profile: languageProfile(model.getLanguageId()),
+					profile: languageProfile(
+						model.getLanguageId(),
+						model.getOptions().tabSize,
+					),
 				},
 			});
 			this.synced.set(model, { worker, key, profile, version });
@@ -293,6 +300,7 @@ class LanguageEngine {
 			entry.subscriptions.push(
 				model.onDidChangeContent((event) => this.sync(model, event)),
 				model.onDidChangeLanguage(() => this.synced.delete(model)),
+				model.onDidChangeOptions(() => this.synced.delete(model)),
 				model.onWillDispose(() => this.remove(model)),
 			);
 		}

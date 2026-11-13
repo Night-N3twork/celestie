@@ -90,5 +90,38 @@ export function validDiffResult(
 			b = item.modified.to;
 		}
 	}
+	if ("moves" in value) {
+		if (!Array.isArray(value.moves) || value.moves.length > 1000)
+			return false;
+		const ids = new Set<number>();
+		for (const move of value.moves) {
+			if (
+				!move ||
+				!Number.isInteger(move.id) ||
+				move.id < 1 ||
+				ids.has(move.id) ||
+				!span(move.original, originalLength) ||
+				!span(move.modified, modifiedLength)
+			)
+				return false;
+			ids.add(move.id);
+			for (const key of [
+				"originalStart",
+				"originalEnd",
+				"modifiedStart",
+				"modifiedEnd",
+			] as const)
+				if (!Number.isInteger(move[key]) || move[key] < 0) return false;
+			if (
+				move.originalEnd <= move.originalStart ||
+				move.modifiedEnd <= move.modifiedStart ||
+				move.originalEnd - move.originalStart !==
+					move.modifiedEnd - move.modifiedStart ||
+				move.originalEnd > originalLength + 1 ||
+				move.modifiedEnd > modifiedLength + 1
+			)
+				return false;
+		}
+	}
 	return true;
 }

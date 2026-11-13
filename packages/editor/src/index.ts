@@ -4,6 +4,7 @@ export type {
 	DiffComputationOptions,
 	DiffEditorOptions,
 	DiffModels,
+	DiffMove,
 	DiffRange,
 	DiffResult,
 	DiffSnapshot,
@@ -75,6 +76,7 @@ export type {
 } from "./api/tokenization";
 export { registerLanguageTokenizer } from "./api/tokenization";
 export type {
+	ColumnPosition,
 	ContentChange,
 	Disposable,
 	EditHistoryOptions,
@@ -83,9 +85,11 @@ export type {
 	ModelChangeEvent,
 	Position,
 	Range,
+	SelectionColumns,
 	TextEdit,
 	TextSelection,
 } from "./api/types";
+export type { UnicodeHighlightOptions } from "./api/unicode-highlights";
 export { Uri, type UriComponents } from "./api/uri";
 export type { EditorWorkerFactory, EditorWorkerKind } from "./api/workers";
 export { setEditorWorkerFactory } from "./api/workers";

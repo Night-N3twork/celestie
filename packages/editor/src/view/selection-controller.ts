@@ -18,6 +18,13 @@ interface SelectionHost {
 	setSelections(values: readonly TextSelection[], reveal?: boolean): void;
 	offsetAtPoint(x: number, y: number): number;
 	columnWidth(): number;
+	headPoint(selection: TextSelection): number;
+	horizontalMove(
+		offset: number,
+		direction: -1 | 1,
+		affinity?: "before" | "after",
+	): { offset: number; affinity: "before" | "after" } | undefined;
+	hitAffinity(offset: number, clientX: number): "before" | "after";
 	isComposing(): boolean;
 	viewport(): HTMLElement;
 	scrollBy(x: number, y: number): void;
@@ -50,6 +57,11 @@ interface SelectionHost {
 	visualRowCount(): number;
 	isTextRow(row: number): boolean;
 	offsetAtVisualRowX(row: number, x: number): number;
+	columnSelection(
+		row: number,
+		anchorX: number,
+		activeX: number,
+	): TextSelection;
 	previewDrop(offset: number | undefined): void;
 	moveSelection(
 		selection: TextSelection,
@@ -120,8 +132,7 @@ export class SelectionController implements Disposable {
 			let affinity: "before" | "after" = "after";
 			if (vertical) {
 				const column =
-					this.preferred[index] ??
-					this.host.pointAtOffset(active, selection.affinity);
+					this.preferred[index] ?? this.host.headPoint(selection);
 				this.preferred[index] = column;
 				const movement = this.host.verticalMove(
 					active,
@@ -156,12 +167,22 @@ export class SelectionController implements Disposable {
 				}
 			} else {
 				const direction = key === "ArrowLeft" ? -1 : 1;
+				const movement =
+					extend || selection.start === selection.end
+						? this.host.horizontalMove(
+								active,
+								direction,
+								selection.affinity,
+							)
+						: undefined;
+				if (movement) affinity = movement.affinity;
 				target =
-					!extend && selection.start !== selection.end
+					movement?.offset ??
+					(!extend && selection.start !== selection.end
 						? direction < 0
 							? selection.start
 							: selection.end
-						: graphemeOffset(text, active, direction);
+						: graphemeOffset(text, active, direction));
 			}
 			if (key === "End") affinity = "before";
 			return extend
@@ -175,9 +196,7 @@ export class SelectionController implements Disposable {
 		const values = this.host.getSelections();
 		const source = values[0] ?? caret(0);
 		if (values.length >= selectionLimit) return;
-		const column =
-				this.preferred[0] ??
-				this.host.pointAtOffset(head(source), source.affinity),
+		const column = this.preferred[0] ?? this.host.headPoint(source),
 			movement = this.host.verticalMove(
 				head(source),
 				direction,
@@ -195,10 +214,7 @@ export class SelectionController implements Disposable {
 			const position = {
 				line: this.host.visualIndex(head(source), source.affinity),
 			};
-			const column = this.host.pointAtOffset(
-				head(source),
-				source.affinity,
-			);
+			const column = this.host.headPoint(source);
 			this.rectangle = {
 				line: position.line,
 				column,
@@ -230,13 +246,10 @@ export class SelectionController implements Disposable {
 		) {
 			if (this.host.isTextRow(line))
 				values.push(
-					directed(
-						this.host.offsetAtVisualRowX(line, rect.column),
-						this.host.offsetAtVisualRowX(line, rect.endColumn),
-						this.host.visualAffinity(
-							line,
-							this.host.offsetAtVisualRowX(line, rect.endColumn),
-						),
+					this.host.columnSelection(
+						line,
+						rect.column,
+						rect.endColumn,
 					),
 				);
 			if (line === rect.line) break;
@@ -359,7 +372,16 @@ export class SelectionController implements Disposable {
 				existing >= 0 && values.length > 1
 					? values.filter((_, index) => index !== existing)
 					: values.length < selectionLimit
-						? [caret(offset), ...values]
+						? [
+								caret(
+									offset,
+									this.host.hitAffinity(
+										offset,
+										event.clientX,
+									),
+								),
+								...values,
+							]
 						: values,
 			);
 		} else if (bounded) {
@@ -483,7 +505,9 @@ export class SelectionController implements Disposable {
 		const first = getInputPosition(text, drag.start),
 			last = getInputPosition(text, end);
 		if (drag.mode === "text") {
-			this.host.setSelections([directed(drag.start, end)]);
+			this.host.setSelections([
+				directed(drag.start, end, this.host.hitAffinity(end, drag.x)),
+			]);
 			return;
 		}
 		if (drag.mode === "word") {
@@ -525,16 +549,7 @@ export class SelectionController implements Disposable {
 			line -= direction
 		) {
 			if (this.host.isTextRow(line))
-				values.push(
-					directed(
-						this.host.offsetAtVisualRowX(line, a),
-						this.host.offsetAtVisualRowX(line, b),
-						this.host.visualAffinity(
-							line,
-							this.host.offsetAtVisualRowX(line, b),
-						),
-					),
-				);
+				values.push(this.host.columnSelection(line, a, b));
 			if (line === firstRow) break;
 		}
 		this.host.setSelections(normalizeSelections(values, text.length));
