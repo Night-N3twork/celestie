@@ -1,0 +1,52 @@
+name: Publish @celestie/editor
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const pkg = JSON.parse(
+              fs.readFileSync("packages/editor/package.json", "utf8")
+            );
+            if (process.env.RELEASE_TAG !== `v${pkg.version}`) {
+              throw new Error("Release tag must match editor package version");
+            }
+          '
+
+      - name: Publish editor
+        working-directory: packages/editor
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ "$PRERELEASE" = "true" ]; then
+            npm publish --access public --tag next
+          else
+            npm publish --access public --tag latest
+          fi

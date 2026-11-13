@@ -1,7 +1,14 @@
 {
 	"name": "@celestie/editor",
 	"version": "0.1.0",
-	"private": true,
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Night-N3twork/celestie.git",
+		"directory": "packages/editor"
+	},
 	"type": "module",
 	"types": "./dist/index.d.ts",
 	"exports": {
