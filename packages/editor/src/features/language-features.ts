@@ -944,7 +944,13 @@ export class LanguageFeatures implements Disposable {
 			event.stopImmediatePropagation();
 			return;
 		}
-		if (event.key === "Escape") this.host.cancelSnippet();
+		if (
+			event.key === "Escape" &&
+			this.widget.hidden &&
+			!this.inlineSuggestions.active &&
+			this.pendingCommands === 0
+		)
+			this.host.cancelSnippet();
 		if (
 			event.key === "Escape" &&
 			(!this.widget.hidden ||
@@ -981,19 +987,27 @@ export class LanguageFeatures implements Disposable {
 			!event.altKey &&
 			!event.shiftKey &&
 			this.choices.length &&
-			["ArrowDown", "ArrowUp", "Enter", "Tab"].includes(event.key)
+			[
+				"ArrowDown",
+				"ArrowUp",
+				"PageDown",
+				"PageUp",
+				"Enter",
+				"Tab",
+			].includes(event.key)
 		) {
 			event.preventDefault();
 			event.stopImmediatePropagation();
 			if (event.key === "Enter" || event.key === "Tab")
 				this.popup.acceptChoice(this.index);
 			else {
-				this.index =
-					(this.index +
-						(event.key === "ArrowDown" ? 1 : -1) +
-						this.choices.length) %
-					this.choices.length;
-				this.popup.updateSelection();
+				this.popup.moveChoice(
+					event.key as
+						| "ArrowDown"
+						| "ArrowUp"
+						| "PageDown"
+						| "PageUp",
+				);
 				this.resolveActive();
 			}
 			return;

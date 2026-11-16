@@ -90,42 +90,4 @@ export function findPatternMatches(
 	return { matches, truncated };
 }
 
-export function expandRegexReplacement(
-	replacement: string,
-	match: SearchMatch,
-	source: string,
-	budget = 16000000,
-): string {
-	let size = replacement.length;
-	if (size > budget) throw new RangeError("Replacement is too large.");
-	const captures = match.captures ?? [];
-	const substitute = (
-		original: string,
-		token: string,
-		name: string | undefined,
-	): string => {
-		if (token === "$") return "$";
-		if (token === "&") return source.slice(match.from, match.to);
-		if (token === "`") return source.slice(0, match.from);
-		if (token === "'") return source.slice(match.to);
-		if (name !== undefined)
-			return match.groups ? (match.groups[name] ?? "") : original;
-		const number = Number(token);
-		if (number >= 1 && number <= captures.length)
-			return captures[number - 1] ?? "";
-		const first = Number(token[0]);
-		if (token.length === 2 && first >= 1 && first <= captures.length)
-			return (captures[first - 1] ?? "") + token[1];
-		return original;
-	};
-	return replacement.replace(
-		/\$(\$|&|`|'|<([^>]+)>|[0-9]{1,2})/g,
-		(original: string, token: string, name: string | undefined): string => {
-			const value = substitute(original, token, name);
-			size += value.length - original.length;
-			if (size > budget)
-				throw new RangeError("Replacement is too large.");
-			return value;
-		},
-	);
-}
+export { expandRegexReplacement } from "./replacement-text";

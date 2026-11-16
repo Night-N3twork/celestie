@@ -217,6 +217,13 @@ export function registerEditorActions(view: EditorView): void {
 		`${primary}+D`,
 	);
 	add(
+		"editor.action.insertCursorAtEndOfEachLineSelected",
+		"Add Cursors to Selected Line Ends",
+		() => view.addCursorsAtSelectionLineEnds(),
+		false,
+		"Shift+Alt+I",
+	);
+	add(
 		"editor.action.selectHighlights",
 		"Select All Occurrences",
 		() => view.selectOccurrences(true),

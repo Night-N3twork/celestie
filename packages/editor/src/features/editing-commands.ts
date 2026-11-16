@@ -70,7 +70,11 @@ function wordTokens(
 		for (const match of text.slice(last, to).matchAll(/\s+|\S+/gu))
 			tokens.push({ index: last + match.index, text: match[0] });
 	};
-	for (const match of text.matchAll(pattern)) {
+	const expression = new RegExp(
+		pattern.source,
+		`${pattern.flags.replace(/[gy]/g, "")}g`,
+	);
+	for (const match of text.matchAll(expression)) {
 		if (!match[0] || match.index < last) continue;
 		gap(match.index);
 		tokens.push({ index: match.index, text: match[0] });
@@ -86,15 +90,63 @@ export function wordBoundary(
 	direction: -1 | 1,
 	subword = false,
 	pattern: RegExp = word,
+	behavior: "move" | "delete" | "multicursor" = "move",
 ): number {
-	const tokens = wordTokens(text, pattern);
-	const ordered = direction < 0 ? tokens.reverse() : tokens;
+	let lineStart = offset === 0 ? 0 : text.lastIndexOf("\n", offset - 1) + 1;
+	let lineEnd = text.indexOf("\n", offset);
+	if (lineEnd < 0) lineEnd = text.length;
+	if (behavior === "delete" && !subword) {
+		if (direction < 0 && offset === lineStart)
+			return Math.max(0, offset - 1);
+		if (direction > 0 && offset === lineEnd) {
+			const next = Math.min(text.length, offset + 1);
+			return next + (text.slice(next).match(/^[\t ]*/)?.[0].length ?? 0);
+		}
+		const whitespace =
+			direction < 0
+				? (text.slice(lineStart, offset).match(/[\t ]+$/)?.[0] ?? "")
+				: (text.slice(offset, lineEnd).match(/^[\t ]+/)?.[0] ?? "");
+		if (whitespace.length >= (direction < 0 ? 2 : 1))
+			return offset + direction * whitespace.length;
+	} else if (direction < 0 && offset === lineStart && lineStart > 0) {
+		offset = lineStart - 1;
+		lineEnd = offset;
+		lineStart = offset === 0 ? 0 : text.lastIndexOf("\n", offset - 1) + 1;
+	} else if (direction > 0 && offset === lineEnd && lineEnd < text.length) {
+		offset = lineEnd + 1;
+		lineStart = offset;
+		lineEnd = text.indexOf("\n", offset);
+		if (lineEnd < 0) lineEnd = text.length;
+	}
+	const line = text.slice(lineStart, lineEnd);
+	const tokens = wordTokens(line, pattern).map((token) => ({
+		...token,
+		index: token.index + lineStart,
+	}));
+	const ordered = direction < 0 ? [...tokens].reverse() : tokens;
 	for (const token of ordered) {
 		const from = token.index;
 		const to = from + token.text.length;
 		if (direction < 0 ? from >= offset : to <= offset) continue;
 		if (/^\s+$/u.test(token.text)) continue;
-		if (!subword) return direction < 0 ? from : to;
+		if (!subword) {
+			const neighbor =
+				direction < 0
+					? tokens[tokens.indexOf(token) - 1]
+					: tokens[tokens.indexOf(token) + 1];
+			if (
+				behavior !== "delete" &&
+				!(behavior === "multicursor" && direction < 0) &&
+				token.text.length === 1 &&
+				!/[\p{ID_Continue}$]/u.test(token.text) &&
+				neighbor &&
+				/[\p{ID_Continue}$]/u.test(neighbor.text)
+			)
+				return direction < 0
+					? neighbor.index
+					: neighbor.index + neighbor.text.length;
+			return direction < 0 ? from : to;
+		}
 		const units = [...token.text];
 		const boundaries = [from];
 		let position = from;
@@ -120,7 +172,7 @@ export function wordBoundary(
 			? (boundaries.filter((value) => value < offset).at(-1) ?? from)
 			: (boundaries.find((value) => value > offset) ?? to);
 	}
-	return direction < 0 ? 0 : text.length;
+	return direction < 0 ? lineStart : lineEnd;
 }
 
 export function planWordCommand(
@@ -130,15 +182,18 @@ export function planWordCommand(
 	action: "move" | "select" | "delete",
 	subword = false,
 	pattern: RegExp = word,
+	multiple = false,
 ): EditingPlan {
 	const active =
 		selection.direction === "backward" ? selection.start : selection.end;
-	const target =
-		action === "move" && selection.start !== selection.end
-			? direction < 0
-				? selection.start
-				: selection.end
-			: wordBoundary(text, active, direction, subword, pattern);
+	const target = wordBoundary(
+		text,
+		active,
+		direction,
+		subword,
+		pattern,
+		action === "delete" ? "delete" : multiple ? "multicursor" : "move",
+	);
 	if (action === "delete") {
 		const from =
 			selection.start !== selection.end

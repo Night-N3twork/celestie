@@ -147,6 +147,10 @@ export function registerEverydayShortcuts(
 		alt: true,
 	});
 	bind("editor.action.addSelectionToNextFindMatch", "d", { primary: true });
+	bind("editor.action.insertCursorAtEndOfEachLineSelected", "i", {
+		shift: true,
+		alt: true,
+	});
 	bind("editor.action.selectHighlights", "l", { primary: true, shift: true });
 	bind("cursorUndo", "u", { primary: true });
 	bind("cursorRedo", "u", { primary: true, shift: true });

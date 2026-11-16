@@ -208,6 +208,31 @@ export class SelectionController implements Disposable {
 		this.host.setSelections([next, ...values], true);
 		this.preferred = [column, ...this.preferred];
 	}
+	lineEnds(): void {
+		const text = this.host.getText(),
+			offsets = new Set<number>();
+		for (const selection of this.host.getSelections()) {
+			if (selection.start === selection.end) continue;
+			let at = selection.start;
+			while (at < selection.end && offsets.size < selectionLimit) {
+				const newline = text.indexOf("\n", at);
+				if (newline < 0 || newline >= selection.end) {
+					offsets.add(selection.end);
+					break;
+				}
+				offsets.add(newline);
+				at = newline + 1;
+			}
+			if (offsets.size >= selectionLimit) break;
+		}
+		if (offsets.size) {
+			this.reset();
+			this.host.setSelections(
+				[...offsets].map((offset) => caret(offset)),
+				true,
+			);
+		}
+	}
 	column(direction: "Up" | "Down" | "Left" | "Right"): void {
 		const source = this.host.getSelections()[0] ?? caret(0);
 		if (!this.rectangle) {

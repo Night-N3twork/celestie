@@ -67,6 +67,34 @@ export class LanguagePopup implements Disposable {
 		active?.scrollIntoView({ block: "nearest" });
 		this.updatePreview();
 	}
+	moveChoice(key: "ArrowUp" | "ArrowDown" | "PageUp" | "PageDown"): void {
+		if (!this.choices.length) return;
+		const direction = key === "ArrowUp" || key === "PageUp" ? -1 : 1;
+		if (key.startsWith("Page")) {
+			const list = this.widget.querySelector<HTMLElement>(
+				".editor-language-list",
+			);
+			const row = list?.querySelector<HTMLElement>('[role="option"]');
+			const count = Math.max(
+				1,
+				Math.floor(
+					(list?.clientHeight ?? 1) /
+						Math.max(1, row?.offsetHeight ?? 1),
+				),
+			);
+			this.index = Math.max(
+				0,
+				Math.min(
+					this.choices.length - 1,
+					this.index + direction * count,
+				),
+			);
+		} else
+			this.index =
+				(this.index + direction + this.choices.length) %
+				this.choices.length;
+		this.updateSelection();
+	}
 	private describe(visible: boolean): void {
 		const input = this.host.input;
 		const ids = (input.getAttribute("aria-describedby") ?? "")

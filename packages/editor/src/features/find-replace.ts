@@ -2,6 +2,7 @@ import type { Disposable, TextSelection } from "../api/types";
 import { findTextChange } from "../view/input";
 import type { KeyboardShortcuts } from "./keyboard-shortcuts";
 import { RegexSearch } from "./regex-search";
+import { preserveReplacementCase } from "./replacement-text";
 import {
 	expandRegexReplacement,
 	findLiteralMatches,
@@ -48,6 +49,7 @@ export class FindReplace implements Disposable {
 	private disposed = false;
 	private readonly matchCase: HTMLInputElement;
 	private readonly wholeWord: HTMLInputElement;
+	private readonly preserveCase: HTMLInputElement;
 	private readonly inSelection: HTMLInputElement;
 	private scope: { from: number; to: number } | undefined;
 	private trackedScope:
@@ -141,6 +143,7 @@ export class FindReplace implements Disposable {
 		this.matchCase = option("Match case", true);
 		this.wholeWord = option("Whole word");
 		this.regexMode = option("Regular expression");
+		this.preserveCase = option("Preserve case");
 		this.inSelection = option("In selection");
 		this.panel.append(findRow, optionsRow, this.replacementRow);
 		container.prepend(this.panel);
@@ -470,9 +473,19 @@ export class FindReplace implements Disposable {
 		source: string,
 	): string | undefined {
 		try {
-			return this.regexMode.checked
+			const value = this.regexMode.checked
 				? expandRegexReplacement(this.replacement.value, match, source)
 				: this.replacement.value;
+			return this.preserveCase.checked &&
+				(!this.regexMode.checked ||
+					!/\$(?:[1-9&`']|<)/.test(
+						this.replacement.value.replace(/\$\$/g, ""),
+					))
+				? preserveReplacementCase(
+						value,
+						source.slice(match.from, match.to),
+					)
+				: value;
 		} catch (error) {
 			this.error =
 				error instanceof Error ? error.message : "Replacement failed.";

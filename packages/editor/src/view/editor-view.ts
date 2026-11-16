@@ -27,7 +27,7 @@ import { columnRange } from "../features/column-selection";
 import { CommandRegistry } from "../features/commands";
 import type { DecorationCollection } from "../features/decorations";
 import { safeLink } from "../features/documentation";
-import { type TextCommand, wordRange } from "../features/editing-commands";
+import type { TextCommand } from "../features/editing-commands";
 import type { EditingPlan } from "../features/editing-plan";
 import { registerEditorActions } from "../features/editor-actions";
 import type { SearchEdit } from "../features/find-replace";
@@ -42,6 +42,7 @@ import {
 import { LanguageEdits } from "../features/language-edits";
 import { LanguageFeatures } from "../features/language-features";
 import type { LineCommand } from "../features/line-commands";
+import { OccurrenceSelection } from "../features/occurrence-selection";
 import { providerWorkspace } from "../features/provider-workspace";
 import {
 	caret,
@@ -924,6 +925,7 @@ export class EditorView implements Disposable {
 	private bindModel(model: TextModel): void {
 		this.modelSubscriptions.push(
 			model.onDidChangeContent((event) => {
+				this.occurrenceSelection.clear();
 				this.editing.resetSingle();
 
 				if (!this.pendingSelection) this.breakHistoryGroup();
@@ -980,6 +982,7 @@ export class EditorView implements Disposable {
 		this.updateCursor();
 	}
 	private switchModel(model: TextModel | null, save: boolean): void {
+		this.occurrenceSelection.clear();
 		this.nativeInput.resetAutoClosing();
 		this.languageEdits.cancel();
 		if (model === this.attachedModel) return;
@@ -1217,64 +1220,21 @@ export class EditorView implements Disposable {
 	addCursor(direction: -1 | 1): void {
 		if (!this.isComposing) this.cursors.addVertical(direction);
 	}
+	addCursorsAtSelectionLineEnds(): void {
+		if (!this.isComposing) this.cursors.lineEnds();
+	}
 	columnSelect(direction: "Up" | "Down" | "Left" | "Right"): void {
 		if (!this.isComposing) this.cursors.column(direction);
 	}
+	private readonly occurrenceSelection = new OccurrenceSelection({
+		text: () => this.element.value,
+		wordPattern: () => wordExpression(this.language),
+		selections: () => this.getSelections(),
+		select: (values) => this.setSelections(values, true),
+		announce: (message) => this.announce(message),
+	});
 	selectOccurrences(all = false): void {
-		if (this.isComposing) return;
-		const text = this.element.value,
-			primary = this.getSelection();
-		if (primary.start === primary.end) {
-			const range = wordRange(
-				text,
-				primary.start,
-				wordExpression(this.language),
-			);
-			if (range.from === range.to) return;
-			this.setSelections(
-				[
-					{ start: range.from, end: range.to, direction: "forward" },
-					...this.selectionsValue.slice(1),
-				],
-				true,
-			);
-			if (!all) return;
-		}
-		const selection = this.getSelection(),
-			needle = text.slice(selection.start, selection.end);
-		if (!needle) return;
-		const values = all ? [selection] : [...this.selectionsValue];
-		const start = all ? 0 : selection.end;
-		const find = (from: number, to: number) => {
-			let offset = from;
-			while (offset <= to && values.length < selectionLimit) {
-				const match = text.indexOf(needle, offset);
-				if (match < 0 || match + needle.length > to) break;
-				if (
-					!values.some(
-						(value) =>
-							match < value.end &&
-							match + needle.length > value.start,
-					)
-				) {
-					const next: TextSelection = {
-						start: match,
-						end: match + needle.length,
-						direction: "forward",
-					};
-					if (all) values.push(next);
-					else values.unshift(next);
-					if (!all) return true;
-				}
-				offset = match + needle.length;
-			}
-			return false;
-		};
-		if (!find(start, text.length) && !all) find(0, start);
-		this.setSelections(values, true);
-		this.announce(
-			`${this.selectionsValue.length} selections${values.length === selectionLimit ? " (selection limit reached)" : ""}.`,
-		);
+		if (!this.isComposing) this.occurrenceSelection.select(all);
 	}
 	get isComposing(): boolean {
 		return (
@@ -1970,6 +1930,7 @@ export class EditorView implements Disposable {
 		this.languageEdits.cancel();
 		if (this.disposed) return;
 		this.disposed = true;
+		this.occurrenceSelection.clear();
 		this.nativeInput.resetAutoClosing();
 		this.nativeInput.deferredComposition = undefined;
 		this.analysis = undefined;

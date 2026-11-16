@@ -86,6 +86,7 @@ export class ViewEditing {
 				action,
 				subword,
 				wordExpression(this.host.language()),
+				this.host.getSelections().length > 1,
 			),
 		);
 	}
